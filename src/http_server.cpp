@@ -655,21 +655,62 @@ void reset_reason(DynamicJsonDocument &doc) {
 
 void httpServer::setStaticPages() {
 
-    web_server->serveStatic("/", FILESYSTEM, "/index.htm", "max-age=600");
-    web_server->serveStatic("/index.htm", FILESYSTEM, "/index.htm", "max-age=600");
-    web_server->serveStatic("/index.html", FILESYSTEM, "/index.htm", "max-age=600");
+    // Static page handlers - Vue
+    web_server->serveStatic("/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/index.html", FILESYSTEM, "/index.html", "max-age=600");
 
-    // Static page handlers
-    web_server->serveStatic("/", FILESYSTEM, "/index.htm", "max-age=600");
-    web_server->serveStatic("/index/", FILESYSTEM, "/index.htm", "max-age=600");
-    web_server->serveStatic("/settings/", FILESYSTEM, "/settings.htm", "max-age=600");
-    web_server->serveStatic("/calibration/", FILESYSTEM, "/calibration.htm", "max-age=600");
-    web_server->serveStatic("/help/", FILESYSTEM, "/help.htm", "max-age=600");
-    web_server->serveStatic("/about/", FILESYSTEM, "/about.htm", "max-age=600");
-    web_server->serveStatic("/controllerrestart/", FILESYSTEM, "/controllerrestart.htm", "max-age=600");
-    web_server->serveStatic("/wifireset/", FILESYSTEM, "/wifireset.htm", "max-age=600");
-    web_server->serveStatic("/factoryreset/", FILESYSTEM, "/factoryreset.htm", "max-age=600");
-    web_server->serveStatic("/gsheets/", FILESYSTEM, "/gsheets.htm", "max-age=600");
+    // Vue routes
+    web_server->serveStatic("/config", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/config/tiltbridge", FILESYSTEM, "/index.html", "max-age=600");
+
+    web_server->serveStatic("/target", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/fermentrack", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/gsheets", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/brewersfriend", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/brewfather", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/grainfather", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/brewstatus", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/taplistio", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/mqtt", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/generic", FILESYSTEM, "/index.html", "max-age=600");
+
+    web_server->serveStatic("/help", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/about", FILESYSTEM, "/index.html", "max-age=600");
+
+
+    // Vue routes
+    web_server->serveStatic("/config/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/config/tiltbridge/", FILESYSTEM, "/index.html", "max-age=600");
+
+    web_server->serveStatic("/target/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/fermentrack/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/gsheets/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/brewersfriend/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/brewfather/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/grainfather/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/brewstatus/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/taplistio/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/mqtt/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/target/generic/", FILESYSTEM, "/index.html", "max-age=600");
+
+    web_server->serveStatic("/help/", FILESYSTEM, "/index.html", "max-age=600");
+    web_server->serveStatic("/about/", FILESYSTEM, "/index.html", "max-age=600");
+
+    // web_server->serveStatic("/", FILESYSTEM, "/index.htm", "max-age=600");
+    // web_server->serveStatic("/index.htm", FILESYSTEM, "/index.html", "max-age=600");
+    // web_server->serveStatic("/index.html", FILESYSTEM, "/index.html", "max-age=600");
+
+    // // Static page handlers
+    // web_server->serveStatic("/", FILESYSTEM, "/index.htm", "max-age=600");
+    // web_server->serveStatic("/index/", FILESYSTEM, "/index.htm", "max-age=600");
+    // web_server->serveStatic("/settings/", FILESYSTEM, "/settings.htm", "max-age=600");
+    // web_server->serveStatic("/calibration/", FILESYSTEM, "/calibration.htm", "max-age=600");
+    // web_server->serveStatic("/help/", FILESYSTEM, "/help.htm", "max-age=600");
+    // web_server->serveStatic("/about/", FILESYSTEM, "/about.htm", "max-age=600");
+    // web_server->serveStatic("/controllerrestart/", FILESYSTEM, "/controllerrestart.htm", "max-age=600");
+    // web_server->serveStatic("/wifireset/", FILESYSTEM, "/wifireset.htm", "max-age=600");
+    // web_server->serveStatic("/factoryreset/", FILESYSTEM, "/factoryreset.htm", "max-age=600");
+    // web_server->serveStatic("/gsheets/", FILESYSTEM, "/gsheets.htm", "max-age=600");
     web_server->serveStatic("/404/", FILESYSTEM, "/404.htm", "max-age=600");
 }
 
@@ -807,8 +848,8 @@ void httpServer::init() {
             // manually add every single file to setStaticPages(). 
             handleFileRead(web_server->uri());
         } else {
-            Log.verbose(F("Serving 404 for request to %s.\r\n"), web_server->uri().c_str());
-            redirect("/404/");
+            // Log.verbose(F("Serving 404 for request to %s.\r\n"), web_server->uri().c_str());
+            // redirect("/404/");
         }
     });
 

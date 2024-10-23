@@ -57,7 +57,7 @@ String httpServer::getContentType(String filename) {
 bool httpServer::handleFileRead(String path) {
   // Serial.println("handleFileRead: " + path);
   if (path.endsWith("/")) {
-    path += "index.htm";
+    path += "index.html";
   }
   String contentType = getContentType(path);
   String pathWithGz = path + ".gz";
