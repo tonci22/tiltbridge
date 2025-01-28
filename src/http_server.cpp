@@ -657,6 +657,7 @@ void httpServer::setStaticPages() {
         "/config/tiltbridge",
         "/target", 
         "/target/fermentrack", 
+        "/target/legacy_fermentrack", 
         "/target/gsheets", 
         "/target/brewersfriend",
         "/target/brewfather", 
