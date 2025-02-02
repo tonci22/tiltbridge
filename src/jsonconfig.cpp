@@ -11,6 +11,7 @@
 
 #include "jsonconfig.h"
 #include "JsonKeys.h"
+#include "bridge_lcd.h"  // for HAVE_LCD and HAVE_STATUS_LED  (note - HAVE_STATUS_LED is not used anywhere)
 #include "targets/fermentrack_2.h"  // For fermentrackRegistrationError
 
 
@@ -157,13 +158,14 @@ JsonDocument Config::to_json_external() {
     // save as part of the configuration.
     JsonDocument obj = to_json();
 
-#ifdef HAVE_LCD
+#if HAVE_LCD
     obj["have_lcd"] = true;
 #else
     obj["have_lcd"] = false;
 #endif
 
-#ifdef HAVE_STATUS_LED
+// Note - HAVE_STATUS_LED is not actually defined/used anywhere
+#if HAVE_STATUS_LED
     obj["have_led"] = true;
 #else
     obj["have_led"] = false;
