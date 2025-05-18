@@ -32,9 +32,12 @@
 
 fermentrackRegErrorT fermentrackRegistrationError;  //<! Error code from last upstream registration attempt
 fermentrackStatusErrorT fermentrackStatusError;  //<! Error code from last status attempt
+FermentrackMessageFlags fermentrackMessageFlags;
 
 bool register_with_fermentrack_2();
 bool send_status_to_fermentrack_2();
+bool process_messages_on_fermentrack_2();
+void action_fermentrack_messages();
 
 
 bool ft2_get_url(char *url, size_t size, const char *path) {
@@ -98,6 +101,7 @@ bool dataSendHandler::send_to_fermentrack()
         // Fermentrack uses a number of functions to process each step of registration/data sending
         register_with_fermentrack_2();
         send_status_to_fermentrack_2();
+        process_messages_on_fermentrack_2();
 
 
         // Set up for the next send
@@ -266,6 +270,14 @@ bool send_status_to_fermentrack_2() {
         if(success) {
             // We successfully sent the device status
             Log.verbose("Fermentrack 2 status successfully sent. Device ID: %s\r\n", config.fermentrackDeviceID);
+            
+            // Check if there are messages to retrieve
+            if(doc["has_messages"].is<bool>()) {
+                fermentrackMessageFlags.hasMessages = doc["has_messages"].as<bool>();
+                if(fermentrackMessageFlags.hasMessages) {
+                    Log.info("Fermentrack 2 has messages for this device\r\n");
+                }
+            }
         } else {
             // We didn't succeed (something happened on Fermentrack's end)
             fermentrackStatusError = (fermentrackStatusErrorT) doc["msg_code"].as<uint8_t>();
@@ -277,5 +289,135 @@ bool send_status_to_fermentrack_2() {
     } 
 
     return true;
+}
+
+
+bool process_messages_on_fermentrack_2() {
+    char url[256] = "";
+    String response;
+
+    // Check if we have messages to retrieve
+    if(!fermentrackMessageFlags.hasMessages)
+        return false;
+
+    // Clear the flag immediately to prevent re-processing
+    fermentrackMessageFlags.hasMessages = false;
+
+    // If we aren't registered, we can't retrieve messages
+    if(!ft2_is_registered())
+        return false;
+    
+    // Build the URL with query parameters for device ID and API key
+    if(!ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::messages, config.fermentrackDeviceID, config.fermentrackAPIKey))
+        return false;
+
+    Log.notice("Retrieving messages from Fermentrack 2 at %s\r\n", url);
+
+    // Use HTTP GET to retrieve messages
+    String empty_payload = "";
+    sendResult result = send_json_str(empty_payload, url, response, httpMethod::HTTP_GET);
+
+    if(result != sendResult::success) {
+        Log.error("Error retrieving messages from Fermentrack 2\r\n");
+        return false;
+    }
+
+    JsonDocument doc;
+    deserializeJson(doc, response);
+    Log.verbose("Fermentrack 2 messages response: %s\r\n", response.c_str());
+
+    if(doc["success"].is<bool>()) {
+        bool success = doc["success"].as<bool>();
+
+        if(success) {
+            // Process the messages
+            if(doc["messages"].is<JsonObject>()) {
+                JsonObject messages = doc["messages"].as<JsonObject>();
+                
+                // Set the message flags based on the response
+                if(messages["reset_connection"].is<bool>()) {
+                    fermentrackMessageFlags.pendingResetConnection = messages["reset_connection"].as<bool>();
+                    if(fermentrackMessageFlags.pendingResetConnection) {
+                        Log.info("Received reset_connection message from Fermentrack 2\r\n");
+                    }
+                }
+                
+                if(messages["restart_device"].is<bool>()) {
+                    fermentrackMessageFlags.pendingRestartDevice = messages["restart_device"].as<bool>();
+                    if(fermentrackMessageFlags.pendingRestartDevice) {
+                        Log.info("Received restart_device message from Fermentrack 2\r\n");
+                    }
+                }
+
+                // Now PATCH the message flags to false on the remote
+                JsonDocument patch_doc;
+                String patch_payload;
+                
+                patch_doc[Fermentrack2SettingsKeys::apiKey] = config.fermentrackAPIKey;
+                patch_doc[Fermentrack2SettingsKeys::deviceID] = config.fermentrackDeviceID;
+                patch_doc["reset_connection"] = false;
+                patch_doc["restart_device"] = false;
+                
+                serializeJson(patch_doc, patch_payload);
+                
+                // Get the base URL for the messages endpoint
+                if(ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::messages)) {
+                    String patch_response;
+                    sendResult patch_result = send_json_str(patch_payload, url, patch_response, httpMethod::HTTP_PATCH);
+                    
+                    if(patch_result == sendResult::success) {
+                        Log.verbose("Successfully cleared message flags on Fermentrack 2\r\n");
+                    } else {
+                        Log.error("Error clearing message flags on Fermentrack 2\r\n");
+                    }
+                }
+            }
+        } else {
+            Log.warning("Failed to retrieve messages from Fermentrack 2 with error code %d\r\n", doc["msg_code"].as<uint8_t>());
+        }
+    } else {
+        // Invalid response
+        Log.error("Invalid response when retrieving messages from Fermentrack 2\r\n");
+    }
+
+    // Action the messages we retrieved
+    action_fermentrack_messages();
+
+    return true;
+}
+
+
+void action_fermentrack_messages() {
+    // Process the reset_connection message first
+    if(fermentrackMessageFlags.pendingResetConnection) {
+        Log.notice("Resetting Fermentrack 2 connection\r\n");
+        
+        // Clear all Fermentrack 2 settings
+        config.fermentrackHostname[0] = '\0';  // Clear hostname
+        config.fermentrackPort = 80;           // Reset to default port
+        config.fermentrackUsername[0] = '\0';  // Clear username
+        config.fermentrackDeviceID[0] = '\0';  // Clear device ID
+        config.fermentrackAPIKey[0] = '\0';    // Clear API key
+        
+        // Reset the registration error
+        fermentrackRegistrationError = fermentrackRegErrorT::NOT_ATTEMPTED_REGISTRATION;
+        
+        // Save the cleared configuration
+        config.save();
+        
+        // Clear the flag
+        fermentrackMessageFlags.pendingResetConnection = false;
+        
+        Log.notice("Fermentrack 2 connection has been reset\r\n");
+    }
+    
+    // Process the restart_device message last, as it will restart the device
+    if(fermentrackMessageFlags.pendingRestartDevice) {
+        Log.notice("Restarting device as requested by Fermentrack 2\r\n");
+        
+        // The ESP.restart() function is platform-specific
+        ESP.restart();
+        // Note: The pendingRestartDevice flag will be cleared when the device restarts
+    }
 }
 
