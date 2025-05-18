@@ -265,11 +265,11 @@ bool send_status_to_fermentrack_2() {
 
         if(success) {
             // We successfully sent the device status
-            Log.verbose("Fermentrack 2 registration successful. Device ID: %s\r\n", config.fermentrackDeviceID);
+            Log.verbose("Fermentrack 2 status successfully sent. Device ID: %s\r\n", config.fermentrackDeviceID);
         } else {
             // We didn't succeed (something happened on Fermentrack's end)
-            fermentrackRegistrationError = (fermentrackRegErrorT) doc["msg_code"].as<uint8_t>();
-            Log.warning("Fermentrack 2 registration failed with error code %d\r\n", fermentrackRegistrationError);
+            fermentrackStatusError = (fermentrackStatusErrorT) doc["msg_code"].as<uint8_t>();
+            Log.warning("Fermentrack 2 status failed to send with error code %d\r\n", fermentrackStatusError);
         }
     } else {
         // Invalid response
