@@ -65,6 +65,19 @@ void bridge_lcd::init() {
 #error "If you define I2C_SDA_PIN, you must also define I2C_SCL_PIN"
 #endif
     // If the user explicitly supplies an SDA/SCL pin, we'll use that
+
+#ifdef I2C_RESET_PIN
+    pinMode(I2C_RESET_PIN, OUTPUT);
+    // Apparently for the Heltec boards you have to do this twice. Go figure. 
+    digitalWrite(I2C_RESET_PIN, LOW); // Set I2C_RESET_PIN low to reset OLED 
+    delay(200); 
+    digitalWrite(I2C_RESET_PIN, HIGH); // While OLED is running, must set I2C_RESET_PIN in high 
+    delay(200); 
+    digitalWrite(I2C_RESET_PIN, LOW); // Set I2C_RESET_PIN low to reset OLED 
+    delay(200); 
+    digitalWrite(I2C_RESET_PIN, HIGH); // While OLED is running, must set I2C_RESET_PIN in high 
+#endif
+
     oled_display = new SSD1306Wire(0x3c, I2C_SDA_PIN, I2C_SCL_PIN);
 #else
 
@@ -88,9 +101,9 @@ void bridge_lcd::init() {
             digitalWrite(16, LOW);                    // We weren't able to find the TTGO board, so reset the pin
 
             pinMode(21, OUTPUT); 
-            digitalWrite(21, LOW); // Set GPIO16 low to reset OLED 
+            digitalWrite(21, LOW); // Set GPIO21 low to reset OLED 
             delay(50); 
-            digitalWrite(21, HIGH); // While OLED is running, must set GPIO16 in high 
+            digitalWrite(21, HIGH); // While OLED is running, must set GPIO21 in high 
             if (i2c_device_at_address(0x3c, 17, 18)) {
                 oled_display = new SSD1306Wire(0x3c, 17, 18);
             } else {
