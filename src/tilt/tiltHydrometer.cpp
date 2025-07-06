@@ -7,26 +7,38 @@
 #include "jsonconfig.h"
 
 const char* tilt_color_names[] = {
-        "Red",
-        "Green",
-        "Black",
-        "Purple",
-        "Orange",
-        "Blue",
-        "Yellow",
-        "Pink"
+    "Red",
+    "Green",
+    "Black",
+    "Purple",
+    "Orange",
+    "Blue",
+    "Yellow",
+    "Pink"
 };
 
+// I feel like there has to be a better way to do this, but I'd rather not have to convert
+// the color names to lowercase every time we do a comparison/at runtime
+const char* api_color_names[] = {
+    "red", 
+    "green", 
+    "black", 
+    "purple", 
+    "orange", 
+    "blue", 
+    "yellow", 
+    "pink"
+};
 
 const uint32_t tilt_text_colors[] = {
-        0xF800, // Red
-        0x07E0, // Green
-        0xFFFF, // Black (white)
-        0x780F, // Purple
-        0xBAA0, // Orange (hook 'em)
-        0x001F, // Blue
-        0xFFE0, // Yellow
-        0xFE19  // Pink
+    0xF800, // Red
+    0x07E0, // Green
+    0xFFFF, // Black (white)
+    0x780F, // Purple
+    0xBAA0, // Orange (hook 'em)
+    0x001F, // Blue
+    0xFFE0, // Yellow
+    0xFE19  // Pink
 };
 
 tiltHydrometer::tiltHydrometer(NimBLEAddress address, uint8_t color)

@@ -85,6 +85,7 @@ private:
 };
 
 extern const char* tilt_color_names[];
+extern const char* api_color_names[];
 extern const uint32_t tilt_text_colors[];
 
 #endif //TILTBRIDGE_TILTHYDROMETER_H

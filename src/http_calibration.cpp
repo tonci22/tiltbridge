@@ -59,7 +59,7 @@ bool processCalibrationDataPoint(const JsonDocument& json, bool triggerUpstreamU
     }
     
     // Add new calibration point as array [rawGravity, actualGravity]
-    JsonArray newPoint = dataPoints.createNestedArray();
+    JsonArray newPoint = dataPoints.add<JsonArray>();
     newPoint.add(rawGravity);
     newPoint.add(actualGravity);
     
