@@ -211,21 +211,21 @@ JsonDocument Config::to_json() {
     obj[FermentrackSettings::fermentrackDeviceID] = fermentrackDeviceID;
     obj[FermentrackSettings::fermentrackAPIKey] = fermentrackAPIKey;
 
-    obj["brewstatusURL"] = brewstatusURL;
-    obj["brewstatusPushEvery"] = brewstatusPushEvery;
-    obj["taplistioURL"] = taplistioURL;
-    obj["taplistioPushEvery"] = taplistioPushEvery;
-    obj["scriptsURL"] = scriptsURL;
-    obj["scriptsEmail"] = scriptsEmail;
-    obj["brewersFriendKey"] = brewersFriendKey;
-    obj["brewfatherKey"] = brewfatherKey;
-    obj["userTargetURL"] = userTargetURL;
-    obj["mqttBrokerHost"] = mqttBrokerHost;
-    obj["mqttBrokerPort"] = mqttBrokerPort;
-    obj["mqttUsername"] = mqttUsername;
-    obj["mqttPassword"] = mqttPassword;
-    obj["mqttTopic"] = mqttTopic;
-    obj["mqttPushEvery"] = mqttPushEvery;
+    obj[BrewstatusSettings::brewstatusURL] = brewstatusURL;
+    obj[BrewstatusSettings::brewstatusPushEvery] = brewstatusPushEvery;
+    obj[TaplistioSettings::taplistioURL] = taplistioURL;
+    obj[TaplistioSettings::taplistioPushEvery] = taplistioPushEvery;
+    obj[GoogleSheetsSettings::scriptsURL] = scriptsURL;
+    obj[GoogleSheetsSettings::scriptsEmail] = scriptsEmail;
+    obj[BrewersFriendSettings::brewersFriendKey] = brewersFriendKey;
+    obj[BrewfatherSettings::brewfatherKey] = brewfatherKey;
+    obj[UserTargetSettings::userTargetURL] = userTargetURL;
+    obj[MQTTSettings::mqttBrokerHost] = mqttBrokerHost;
+    obj[MQTTSettings::mqttBrokerPort] = mqttBrokerPort;
+    obj[MQTTSettings::mqttUsername] = mqttUsername;
+    obj[MQTTSettings::mqttPassword] = mqttPassword;
+    obj[MQTTSettings::mqttTopic] = mqttTopic;
+    obj[MQTTSettings::mqttPushEvery] = mqttPushEvery;
 
     return obj;
 }
@@ -361,81 +361,81 @@ void Config::load_from_json(JsonDocument obj) {
 
 
     // BrewStatus Settings
-    if (!obj["brewstatusURL"].isNull()) {
-        const char *bu = obj["brewstatusURL"];
+    if (!obj[BrewstatusSettings::brewstatusURL].isNull()) {
+        const char *bu = obj[BrewstatusSettings::brewstatusURL];
         strlcpy(brewstatusURL, bu, 256);
     }
 
-    if (!obj["brewstatusPushEvery"].isNull()) {
-        int pe = obj["brewstatusPushEvery"];
+    if (!obj[BrewstatusSettings::brewstatusPushEvery].isNull()) {
+        int pe = obj[BrewstatusSettings::brewstatusPushEvery];
         brewstatusPushEvery = pe;
     }
 
     // TaplistIO Settings
-    if (!obj["taplistioURL"].isNull()) {
-        const char *tu = obj["taplistioURL"];
+    if (!obj[TaplistioSettings::taplistioURL].isNull()) {
+        const char *tu = obj[TaplistioSettings::taplistioURL];
         strlcpy(taplistioURL, tu, 256);
     }
 
-    if (!obj["taplistioPushEvery"].isNull()) {
-        taplistioPushEvery = obj["taplistioPushEvery"];
+    if (!obj[TaplistioSettings::taplistioPushEvery].isNull()) {
+        taplistioPushEvery = obj[TaplistioSettings::taplistioPushEvery];
     }
 
     // Google Scripts Settings
-    if (!obj["scriptsURL"].isNull()) {
-        const char *su = obj["scriptsURL"];
+    if (!obj[GoogleSheetsSettings::scriptsURL].isNull()) {
+        const char *su = obj[GoogleSheetsSettings::scriptsURL];
         strlcpy(scriptsURL, su, 256);
     }
 
-    if (!obj["scriptsEmail"].isNull()) {
-        const char *se = obj["scriptsEmail"];
+    if (!obj[GoogleSheetsSettings::scriptsEmail].isNull()) {
+        const char *se = obj[GoogleSheetsSettings::scriptsEmail];
         strlcpy(scriptsEmail, se, 256);
     }
 
     // Brewers Friend
-    if (!obj["brewersFriendKey"].isNull()) {
-        const char *bf = obj["brewersFriendKey"];
+    if (!obj[BrewersFriendSettings::brewersFriendKey].isNull()) {
+        const char *bf = obj[BrewersFriendSettings::brewersFriendKey];
         strlcpy(brewersFriendKey, bf, 65);
     }
 
     // Brewfather
-    if (!obj["brewfatherKey"].isNull()) {
-        const char *bk = obj["brewfatherKey"];
+    if (!obj[BrewfatherSettings::brewfatherKey].isNull()) {
+        const char *bk = obj[BrewfatherSettings::brewfatherKey];
         strlcpy(brewfatherKey, bk, 65);
     }
 
     // User-defined Target Settings
-    if (!obj["userTargetURL"].isNull()) {
-        const char *uturl = obj["userTargetURL"];
+    if (!obj[UserTargetSettings::userTargetURL].isNull()) {
+        const char *uturl = obj[UserTargetSettings::userTargetURL];
         strlcpy(userTargetURL, uturl, 128);
     }
 
     // MQTT Settings
-    if (!obj["mqttBrokerHost"].isNull()) {
-        const char *mi = obj["mqttBrokerHost"];
+    if (!obj[MQTTSettings::mqttBrokerHost].isNull()) {
+        const char *mi = obj[MQTTSettings::mqttBrokerHost];
         strlcpy(mqttBrokerHost, mi, 256);
     }
 
-    if (!obj["mqttBrokerPort"].isNull()) {
-        mqttBrokerPort = int(obj["mqttBrokerPort"]);
+    if (!obj[MQTTSettings::mqttBrokerPort].isNull()) {
+        mqttBrokerPort = int(obj[MQTTSettings::mqttBrokerPort]);
     }
 
-    if (!obj["mqttUsername"].isNull()) {
-        const char *mu = obj["mqttUsername"];
+    if (!obj[MQTTSettings::mqttUsername].isNull()) {
+        const char *mu = obj[MQTTSettings::mqttUsername];
         strlcpy(mqttUsername, mu, 51);
     }
 
-    if (!obj["mqttPassword"].isNull()) {
-        const char *mp = obj["mqttPassword"];
+    if (!obj[MQTTSettings::mqttPassword].isNull()) {
+        const char *mp = obj[MQTTSettings::mqttPassword];
         strlcpy(mqttPassword, mp, 65);
     }
 
-    if (!obj["mqttTopic"].isNull()) {
-        const char *mt = obj["mqttTopic"];
+    if (!obj[MQTTSettings::mqttTopic].isNull()) {
+        const char *mt = obj[MQTTSettings::mqttTopic];
         strlcpy(mqttTopic, mt, 31);
     }
 
-    if (!obj["mqttPushEvery"].isNull()) {
-        mqttPushEvery = int(obj["mqttPushEvery"]);
+    if (!obj[MQTTSettings::mqttPushEvery].isNull()) {
+        mqttPushEvery = int(obj[MQTTSettings::mqttPushEvery]);
     }
 }
