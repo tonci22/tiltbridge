@@ -256,8 +256,6 @@ bool dataSendHandler::send_to_grainfather()
         send_grainfather = false;
         send_lock = true;
 
-        Log.verbose(F("Calling send to Grainfather.\r\n"));
-
         // Loop through each of the tilt colors cached by tilt_scanner, sending
         // data for each of the active tilts
         tilt_scanner.drop_expired_tilts();
@@ -266,6 +264,7 @@ bool dataSendHandler::send_to_grainfather()
             if (strlen(config.grainfatherURL[th.m_color].link) == 0)
                 continue;
 
+            Log.verbose(F("Calling send to Grainfather.\r\n"));
             char gravity[10];
             char temp[6];
             JsonDocument j;

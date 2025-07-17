@@ -127,12 +127,23 @@ void bridge_lcd::init() {
 
 
 #elif defined(LCD_TFT_ESPI) || defined(LCD_TFT)
-    tft = new TFT_eSPI(TFT_WIDTH, TFT_HEIGHT);
+    // Initialize appropriate LovyanGFX configuration based on hardware
+#if defined(LCD_TFT)
+    tft = new LGFX_D32_Pro();
+#elif defined(LCD_TFT_M5STICKC)
+    tft = new LGFX_M5StickC();
+#elif defined(ESP32S3)
+    tft = new LGFX_S3_TDisplay();
+    // tft = new LGFX();
+#else
+    tft = new LGFX_TFT_ESPI();
+#endif
+    
     tft->init();
     tft->setSwapBytes(true);
     reinit();
 
-    tft->setFreeFont(FF_NORMAL);
+    tft->setFont(&FreeSans9pt7b);
 
 #ifdef TFT_BACKLIGHT
     pinMode(TFT_BACKLIGHT, OUTPUT);
@@ -166,7 +177,7 @@ void bridge_lcd::checkTouch()
 #ifdef TOUCH_CS
 
     uint16_t x = 0, y = 0; // Touch coordinates (not used here)
-    bool touched = tft->getTouch(&x, &y, MIN_PRESSURE);
+    bool touched = tft->getTouch(&x, &y);
 
     if (touched && ! touchLatch && ! setWiFiPushed) {
         // New touch, not currently waiting to process a touch elsewhere
@@ -223,30 +234,30 @@ void bridge_lcd::print_line(const char *left_text, const char *middle_text, cons
     oled_display->drawString(128, starting_pixel_row, right_text);
 #elif defined(LCD_TFT)
     int16_t starting_pixel_row = 0;
-    starting_pixel_row = (tft->fontHeight(GFXFF)) * (line - 1) + 2;
+    starting_pixel_row = (tft->fontHeight()) * (line - 1) + 2;
 
     if(add_gutter)  // We need space to the left to be able to display the Tilt color block
-        tft->drawString(left_text, 25, starting_pixel_row, GFXFF);
+        tft->drawString(left_text, 25, starting_pixel_row);
     else
-        tft->drawString(left_text, 1, starting_pixel_row, GFXFF);
+        tft->drawString(left_text, 1, starting_pixel_row);
 
     yield();
-    tft->drawString(middle_text, 134, starting_pixel_row, GFXFF);
+    tft->drawString(middle_text, 134, starting_pixel_row);
     yield();
     if(add_gutter)
-        tft->drawString(right_text, 300 - tft->textWidth(right_text, GFXFF), starting_pixel_row, GFXFF);
+        tft->drawString(right_text, 300 - tft->textWidth(right_text), starting_pixel_row);
     else
-        tft->drawString(right_text, 319 - tft->textWidth(right_text, GFXFF), starting_pixel_row, GFXFF);
+        tft->drawString(right_text, 319 - tft->textWidth(right_text), starting_pixel_row);
 #elif defined(LCD_TFT_ESPI)
     // ignore left text as we color the text by the tilt
     int16_t starting_pixel_row = 0;
 
     starting_pixel_row = (TFT_ESPI_LINE_CLEARANCE + TFT_ESPI_FONT_SIZE) * (line - 1) + TFT_ESPI_LINE_CLEARANCE;
 
-    // TFT_eSPI::drawString(const char *string, int32_t poX, int32_t poY, uint8_t font_number)
+    // LovyanGFX::drawString(const char *string, int32_t poX, int32_t poY)
     // TODO - Replace middle_text with left_text (and skip all middle text instead)
-    tft->drawString(middle_text, 0, starting_pixel_row, GFXFF);
-    tft->drawString(right_text, tft->width() / 2, starting_pixel_row, GFXFF);
+    tft->drawString(middle_text, 0, starting_pixel_row);
+    tft->drawString(right_text, tft->width() / 2, starting_pixel_row);
 #endif
 }
 
@@ -256,7 +267,7 @@ void bridge_lcd::clear() {
     oled_display->clear();
     oled_display->setFont(SSD1306_FONT);
 #elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
-    tft->fillScreen(TFT_BLACK);
+    tft->fillScreen(0x0000);  // Black color in 16-bit RGB565 format
 #endif
     yield();
 }
@@ -280,20 +291,20 @@ void bridge_lcd::print_tilt_to_line(tiltHydrometer *tilt, uint8_t line) {
     print_line(tilt_color_names[tilt->m_color], temp, gravity, line, true);
 
 #ifdef LCD_TFT
-    uint16_t fHeight = tft->fontHeight(GFXFF);
+    uint16_t fHeight = tft->fontHeight();
     if (tilt_text_colors[tilt->m_color] == 0xFFFF) { // White outline, black square
         tft->fillRect( // White square
             0,
             fHeight * (line - 1) + 2,
             15,
             fHeight - 8,
-            TFT_WHITE);
+            0xFFFF);  // White in RGB565
         tft->fillRect( // Black square
             1,
             fHeight * (line - 1) + 3,
             13,
             fHeight - 10,
-            TFT_BLACK);
+            0x0000);  // Black in RGB565
     } else {
         // All else
         tft->fillRect(
@@ -304,7 +315,7 @@ void bridge_lcd::print_tilt_to_line(tiltHydrometer *tilt, uint8_t line) {
             tilt_text_colors[tilt->m_color]);
     }
 #elif defined(LCD_TFT_ESPI)
-    tft->setTextColor(TFT_WHITE);
+    tft->setTextColor(0xFFFF);  // White in RGB565
 #endif
 }
 
@@ -357,7 +368,7 @@ void bridge_lcd::display_logo_internal() {
         oled_logo_bits,
         oled_logo_width,
         oled_logo_height,
-        TFT_WHITE);
+        0xFFFF);  // White in RGB565
     display();
 #endif
 }
