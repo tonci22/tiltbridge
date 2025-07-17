@@ -185,7 +185,6 @@ bool updateJsonSetting(const JsonDocument& json, const char* key, uint16_t& conf
 
 bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
     // Calibration settings
     if(!updateJsonSettingBool(json, CalibrationKeys::applyCalibration, config.applyCalibration))
@@ -197,11 +196,9 @@ bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUp
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid upstream configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save calibration configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save calibration configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -210,7 +207,6 @@ bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUp
 
 bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
     bool update_legacy = false;
     bool update_ft2 = false;
@@ -276,7 +272,6 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
 
 bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsURL, config.scriptsURL, 256))
@@ -301,11 +296,9 @@ bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamU
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Google Sheets configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Google Sheets configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save Google Sheets configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -314,7 +307,6 @@ bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamU
 
 bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, BrewersFriendSettings::brewersFriendKey, config.brewersFriendKey, 64))
@@ -326,11 +318,9 @@ bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstream
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Brewer's Friend configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Brewer's Friend configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save Brewer's Friend configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -339,7 +329,6 @@ bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstream
 
 bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, BrewfatherSettings::brewfatherKey, config.brewfatherKey, 64))
@@ -351,11 +340,9 @@ bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpd
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Brewfather configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Brewfather configuration data.\r\n"));
-            failCount++;
-        }
+    } else  if (!config.save()) {
+        Log.error(F("Error: Unable to save Brewfather configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -364,7 +351,6 @@ bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpd
 
 bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, UserTargetSettings::userTargetURL, config.userTargetURL, 128))
@@ -376,11 +362,9 @@ bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpd
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid user target configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save user target configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save user target configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -389,7 +373,6 @@ bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpd
 
 bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
     // Loop through each of the keys associated with the sheet names, and update the relevant config entry
     uint8_t i=0;
@@ -409,11 +392,9 @@ bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUp
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Grainfather configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Grainfather configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save Grainfather configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -422,7 +403,6 @@ bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUp
 
 bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, BrewstatusSettings::brewstatusURL, config.brewstatusURL, 256))
@@ -439,11 +419,9 @@ bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpd
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Brewstatus configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Brewstatus configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save Brewstatus configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -452,7 +430,6 @@ bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpd
 
 bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, TaplistioSettings::taplistioURL, config.taplistioURL, 256))
@@ -468,11 +445,9 @@ bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpda
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Taplist.io configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Taplist.io configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save Taplist.io configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;
@@ -480,7 +455,6 @@ bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpda
 
 bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-    bool saveSettings = false;
 
 
     if(!updateJsonSetting(json, MQTTSettings::mqttBrokerHost, config.mqttBrokerHost, sizeof(config.mqttBrokerHost)))
@@ -511,11 +485,9 @@ bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     // Save
     if(failCount>0) {
         Log.error(F("Error: Invalid Taplist.io configuration.\r\n"));
-    } else if (saveSettings) {
-        if (!config.save()) {
-            Log.error(F("Error: Unable to save Taplist.io configuration data.\r\n"));
-            failCount++;
-        }
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save Taplist.io configuration data.\r\n"));
+        failCount++;
     }
 
     return failCount == 0;

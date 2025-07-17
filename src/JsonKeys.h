@@ -70,6 +70,5 @@ constexpr auto mqttPushEvery = "mqttPushEvery";
 constexpr auto mqttUsername = "mqttUsername";
 constexpr auto mqttPassword = "mqttPassword";
 constexpr auto mqttTopic = "mqttTopic";
-
 }
 

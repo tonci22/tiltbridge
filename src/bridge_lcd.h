@@ -22,13 +22,12 @@
 #elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
 
 // For the LCD_TFT displays, we're connecting via SPI
-#define DISABLE_ALL_LIBRARY_WARNINGS
-#include <TFT_eSPI.h>
-#undef DISABLE_ALL_LIBRARY_WARNINGS
+#include <LovyanGFX.hpp>
+#include "lovyan_config.h"
 #include <SPI.h>
 
 #define FF_NORMAL               &FreeSans9pt7b
-#define GFXFF                   1
+
 #define HAVE_LCD                1
 
 #if defined(LCD_TFT)
@@ -95,7 +94,7 @@ private:
 #ifdef LCD_SSD1306
     SSD1306Wire *oled_display;
 #elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
-    TFT_eSPI *tft;
+    lgfx::LGFX_Device *tft;
 #endif // LCD_SSD1306
 
     bool displaying_wifi_dc_screen = false;

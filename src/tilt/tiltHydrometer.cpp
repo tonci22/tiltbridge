@@ -31,14 +31,14 @@ const char* api_color_names[] = {
 };
 
 const uint32_t tilt_text_colors[] = {
-    0xF800, // Red
-    0x07E0, // Green
-    0xFFFF, // Black (white)
-    0x780F, // Purple
-    0xBAA0, // Orange (hook 'em)
-    0x001F, // Blue
-    0xFFE0, // Yellow
-    0xFE19  // Pink
+    0xFF0000, // Red
+    0x00FF00, // Green
+    0xFFFFFF, // Black (white)
+    0xCC00CC, // Purple
+    0xBD5500, // Orange (hook 'em)
+    0x0000FF, // Blue
+    0xFFFF00, // Yellow
+    0xFFC2CE  // Pink
 };
 
 tiltHydrometer::tiltHydrometer(NimBLEAddress address, uint8_t color)
