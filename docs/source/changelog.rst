@@ -12,6 +12,7 @@ v2.0.0 - Unreleased - New UI & Fermentrack 2 Support
 - Completely rebuilt calibration workflow
 - Migrate from asynchronous to synchronous HTTP server
 - Upgrade to latest upstream frameworks/libraries
+- Add supprot for InfluxDB 2.x as a data target
 
 
 

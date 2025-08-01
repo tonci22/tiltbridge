@@ -72,3 +72,11 @@ constexpr auto mqttPassword = "mqttPassword";
 constexpr auto mqttTopic = "mqttTopic";
 }
 
+namespace InfluxDBSettings {
+constexpr auto influxdbURL = "influxdbURL";
+constexpr auto influxdbToken = "influxdbToken";
+constexpr auto influxdbOrg = "influxdbOrg";
+constexpr auto influxdbBucket = "influxdbBucket";
+constexpr auto influxdbPushEvery = "influxdbPushEvery";
+}
+

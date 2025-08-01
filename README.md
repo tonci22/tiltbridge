@@ -21,6 +21,7 @@ TiltBridge automatically logs your data to the following cloud data services:
 * [Grainfather](https://community.grainfather.com/)
 * [Taplist.io](https://taplist.io)
 * [MQTT](https://mqtt.org/) Broker
+* InfluxDB v2.x
 
 #### Features
 

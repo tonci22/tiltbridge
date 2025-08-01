@@ -41,6 +41,7 @@ void dataSendHandler::init()
     gSheetsTicker.once(70, [](){data_sender.send_gSheets = true;});              // Schedule first send to Google Sheets
     grainfatherTicker.once(80, [](){data_sender.send_grainfather = true;});      // Schedule first send to Grainfather
     taplistioTicker.once(90, [](){data_sender.send_taplistio = true;});          // Schedule first send to Taplist.io
+    influxdbTicker.once(100, [](){data_sender.send_influxdb = true;});           // Schedule first send to InfluxDB
 }
 
 void dataSendHandler::process()
@@ -54,6 +55,7 @@ void dataSendHandler::process()
         send_to_taplistio();
         send_to_google();
         send_to_mqtt();
+        send_to_influxdb();
     }
 }
 
@@ -910,6 +912,111 @@ bool dataSendHandler::publish_to_mqtt(const char* topic, JsonDocument& payload, 
         Log.error(F("Failed to publish to MQTT\r\n"));
     }
     delay(10);
+    return result;
+}
+
+bool dataSendHandler::send_to_influxdb()
+{
+    bool result = true;
+
+    if (send_influxdb && !send_lock)
+    {
+        send_influxdb = false;
+        send_lock = true;
+
+        if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && 
+            strlen(config.influxdbToken) > 0 && 
+            strlen(config.influxdbOrg) > 0 && 
+            strlen(config.influxdbBucket) > 0) {
+            
+            Log.verbose(F("Calling send to InfluxDB.\r\n"));
+            
+            // Build the write API URL
+            char writeURL[512];
+            snprintf(writeURL, sizeof(writeURL), "%s/api/v2/write?org=%s&bucket=%s&precision=s", 
+                     config.influxdbURL, config.influxdbOrg, config.influxdbBucket);
+
+            // Build line protocol data
+            String lineData = "";
+            uint64_t timestamp = std::time(nullptr);
+            
+            tilt_scanner.drop_expired_tilts();
+            for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
+                char gravity[10];
+                char temp[6];
+                char battery_str[4];
+                
+                th.cal_smooth_gravity_str(gravity, sizeof(gravity));
+                th.converted_temp(temp, sizeof(temp), false); // Use configured unit
+                th.get_weeks_battery(battery_str, sizeof(battery_str));
+                
+                // InfluxDB line protocol: measurement,tag1=value1 field1=value1,field2=value2 timestamp
+                char line[256];
+                snprintf(line, sizeof(line), 
+                        "tilt,color=%s,device_source=TiltBridge "
+                        "gravity=%s,temperature=%s,temp_units=\"%s\",weeks_on_battery=%s\n",
+                        tilt_color_names[th.m_color],
+                        gravity, temp, config.tempUnit, battery_str);
+                
+                lineData += line;
+            }
+
+            if (lineData.length() > 0) {
+                // Send data using HTTP POST with line protocol
+                HTTPClient http;
+                WiFiClientSecure secureClient;
+
+                // Determine if URL is HTTPS
+                bool useHTTPS = strncmp(config.influxdbURL, "https://", 8) == 0;
+                
+                if (useHTTPS) {
+                    secureClient.setInsecure(); // Don't verify certificates
+                    http.begin(secureClient, writeURL);
+                } else {
+                    http.begin(writeURL);
+                }
+
+                // Set headers for InfluxDB v2 API
+                http.addHeader(F("Authorization"), String("Token ") + config.influxdbToken);
+                http.addHeader(F("Content-Type"), "text/plain; charset=utf-8");
+                http.addHeader(F("Accept"), "application/json");
+
+                char userAgent[128];
+                snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", 
+                         version(), branch(), build());
+                http.setUserAgent(userAgent);
+
+                // Send the data
+                int httpResponseCode = http.POST(lineData);
+
+                if (httpResponseCode > 0) {
+                    Log.verbose(F("InfluxDB HTTP Response code: %d\r\n"), httpResponseCode);
+                    
+                    if (httpResponseCode >= 200 && httpResponseCode < 300) {
+                        Log.notice(F("Completed send to InfluxDB.\r\n"));
+                    } else {
+                        Log.error(F("InfluxDB returned error code %d: %s\r\n"), 
+                                 httpResponseCode, http.getString().c_str());
+                        result = false;
+                    }
+                } else {
+                    Log.error(F("Error sending to InfluxDB: %s\r\n"), 
+                             http.errorToString(httpResponseCode).c_str());
+                    result = false;
+                }
+
+                http.end();
+                if (useHTTPS) {
+                    secureClient.stop();
+                }
+            } else {
+                Log.verbose(F("No Tilt data to send to InfluxDB.\r\n"));
+            }
+        }
+        
+        influxdbTicker.once(config.influxdbPushEvery, [](){data_sender.send_influxdb = true;}); // Set up subsequent send to InfluxDB
+        send_lock = false;
+    }
     return result;
 }
 

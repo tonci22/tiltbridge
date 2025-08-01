@@ -227,6 +227,13 @@ JsonDocument Config::to_json() {
     obj[MQTTSettings::mqttTopic] = mqttTopic;
     obj[MQTTSettings::mqttPushEvery] = mqttPushEvery;
 
+    // InfluxDB Settings
+    obj[InfluxDBSettings::influxdbURL] = influxdbURL;
+    obj[InfluxDBSettings::influxdbToken] = influxdbToken;
+    obj[InfluxDBSettings::influxdbOrg] = influxdbOrg;
+    obj[InfluxDBSettings::influxdbBucket] = influxdbBucket;
+    obj[InfluxDBSettings::influxdbPushEvery] = influxdbPushEvery;
+
     return obj;
 }
 
@@ -437,5 +444,30 @@ void Config::load_from_json(JsonDocument obj) {
 
     if (!obj[MQTTSettings::mqttPushEvery].isNull()) {
         mqttPushEvery = int(obj[MQTTSettings::mqttPushEvery]);
+    }
+
+    // InfluxDB Settings
+    if (!obj[InfluxDBSettings::influxdbURL].isNull()) {
+        const char *iu = obj[InfluxDBSettings::influxdbURL];
+        strlcpy(influxdbURL, iu, 256);
+    }
+
+    if (!obj[InfluxDBSettings::influxdbToken].isNull()) {
+        const char *it = obj[InfluxDBSettings::influxdbToken];
+        strlcpy(influxdbToken, it, 128);
+    }
+
+    if (!obj[InfluxDBSettings::influxdbOrg].isNull()) {
+        const char *io = obj[InfluxDBSettings::influxdbOrg];
+        strlcpy(influxdbOrg, io, 64);
+    }
+
+    if (!obj[InfluxDBSettings::influxdbBucket].isNull()) {
+        const char *ib = obj[InfluxDBSettings::influxdbBucket];
+        strlcpy(influxdbBucket, ib, 64);
+    }
+
+    if (!obj[InfluxDBSettings::influxdbPushEvery].isNull()) {
+        influxdbPushEvery = int(obj[InfluxDBSettings::influxdbPushEvery]);
     }
 }

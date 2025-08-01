@@ -494,6 +494,35 @@ bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
 }
 
 
+bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+    uint8_t failCount = 0;
+
+    if(!updateJsonSetting(json, InfluxDBSettings::influxdbURL, config.influxdbURL, sizeof(config.influxdbURL)))
+        failCount++;
+    if(!updateJsonSetting(json, InfluxDBSettings::influxdbToken, config.influxdbToken, sizeof(config.influxdbToken)))
+        failCount++;
+    if(!updateJsonSetting(json, InfluxDBSettings::influxdbOrg, config.influxdbOrg, sizeof(config.influxdbOrg)))
+        failCount++;
+    if(!updateJsonSetting(json, InfluxDBSettings::influxdbBucket, config.influxdbBucket, sizeof(config.influxdbBucket)))
+        failCount++;
+    if(!updateJsonSetting(json, InfluxDBSettings::influxdbPushEvery, config.influxdbPushEvery))
+        failCount++;
+
+    if(strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH)  // Trigger a send to InfluxDB in 5 seconds using the updated settings
+        sendNowTicker.once(5, [](){data_sender.send_influxdb = true;});
+
+    // Save
+    if(failCount>0) {
+        Log.error(F("Error: Invalid InfluxDB configuration.\r\n"));
+    } else if (!config.save()) {
+        Log.error(F("Error: Unable to save InfluxDB configuration data.\r\n"));
+        failCount++;
+    }
+
+    return failCount == 0;
+}
+
+
 //-----------------------------------------------------------------------------------------
 
 #ifndef DISABLE_OTA_UPDATES
@@ -623,6 +652,7 @@ void httpServer::setPutPages() {
         {"/api/settings/brewstatus/", processBrewstatusSettings},
         {"/api/settings/taplistio/", processTaplistioSettings},
         {"/api/settings/mqtt/", processMqttSettings},
+        {"/api/settings/influxdb/", processInfluxdbSettings},
     };
 
     for (const auto& endpoint : endpoints) {

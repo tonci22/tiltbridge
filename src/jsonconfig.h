@@ -92,6 +92,13 @@ public:
     char mqttTopic[31] = "";
     uint16_t mqttPushEvery = 30;
 
+    // InfluxDB Settings
+    char influxdbURL[256] = "";
+    char influxdbToken[128] = "";
+    char influxdbOrg[64] = "";
+    char influxdbBucket[64] = "";
+    uint16_t influxdbPushEvery = 900;
+
 
     JsonDocument to_json_external();
 private:

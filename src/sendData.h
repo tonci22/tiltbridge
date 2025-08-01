@@ -23,6 +23,7 @@
 #define GSCRIPTS_MIN_URL_LENGTH 24
 #define GSCRIPTS_MIN_EMAIL_LENGTH 7
 #define GSHEETS_JSON 512
+#define INFLUXDB_MIN_URL_LENGTH 12
 
 // This is me being lazy and simplifying the reuse of code. The formats for Brewer's
 // Friend and Brewfather are basically the same so I'm combining them together
@@ -49,6 +50,7 @@ public:
     bool send_to_bf_and_bf(uint8_t which_bf); // Handler for both Brewer's Friend and Brewfather
     bool send_to_grainfather();
     bool send_to_bf_and_bf();
+    bool send_to_influxdb();
 
 
     // Send Timers
@@ -62,6 +64,7 @@ public:
     Ticker taplistioTicker;
     Ticker gSheetsTicker;
     Ticker mqttTicker;
+    Ticker influxdbTicker;
 
     // Send Semaphores
     bool send_legacy_fermentrack = false;
@@ -74,6 +77,7 @@ public:
     bool send_taplistio = false;
     bool send_gSheets = false;
     bool send_mqtt = false;
+    bool send_influxdb = false;
 
 private:
     bool send_lock = false;
