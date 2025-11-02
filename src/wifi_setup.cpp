@@ -2,6 +2,7 @@
 #include <ESPmDNS.h>
 #include <LCBUrl.h>
 #include <WiFiManager.h>
+#include <esp_timer.h>
 
 #include "bridge_lcd.h"
 #include "jsonconfig.h"
@@ -74,7 +75,7 @@ void initWiFi() {
     wm.setConfigPortalTimeout(5 * 60);              // Timeout portal in 5 mins
 
     wm.setHostname(config.mdnsID);  // Allow DHCP to get proper name
-    // wm.setWiFiAutoReconnect(true);  // Enable auto reconnect (should remove need for reconnectWiFi())
+    // wm.setWiFiAutoReconnect(true);  // Enable auto reconnect (should remove need for reconnectWiFi()) - Note, this doesn't seem to be supported for anything other than ESP8266, so disabling it here in favor of the manual implementation in the loop
     wm.setWiFiAPChannel(1);         // Pick the most common channel, safe for all countries
     wm.setCleanConnect(true);       // Always disconnect before connecting
     // Commenting out setCountry until https://github.com/tzapu/WiFiManager/issues/1309 is fixed
@@ -135,10 +136,10 @@ void initWiFi() {
     lcd.display_wifi_success_screen(mdns_url, ip_address_url);
 }
 
-#define MAX_CONNECT_ATTEMPTS 200
-#define TIME_BETWEEN_ATTEMPTS 3000  // Minimum time between attempts
+#define MAX_CONNECT_ATTEMPTS 50
+#define TIME_BETWEEN_ATTEMPTS 6000  // Minimum time between attempts (milliseconds)
 uint8_t WLcount = 0;
-unsigned long WLNextAt = 0;
+int64_t WLNextAt = 0;
 
 void reconnectWiFi() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -149,14 +150,10 @@ void reconnectWiFi() {
             lcd.display_wifi_disconnected_screen();
             WiFi.begin();
             delay(1000); // Ensuring the "disconnected" screen appears for at least one second
-        } else if(WLNextAt >= millis()) {
+        } else if(WLNextAt >= esp_timer_get_time()) {
             // Haven't hit the timer for the next reconnect attempt - just return
             return;
-        } else {
-            WiFi.reconnect();
-            delay(100);
-        }
-        WLNextAt = millis() + TIME_BETWEEN_ATTEMPTS;
+        WLNextAt = esp_timer_get_time() + (1000 * TIME_BETWEEN_ATTEMPTS);
 
         // Check if we reconnected
         if (WiFi.status() != WL_CONNECTED) {
