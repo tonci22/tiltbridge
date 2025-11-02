@@ -148,20 +148,24 @@ void reconnectWiFi() {
             // First time we noticed the WiFi is out
             Log.notice(F("WiFi is disconnected, reconnecting. (%d/%d)" CR), WLcount, MAX_CONNECT_ATTEMPTS);
             lcd.display_wifi_disconnected_screen();
-            WiFi.begin();
+            // WiFi.begin();
             delay(1000); // Ensuring the "disconnected" screen appears for at least one second
         } else if(WLNextAt >= esp_timer_get_time()) {
             // Haven't hit the timer for the next reconnect attempt - just return
             return;
+        }
+
+        // Try to reconnect
+        WiFi.reconnect();
         WLNextAt = esp_timer_get_time() + (1000 * TIME_BETWEEN_ATTEMPTS);
+        ++WLcount;
 
         // Check if we reconnected
         if (WiFi.status() != WL_CONNECTED) {
-            if (WLcount < MAX_CONNECT_ATTEMPTS) {
+            if (WLcount <= MAX_CONNECT_ATTEMPTS) {
                 // Not reconnected, but still have attempts left to reconnect
                 // printDot(true);
                 Log.notice(F("WiFi is still disconnected. (%d/%d)" CR), WLcount, MAX_CONNECT_ATTEMPTS);
-                ++WLcount;
             } else {
                 // We failed to reconnect.
                 lcd.display_wifi_reconnect_failed();

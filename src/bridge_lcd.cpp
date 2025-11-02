@@ -158,9 +158,7 @@ uint8_t bridge_lcd::display_next() {
 
     if (WiFi.status() == WL_CONNECTED) {
         displaying_wifi_dc_screen = false;
-    }
-
-    if (displaying_wifi_dc_screen) {
+    } else if (displaying_wifi_dc_screen) {
         // If we're displaying the wifi dc screen, stay on it. 
         return 1;
     }
