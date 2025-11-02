@@ -51,6 +51,16 @@ void mdnsReset() {
 void initWiFi() {
 
     WiFi.mode(WIFI_STA); // Explicitly set mode, ESP defaults to STA+AP
+    WiFi.setSleep(WIFI_PS_NONE); // Disable WiFi power saving for better stability
+
+    // Set up WiFi event handlers for better diagnostics
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+        Log.warning(F("WiFi disconnected, reason: %d\r\n"), info.wifi_sta_disconnected.reason);
+    }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+        Log.notice(F("WiFi connected, IP: %s\r\n"), WiFi.localIP().toString().c_str());
+    }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
 
     WiFiManager wm;
 #if ARDUINO_LOG_LEVEL == 6
