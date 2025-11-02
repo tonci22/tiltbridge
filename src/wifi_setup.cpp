@@ -27,11 +27,10 @@ void apCallback(WiFiManager *myWiFiManager) {
 void disconnectWiFi() {
     Log.notice(F("Resetting WiFi settings via disconnectWiFi()\r\n"));
     WiFi.mode(WIFI_AP_STA);
-    WiFi.persistent(true);
+    WiFi.persistent(true);  // This is implicit at startup, but I want to set it explicitly here to ensure credentials are deleted
     WiFi.disconnect(true, true);
     WiFi.begin("0","0");  // Fixes a bug where WiFi.disconnect() sometimes won't always clear the settings
-    WiFi.persistent(false);
-    vTaskDelay(1000);
+    vTaskDelay(1000);  // Give everything a moment to settle before resetting
     ESP.restart();
 }
 
