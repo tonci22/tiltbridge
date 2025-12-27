@@ -112,6 +112,7 @@ void initWiFi() {
         // Doing this to reset the DHCP name, the portal should never pop
         // Additionally, there is a bug where the HTTP server doesn't spin up after the AP shuts down. Not sure where
         // that issue is, but this solves it.
+        delay(3000); // Add a small delay to ensure WiFi is settled
         ESP.restart();
     }
 
@@ -146,7 +147,7 @@ void reconnectWiFi() {
         // WiFi is down - Reconnect
         if(WLcount == 0) {
             // First time we noticed the WiFi is out
-            Log.notice(F("WiFi is disconnected, reconnecting. (%d/%d)" CR), WLcount, MAX_CONNECT_ATTEMPTS);
+            Log.notice(F("WiFi is disconnected, reconnecting. (%d/%d)\r\n"), WLcount, MAX_CONNECT_ATTEMPTS);
             lcd.display_wifi_disconnected_screen();
             // WiFi.begin();
             delay(1000); // Ensuring the "disconnected" screen appears for at least one second
@@ -165,20 +166,20 @@ void reconnectWiFi() {
             if (WLcount <= MAX_CONNECT_ATTEMPTS) {
                 // Not reconnected, but still have attempts left to reconnect
                 // printDot(true);
-                Log.notice(F("WiFi is still disconnected. (%d/%d)" CR), WLcount, MAX_CONNECT_ATTEMPTS);
+                Log.notice(F("WiFi is still disconnected. (%d/%d)\r\n"), WLcount, MAX_CONNECT_ATTEMPTS);
             } else {
                 // We failed to reconnect.
                 lcd.display_wifi_reconnect_failed();
-                Log.error(F("Unable to reconnect WiFi, restarting." CR));
+                Log.error(F("Unable to reconnect WiFi, restarting.\r\n"));
                 delay(1000);
                 ESP.restart();
             }
         }
     }
 
-    if (WiFi.status() == WL_CONNECTED && WLcount > 0) {
+    if (WiFi.status() == WL_CONNECTED && WLcount != 0) {
         // We reconnected successfully
-        Log.error(F("Reconnected to WiFi" CR));
+        Log.error(F("Reconnected to WiFi\r\n"));
         mdnsReset();  // Make sure that we reconnect mDNS
         lcd.display_logo();
         WLcount = 0;
