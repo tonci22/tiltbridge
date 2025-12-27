@@ -124,10 +124,10 @@ void bridge_lcd::check_screen() {
 #else // HAVE_LCD
 
 // No-op implementation.
-void bridge_lcd::init() {}
-void bridge_lcd::reinit() {}
+// void bridge_lcd::init() {}
+// void bridge_lcd::reinit() {}
 void bridge_lcd::display_logo(bool fromReset) {}
-void bridge_lcd::checkTouch() {}
+// void bridge_lcd::checkTouch() {}
 
 void bridge_lcd::display_wifi_connect_screen(const char *ap_name, const char *ap_pass) {}
 void bridge_lcd::display_wifi_success_screen(const char *mdns_url, const char *ip_address_url) {}
@@ -137,12 +137,12 @@ void bridge_lcd::display_ota_update_screen() {}
 void bridge_lcd::display_wifi_disconnected_screen() {}
 void bridge_lcd::display_wifi_reconnect_failed() {}
 
-void bridge_lcd::print_line(const char *left_text, const char *right_text, uint8_t line) {}
-void bridge_lcd::print_line(const char *left_text, const char *middle_text, const char *right_text, uint8_t line) {}
-void bridge_lcd::print_line(const char *left_text, const char *middle_text, const char *right_text, uint8_t line, bool add_gutter) {}
+// void bridge_lcd::print_line(const char *left_text, const char *right_text, uint8_t line) {}
+// void bridge_lcd::print_line(const char *left_text, const char *middle_text, const char *right_text, uint8_t line) {}
+// void bridge_lcd::print_line(const char *left_text, const char *middle_text, const char *right_text, uint8_t line, bool add_gutter) {}
 
 void bridge_lcd::check_screen() {}
-void bridge_lcd::clear() {}
+// void bridge_lcd::clear() {}
 
 #endif // HAVE_LCD
 
