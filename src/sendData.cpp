@@ -456,7 +456,7 @@ bool dataSendHandler::send_to_google()
                         Log.verbose("Created secure connection to %s.\r\n", config.scriptsURL);
                         Log.verbose("Sending the following payload to Google Sheets (%s):\r\n\t\t%s\r\n", tilt_color_names[th.m_color], payload_string);
 
-                        http.addHeader(F("Content-Type"), content_json);   // Specify content-type header
+                        http.addHeader("Content-Type", content_json);   // Specify content-type header
                         httpResponseCode = http.POST(payload_string);               // Send the payload
 
                         if (httpResponseCode == HTTP_CODE_OK) {  // HTTP_CODE_OK = 200
@@ -691,8 +691,8 @@ bool dataSendHandler::send_to_url(const char *url, const char *dataToSend, const
                 }
 
                 // Set headers
-                http->addHeader(F("Content-Type"), contentType);
-                http->addHeader(F("Accept"), content_json);
+                http->addHeader("Content-Type", contentType);
+                http->addHeader("Accept", content_json);
 
                 char userAgent[128];
                 snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", version(), branch(), build());
@@ -1031,9 +1031,9 @@ bool dataSendHandler::send_to_influxdb()
                 }
 
                 // Set headers for InfluxDB v2 API
-                http.addHeader(F("Authorization"), String("Token ") + config.influxdbToken);
-                http.addHeader(F("Content-Type"), "text/plain; charset=utf-8");
-                http.addHeader(F("Accept"), "application/json");
+                http.addHeader("Authorization", String("Token ") + config.influxdbToken);
+                http.addHeader("Content-Type", "text/plain; charset=utf-8");
+                http.addHeader("Accept", "application/json");
 
                 char userAgent[128];
                 snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", 

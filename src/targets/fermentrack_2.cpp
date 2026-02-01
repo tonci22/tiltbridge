@@ -147,8 +147,8 @@ bool dataSendHandler::send_to_fermentrack()
  */
 bool register_with_fermentrack_2() {
     char url[256] = "";
-    String payload;
-    String response;
+    char payload[512];
+    char response[1024];
 
     // Handling of tickers/semaphores is assumed to be done by whatever calls this function
 
@@ -176,10 +176,10 @@ bool register_with_fermentrack_2() {
         doc[Fermentrack2SettingsKeys::version] = version();
 
         // Serialize the JSON document
-        serializeJson(doc, payload);
+        serializeJson(doc, payload, sizeof(payload));
     }
 
-    sendResult result = send_json_str(payload, url, response, httpMethod::HTTP_PUT);
+    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PUT);
 
     if(result != sendResult::success) {
         fermentrackRegistrationError = fermentrackRegErrorT::REGISTRATION_ENDPOINT_ERR;
@@ -189,7 +189,7 @@ bool register_with_fermentrack_2() {
 
     JsonDocument doc;
     deserializeJson(doc, response);
-    Log.verbose("Fermentrack 2 registration response: %s\r\n", response.c_str());
+    Log.verbose("Fermentrack 2 registration response: %s\r\n", response);
 
 
     // response = {'success': True, 
@@ -229,8 +229,8 @@ bool register_with_fermentrack_2() {
 
 bool send_status_to_fermentrack_2() {
     char url[256] = "";
-    String payload;
-    String response;
+    char payload[2048];
+    char response[1024];
 
     // If we aren't registered, we can't send data
     if(!ft2_is_registered())
@@ -256,12 +256,12 @@ bool send_status_to_fermentrack_2() {
         doc[Fermentrack2SettingsKeys::version] = version();
 
         // Serialize the JSON document
-        serializeJson(doc, payload);
+        serializeJson(doc, payload, sizeof(payload));
     }
 
-    Log.info("Sending payload to Fermentrack 2: %s\r\n", payload.c_str());
+    Log.info("Sending payload to Fermentrack 2: %s\r\n", payload);
 
-    sendResult result = send_json_str(payload, url, response, httpMethod::HTTP_PUT);
+    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PUT);
 
     // If we failed to send the data, set an error code
     if(result != sendResult::success) {
@@ -272,7 +272,7 @@ bool send_status_to_fermentrack_2() {
 
     JsonDocument doc;
     deserializeJson(doc, response);
-    Log.verbose("Fermentrack 2 status response: %s\r\n", response.c_str());
+    Log.verbose("Fermentrack 2 status response: %s\r\n", response);
 
     if(doc["success"].is<bool>()) {
         bool success = doc["success"].as<bool>();
@@ -304,7 +304,7 @@ bool send_status_to_fermentrack_2() {
 
 bool process_messages_on_fermentrack_2() {
     char url[256] = "";
-    String response;
+    char response[2048];
 
     // Check if we have messages to retrieve
     if(!fermentrackMessageFlags.hasMessages)
@@ -316,7 +316,7 @@ bool process_messages_on_fermentrack_2() {
     // If we aren't registered, we can't retrieve messages
     if(!ft2_is_registered())
         return false;
-    
+
     // Build the URL with query parameters for device ID and API key
     if(!ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::messages, config.fermentrackDeviceID, config.fermentrackAPIKey))
         return false;
@@ -324,8 +324,7 @@ bool process_messages_on_fermentrack_2() {
     Log.notice("Retrieving messages from Fermentrack 2 at %s\r\n", url);
 
     // Use HTTP GET to retrieve messages
-    String empty_payload = "";
-    sendResult result = send_json_str(empty_payload, url, response, httpMethod::HTTP_GET);
+    sendResult result = send_json_str("", url, response, sizeof(response), httpMethod::HTTP_GET);
 
     if(result != sendResult::success) {
         Log.error("Error retrieving messages from Fermentrack 2\r\n");
@@ -334,7 +333,7 @@ bool process_messages_on_fermentrack_2() {
 
     JsonDocument doc;
     deserializeJson(doc, response);
-    Log.verbose("Fermentrack 2 messages response: %s\r\n", response.c_str());
+    Log.verbose("Fermentrack 2 messages response: %s\r\n", response);
 
     if(doc["success"].is<bool>()) {
         bool success = doc["success"].as<bool>();
@@ -374,27 +373,27 @@ bool process_messages_on_fermentrack_2() {
 
                 // Now PATCH the message flags to false on the remote
                 JsonDocument patch_doc;
-                String patch_payload;
-                
+                char patch_payload[512];
+
                 patch_doc[Fermentrack2SettingsKeys::apiKey] = config.fermentrackAPIKey;
                 patch_doc[Fermentrack2SettingsKeys::deviceID] = config.fermentrackDeviceID;
                 patch_doc["reset_connection"] = false;
                 patch_doc["restart_device"] = false;
-                
+
                 // Clear per-color sync_calibration flags
                 for(uint8_t color = 0; color < 8; color++) {
                     char flag_name[32];
                     snprintf(flag_name, sizeof(flag_name), "sync_calibration_%s", api_color_names[color]);
                     patch_doc[flag_name] = false;
                 }
-                
-                serializeJson(patch_doc, patch_payload);
-                
+
+                serializeJson(patch_doc, patch_payload, sizeof(patch_payload));
+
                 // Get the base URL for the messages endpoint
                 if(ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::messages)) {
-                    String patch_response;
-                    sendResult patch_result = send_json_str(patch_payload, url, patch_response, httpMethod::HTTP_PATCH);
-                    
+                    char patch_response[256];
+                    sendResult patch_result = send_json_str(patch_payload, url, patch_response, sizeof(patch_response), httpMethod::HTTP_PATCH);
+
                     if(patch_result == sendResult::success) {
                         Log.verbose("Successfully cleared message flags on Fermentrack 2\r\n");
                     } else {
@@ -479,7 +478,7 @@ void action_fermentrack_messages() {
 // Retrieve calibration coefficients from Fermentrack for a specific Tilt
 bool ft2_get_calibration_coefficients(uint8_t color) {
     char url[512] = "";
-    String response;
+    char response[1024];
 
     // If we aren't registered, we can't retrieve coefficients
     if(!ft2_is_registered())
@@ -495,8 +494,8 @@ bool ft2_get_calibration_coefficients(uint8_t color) {
     char temp_url[256];
     if(!ft2_get_url(temp_url, sizeof(temp_url), FermentrackAPIEndpoints::calibrationCoefficients))
         return false;
-    
-    snprintf(url, sizeof(url), "%s?%s=%s&%s=%s&color=%s", 
+
+    snprintf(url, sizeof(url), "%s?%s=%s&%s=%s&color=%s",
              temp_url,
              Fermentrack2SettingsKeys::deviceID, config.fermentrackDeviceID,
              Fermentrack2SettingsKeys::apiKey, config.fermentrackAPIKey,
@@ -505,8 +504,7 @@ bool ft2_get_calibration_coefficients(uint8_t color) {
     Log.notice("Retrieving calibration coefficients from Fermentrack 2 at %s\r\n", url);
 
     // Use HTTP GET to retrieve coefficients
-    String empty_payload = "";
-    sendResult result = send_json_str(empty_payload, url, response, httpMethod::HTTP_GET);
+    sendResult result = send_json_str("", url, response, sizeof(response), httpMethod::HTTP_GET);
 
     if(result != sendResult::success) {
         Log.error("Error retrieving calibration coefficients from Fermentrack 2\r\n");
@@ -515,20 +513,20 @@ bool ft2_get_calibration_coefficients(uint8_t color) {
 
     JsonDocument doc;
     deserializeJson(doc, response);
-    Log.verbose("Fermentrack 2 calibration coefficients response: %s\r\n", response.c_str());
+    Log.verbose("Fermentrack 2 calibration coefficients response: %s\r\n", response);
 
     // Check if successful
     if(doc["success"].is<bool>() && doc["success"].as<bool>()) {
         JsonObject coefficients = doc["coefficients"];
         
         // Update local coefficients if present in response
-        if(coefficients["grav_x0"].is<String>()) {
+        if(coefficients["grav_x0"].is<const char*>()) {
             config.tilt_calibration[color].x0 = coefficients["grav_x0"].as<double>();
         }
-        if(coefficients["grav_x1"].is<String>()) {
+        if(coefficients["grav_x1"].is<const char*>()) {
             config.tilt_calibration[color].x1 = coefficients["grav_x1"].as<double>();
         }
-        if(coefficients["grav_x2"].is<String>()) {
+        if(coefficients["grav_x2"].is<const char*>()) {
             config.tilt_calibration[color].x2 = coefficients["grav_x2"].as<double>();
         }
 
@@ -545,11 +543,11 @@ bool ft2_get_calibration_coefficients(uint8_t color) {
     return true;
 }
 
-// Set calibration coefficients on Fermentrack for a specific Tilt  
+// Set calibration coefficients on Fermentrack for a specific Tilt
 bool ft2_set_calibration_coefficients(uint8_t color, double x0, double x1, double x2) {
     char url[512] = "";
-    String payload;
-    String response;
+    char payload[512];
+    char response[256];
 
     // If we aren't registered, we can't set coefficients
     if(!ft2_is_registered())
@@ -560,7 +558,7 @@ bool ft2_set_calibration_coefficients(uint8_t color, double x0, double x1, doubl
         Log.error("Invalid Tilt color: %d\r\n", color);
         return false;
     }
-    
+
     if(!ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::calibrationCoefficients))
         return false;
 
@@ -571,20 +569,20 @@ bool ft2_set_calibration_coefficients(uint8_t color, double x0, double x1, doubl
     doc[Fermentrack2SettingsKeys::apiKey] = config.fermentrackAPIKey;
     doc[Fermentrack2SettingsKeys::deviceID] = config.fermentrackDeviceID;
     doc["color"] = tilt_color_names[color];
-    
+
     // Format coefficients according to API requirements
     char x0_str[16], x1_str[16], x2_str[16];
     snprintf(x0_str, sizeof(x0_str), "%.3f", x0);
     snprintf(x1_str, sizeof(x1_str), "%.7f", x1);
     snprintf(x2_str, sizeof(x2_str), "%.7f", x2);
-    
+
     doc["grav_x0"] = x0_str;
     doc["grav_x1"] = x1_str;
     doc["grav_x2"] = x2_str;
 
-    serializeJson(doc, payload);
+    serializeJson(doc, payload, sizeof(payload));
 
-    sendResult result = send_json_str(payload, url, response, httpMethod::HTTP_PATCH);
+    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PATCH);
 
     if(result != sendResult::success) {
         Log.error("Error setting calibration coefficients on Fermentrack 2\r\n");
@@ -598,7 +596,7 @@ bool ft2_set_calibration_coefficients(uint8_t color, double x0, double x1, doubl
 // Retrieve calibration points from Fermentrack for a specific Tilt (for future use)
 bool ft2_get_calibration_points(uint8_t color) {
     char url[512] = "";
-    String response;
+    char response[2048];
 
     // If we aren't registered, we can't retrieve points
     if(!ft2_is_registered())
@@ -614,8 +612,8 @@ bool ft2_get_calibration_points(uint8_t color) {
     char temp_url[256];
     if(!ft2_get_url(temp_url, sizeof(temp_url), FermentrackAPIEndpoints::calibrationPoints))
         return false;
-    
-    snprintf(url, sizeof(url), "%s?%s=%s&%s=%s&color=%s", 
+
+    snprintf(url, sizeof(url), "%s?%s=%s&%s=%s&color=%s",
              temp_url,
              Fermentrack2SettingsKeys::deviceID, config.fermentrackDeviceID,
              Fermentrack2SettingsKeys::apiKey, config.fermentrackAPIKey,
@@ -624,8 +622,7 @@ bool ft2_get_calibration_points(uint8_t color) {
     Log.notice("Retrieving calibration points from Fermentrack 2 at %s\r\n", url);
 
     // Use HTTP GET to retrieve points
-    String empty_payload = "";
-    sendResult result = send_json_str(empty_payload, url, response, httpMethod::HTTP_GET);
+    sendResult result = send_json_str("", url, response, sizeof(response), httpMethod::HTTP_GET);
 
     if(result != sendResult::success) {
         Log.error("Error retrieving calibration points from Fermentrack 2\r\n");
@@ -634,7 +631,7 @@ bool ft2_get_calibration_points(uint8_t color) {
 
     JsonDocument doc;
     deserializeJson(doc, response);
-    Log.verbose("Fermentrack 2 calibration points response: %s\r\n", response.c_str());
+    Log.verbose("Fermentrack 2 calibration points response: %s\r\n", response);
 
     // Check if successful and process points
     if(doc["success"].is<bool>() && doc["success"].as<bool>()) {
@@ -654,7 +651,7 @@ bool ft2_get_calibration_points(uint8_t color) {
             JsonArray dataPoints = calDoc.to<JsonArray>();
             
             for(JsonVariant point : points) {
-                if(point["sensor_gravity"].is<String>() && point["measured_gravity"].is<String>()) {
+                if(point["sensor_gravity"].is<const char*>() && point["measured_gravity"].is<const char*>()) {
                     double sensorGravity = point["sensor_gravity"].as<double>();
                     double measuredGravity = point["measured_gravity"].as<double>();
                     
@@ -693,8 +690,8 @@ bool ft2_get_calibration_points(uint8_t color) {
 // Add calibration point to Fermentrack for a specific Tilt (for future use)
 bool ft2_add_calibration_point(uint8_t color, double sensor_gravity, double measured_gravity) {
     char url[512] = "";
-    String payload;
-    String response;
+    char payload[512];
+    char response[256];
 
     // If we aren't registered, we can't add points
     if(!ft2_is_registered())
@@ -705,7 +702,7 @@ bool ft2_add_calibration_point(uint8_t color, double sensor_gravity, double meas
         Log.error("Invalid Tilt color: %d\r\n", color);
         return false;
     }
-    
+
     if(!ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::calibrationPoint))
         return false;
 
@@ -716,17 +713,17 @@ bool ft2_add_calibration_point(uint8_t color, double sensor_gravity, double meas
     doc[Fermentrack2SettingsKeys::apiKey] = config.fermentrackAPIKey;
     doc[Fermentrack2SettingsKeys::deviceID] = config.fermentrackDeviceID;
     doc["color"] = tilt_color_names[color];
-    
+
     char sensor_str[16], measured_str[16];
     snprintf(sensor_str, sizeof(sensor_str), "%.4f", sensor_gravity);
     snprintf(measured_str, sizeof(measured_str), "%.4f", measured_gravity);
-    
+
     doc["sensor_gravity"] = sensor_str;
     doc["measured_gravity"] = measured_str;
 
-    serializeJson(doc, payload);
+    serializeJson(doc, payload, sizeof(payload));
 
-    sendResult result = send_json_str(payload, url, response, httpMethod::HTTP_POST);
+    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_POST);
 
     if(result != sendResult::success) {
         Log.error("Error adding calibration point to Fermentrack 2\r\n");
@@ -740,8 +737,8 @@ bool ft2_add_calibration_point(uint8_t color, double sensor_gravity, double meas
 // Delete calibration point from Fermentrack for a specific Tilt (for future use)
 bool ft2_delete_calibration_point(uint8_t color, double sensor_gravity) {
     char url[512] = "";
-    String payload;
-    String response;
+    char payload[512];
+    char response[256];
 
     // If we aren't registered, we can't delete points
     if(!ft2_is_registered())
@@ -752,7 +749,7 @@ bool ft2_delete_calibration_point(uint8_t color, double sensor_gravity) {
         Log.error("Invalid Tilt color: %d\r\n", color);
         return false;
     }
-    
+
     if(!ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::calibrationPoint))
         return false;
 
@@ -763,14 +760,14 @@ bool ft2_delete_calibration_point(uint8_t color, double sensor_gravity) {
     doc[Fermentrack2SettingsKeys::apiKey] = config.fermentrackAPIKey;
     doc[Fermentrack2SettingsKeys::deviceID] = config.fermentrackDeviceID;
     doc["color"] = tilt_color_names[color];
-    
+
     char sensor_str[16];
     snprintf(sensor_str, sizeof(sensor_str), "%.4f", sensor_gravity);
     doc["sensor_gravity"] = sensor_str;
 
-    serializeJson(doc, payload);
+    serializeJson(doc, payload, sizeof(payload));
 
-    sendResult result = send_json_str(payload, url, response, httpMethod::HTTP_DELETE);
+    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_DELETE);
 
     if(result != sendResult::success) {
         Log.error("Error deleting calibration point from Fermentrack 2\r\n");
@@ -784,8 +781,8 @@ bool ft2_delete_calibration_point(uint8_t color, double sensor_gravity) {
 // Replace all calibration points on Fermentrack for a specific Tilt color
 bool ft2_replace_all_calibration_points(uint8_t color) {
     char url[512] = "";
-    String payload;
-    String response;
+    char payload[2048];
+    char response[1024];
 
     // If we aren't registered, we can't replace points
     if(!ft2_is_registered())
@@ -796,11 +793,11 @@ bool ft2_replace_all_calibration_points(uint8_t color) {
         Log.error("Invalid Tilt color: %d\r\n", color);
         return false;
     }
-    
+
     if(!ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::calibrationPoints))
         return false;
 
-    Log.notice("Replacing all calibration points on Fermentrack 2 for %s Tilt at %s\r\n", 
+    Log.notice("Replacing all calibration points on Fermentrack 2 for %s Tilt at %s\r\n",
                tilt_color_names[color], url);
 
     // Load calibration points from local storage
@@ -814,36 +811,36 @@ bool ft2_replace_all_calibration_points(uint8_t color) {
     JsonDocument doc;
     doc[Fermentrack2SettingsKeys::apiKey] = config.fermentrackAPIKey;
     doc[Fermentrack2SettingsKeys::deviceID] = config.fermentrackDeviceID;
-    
+
     // Convert color index to lowercase color name for API
     doc["color"] = api_color_names[color];
-    
+
     // Convert local calibration points format to API format
     JsonArray points = doc["points"].to<JsonArray>();
     JsonArray localPoints = calDoc.as<JsonArray>();
-    
+
     for(JsonVariant localPoint : localPoints) {
         if(localPoint.is<JsonArray>()) {
             JsonArray pointArray = localPoint.as<JsonArray>();
             if(pointArray.size() >= 2 && pointArray[0].is<double>() && pointArray[1].is<double>()) {
                 JsonObject apiPoint = points.add<JsonObject>();
-                
+
                 // Format gravity values as strings with appropriate precision
                 char sensor_str[16], measured_str[16];
                 snprintf(sensor_str, sizeof(sensor_str), "%.4f", pointArray[0].as<double>());
                 snprintf(measured_str, sizeof(measured_str), "%.4f", pointArray[1].as<double>());
-                
+
                 apiPoint["sensor_gravity"] = sensor_str;
                 apiPoint["measured_gravity"] = measured_str;
             }
         }
     }
 
-    serializeJson(doc, payload);
-    
+    serializeJson(doc, payload, sizeof(payload));
+
     Log.verbose("Sending %d calibration points to Fermentrack 2\r\n", points.size());
 
-    sendResult result = send_json_str(payload, url, response, httpMethod::HTTP_PUT);
+    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PUT);
 
     if(result != sendResult::success) {
         Log.error("Error replacing calibration points on Fermentrack 2\r\n");
@@ -852,7 +849,7 @@ bool ft2_replace_all_calibration_points(uint8_t color) {
 
     JsonDocument responseDoc;
     deserializeJson(responseDoc, response);
-    Log.verbose("Fermentrack 2 calibration points replacement response: %s\r\n", response.c_str());
+    Log.verbose("Fermentrack 2 calibration points replacement response: %s\r\n", response);
 
     // Check if successful
     if(responseDoc["success"].is<bool>() && responseDoc["success"].as<bool>()) {
