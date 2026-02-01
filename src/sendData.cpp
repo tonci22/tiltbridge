@@ -9,7 +9,7 @@
 #include <HTTPClient.h>
 
 #include <ArduinoLog.h>
-#include <LCBUrl.h>
+#include "url_utils.h"
 
 #include "tilt/tiltScanner.h"
 #include "jsonconfig.h"
@@ -508,8 +508,6 @@ bool dataSendHandler::send_to_google()
 
 void dataSendHandler::init_mqtt()
 {
-    LCBUrl url;
-
     // Checking for the WiFi Status is done in the data sending loop, but we also need to be sure we are connected to WiFi when we initialize the MQTT client
     if (WiFi.status() == WL_CONNECTED) {
         if(mqtt_alreadyinit) {
@@ -519,9 +517,13 @@ void dataSendHandler::init_mqtt()
         }
 
         if (strcmp(config.mqttBrokerHost, "") != 0 || strlen(config.mqttBrokerHost) != 0) {
-            if (url.isMDNS(config.mqttBrokerHost)) {
+            IPAddress resolvedIP;
+            bool mdnsHost = isMDNS(config.mqttBrokerHost);
+
+            if (mdnsHost) {
+                resolveHost(config.mqttBrokerHost, resolvedIP);
                 Log.verbose(F("Initializing connection to MQTTBroker: %s (%s) on port: %d\r\n"),
-                    config.mqttBrokerHost, url.getIP(config.mqttBrokerHost).toString().c_str(), config.mqttBrokerPort);
+                    config.mqttBrokerHost, resolvedIP.toString().c_str(), config.mqttBrokerPort);
             } else {
                 Log.verbose(F("Initializing connection to MQTTBroker: %s on port: %d\r\n"),
                     config.mqttBrokerHost, config.mqttBrokerPort);
@@ -530,14 +532,14 @@ void dataSendHandler::init_mqtt()
             if (mqtt_alreadyinit) {
                 mqttClient.disconnect();
                 delay(250);
-                if (url.isMDNS(config.mqttBrokerHost)) {
-                    mqttClient.setHost(url.getIP(config.mqttBrokerHost), config.mqttBrokerPort);
+                if (mdnsHost) {
+                    mqttClient.setHost(resolvedIP, config.mqttBrokerPort);
                 } else {
                     mqttClient.setHost(config.mqttBrokerHost, config.mqttBrokerPort);
                 }
             } else {
-                if (url.isMDNS(config.mqttBrokerHost)) {
-                    mqttClient.begin(url.getIP(config.mqttBrokerHost), config.mqttBrokerPort, mqClient);
+                if (mdnsHost) {
+                    mqttClient.begin(resolvedIP, config.mqttBrokerPort, mqClient);
                 } else {
                     mqttClient.begin(config.mqttBrokerHost, config.mqttBrokerPort, mqClient);
                 }
@@ -565,21 +567,6 @@ void dataSendHandler::connect_mqtt()
     }
 }
 
-String lcburl_getAfterPath(LCBUrl url) // Get anything after the path
-{
-    String afterpath = "";
-
-    if (url.getQuery().length() > 0) {
-        afterpath = "?" + url.getQuery();
-    }
-
-    if (url.getFragment().length() > 0) {
-        afterpath = afterpath + "#" + url.getFragment();
-    }
-
-    return afterpath;
-}
-
 bool dataSendHandler::send_to_url(const char *url, const char *dataToSend, const char *contentType, bool checkBody, const char* bodyCheck)
 {
     // This handles the generic act of sending data to an endpoint
@@ -590,43 +577,41 @@ bool dataSendHandler::send_to_url(const char *url, const char *dataToSend, const
     if (strlen(dataToSend) > 5 && strlen(url) > 8)
     {
         bool validTarget = false;
-        {
-            // Placing LCBUrl in its own scoping block, as something about it is causing issues with stack memory
-            LCBUrl lcburl;
-            lcburl.setUrl(url);
+        ParsedUrl parsedUrl;
+        parseUrl(url, &parsedUrl);
 
-            // There is an issue where the built-in HTTP client for some reason won't resolve mDNS addresses. Instead, we'll
-            // resolve the address first, and then pass that to the client if needed. 
-            if (lcburl.isMDNS(lcburl.getHost().c_str()))
-            {
-                // Make sure we can resolve the address
-                if (lcburl.getIP(lcburl.getHost().c_str()) != INADDR_NONE)
-                    validTarget = true;
-            }
-            else if (lcburl.isValidIP(lcburl.getIP(lcburl.getHost().c_str()).toString().c_str()))
-                // We were passed an IP Address
+        // There is an issue where the built-in HTTP client for some reason won't resolve mDNS addresses. Instead, we'll
+        // resolve the address first, and then pass that to the client if needed.
+        IPAddress resolvedIP;
+        if (isMDNS(parsedUrl.host))
+        {
+            // Make sure we can resolve the address
+            if (resolveHost(parsedUrl.host, resolvedIP) && resolvedIP != INADDR_NONE)
                 validTarget = true;
-            else
-            {
-                // If it's not mDNS all we care about is that it's http
-                // if (lcburl.getScheme() == "http")
-                    validTarget = true;
-            }
-            if (validTarget) {
-                if (lcburl.isMDNS(lcburl.getHost().c_str()))
-                    // Use the IP address we resolved (necessary for mDNS)
-                    Log.verbose(F("Connecting to: %s at %s on port %l\r\n"),
-                                lcburl.getHost().c_str(),
-                                lcburl.getIP(lcburl.getHost().c_str() ).toString().c_str(),
-                                lcburl.getPort());
-                else
-                    Log.verbose(F("Connecting to: %s on port %l\r\n"),
-                                lcburl.getHost().c_str(),
-                                lcburl.getPort());
-            }
-            if (lcburl.getScheme() == "https")
-                https=true;
         }
+        else if (isValidIP(parsedUrl.host))
+            // We were passed an IP Address
+            validTarget = true;
+        else
+        {
+            // If it's not mDNS all we care about is that it's http
+            // if (strcmp(parsedUrl.scheme, "http") == 0)
+                validTarget = true;
+        }
+        if (validTarget) {
+            if (isMDNS(parsedUrl.host))
+                // Use the IP address we resolved (necessary for mDNS)
+                Log.verbose(F("Connecting to: %s at %s on port %l\r\n"),
+                            parsedUrl.host,
+                            resolvedIP.toString().c_str(),
+                            parsedUrl.port);
+            else
+                Log.verbose(F("Connecting to: %s on port %l\r\n"),
+                            parsedUrl.host,
+                            parsedUrl.port);
+        }
+        if (strcmp(parsedUrl.scheme, "https") == 0)
+            https=true;
 
         if (validTarget) {
             WiFiClientSecure *secureClient;

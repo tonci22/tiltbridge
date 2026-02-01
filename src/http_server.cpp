@@ -1,9 +1,9 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
+#include <WiFi.h>
 
-
-#include <LCBUrl.h>
+#include "url_utils.h"
 #include <ArduinoLog.h>
 #include <Ticker.h>
 
@@ -41,8 +41,7 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     // mDNS ID
     if(json["mdnsID"].is<const char*>()) {
         // Set hostname
-        LCBUrl url;
-        if (!url.isValidLabel(json["mdnsID"])) {
+        if (!isValidLabel(json["mdnsID"].as<const char*>())) {
             Log.warning(F("Settings update error, [mdnsID]:(%s) not valid.\r\n"), json["mdnsID"]);
             failCount++;
         } else {

@@ -1,6 +1,6 @@
 #include <ArduinoLog.h>
 #include <ESPmDNS.h>
-#include <LCBUrl.h>
+#include "url_utils.h"
 #include <WiFiManager.h>
 #include <esp_timer.h>
 
@@ -98,10 +98,9 @@ void initWiFi() {
 
     if (shouldSaveConfig) {
         // If we connected, then let's save the mDNS name
-        LCBUrl url;
         if (strcmp(custom_mdns_name.getValue(), config.mdnsID) != 0) {
             // If the mDNS name is valid, save it.
-            if (url.isValidHostName(custom_mdns_name.getValue())) {
+            if (isValidHostName(custom_mdns_name.getValue())) {
                 strlcpy(config.mdnsID, custom_mdns_name.getValue(), 31);
                 config.save();
             } else {
