@@ -17,7 +17,7 @@
 #include <ArduinoJson.h>
 #include <ctime>
 #include "Ticker.h"
-#include <ArduinoLog.h>
+#include <thorlog.h>
 
 #include "sendData.h"
 #include "version.h"
@@ -52,10 +52,10 @@ bool ft2_replace_all_calibration_points(uint8_t color);
 
 bool ft2_get_url(char *url, size_t size, const char *path) {
     if(strlen(config.fermentrackHostname) <= 3) {
-        Log.error(F("ft2_get_url: No fermentrack host configured, should skip send.\r\n"));
+        Log.error("ft2_get_url: No fermentrack host configured, should skip send.\r\n");
         return false;
     } else if(config.fermentrackPort <= 0 || config.fermentrackPort > 65535) {
-        Log.error(F("ft2_get_url: No upstream port configured, should skip send.\r\n"));
+        Log.error("ft2_get_url: No upstream port configured, should skip send.\r\n");
         return false;
     }
 

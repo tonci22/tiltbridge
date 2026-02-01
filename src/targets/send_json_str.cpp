@@ -1,5 +1,5 @@
 
-#include <ArduinoLog.h>
+#include <thorlog.h>
 
 #include "send_json_str.h"
 #include "version.h"
@@ -46,7 +46,7 @@ sendResult send_json_str(String &payload, const char *url, String &response, htt
 
 
     if (WiFi.status() != WL_CONNECTED) {
-        Log.warning(F("send_json_str: Wifi not connected, skipping send.\r\n"));
+        Log.warning("send_json_str: Wifi not connected, skipping send.\r\n");
         // send_lock = false;
         return sendResult::retry;
     }
@@ -57,9 +57,9 @@ sendResult send_json_str(String &payload, const char *url, String &response, htt
    
     // Log the request appropriately based on whether we have a payload
     if (payload.length() > 0) {
-        Log.info(F("send_json_str: Sending %s with payload to %s\r\n"), httpMethodToString(method), url);
+        Log.info("send_json_str: Sending %s with payload to %s\r\n", httpMethodToString(method), url);
     } else {
-        Log.info(F("send_json_str: Sending %s to %s\r\n"), httpMethodToString(method), url);
+        Log.info("send_json_str: Sending %s to %s\r\n", httpMethodToString(method), url);
     }
 
     yield();  // Yield before we lock up the radio
@@ -99,12 +99,12 @@ sendResult send_json_str(String &payload, const char *url, String &response, htt
                         response.c_str());
                     result = sendResult::failure;
                 } else {
-                    Log.verbose(F("send_json_str: Response:\r\n%s\r\n"), response.c_str());
+                    Log.verbose("send_json_str: Response:\r\n%s\r\n", response.c_str());
                     result = sendResult::success;
                 }
                 http.end();
             } else {
-                Log.error(F("send_json_str: Unable to create connection\r\n"));
+                Log.error("send_json_str: Unable to create connection\r\n");
                 result = sendResult::failure;
             }
         }

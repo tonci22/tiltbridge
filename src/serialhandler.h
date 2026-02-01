@@ -3,10 +3,6 @@
 
 void serial();
 void toggleSerialCompat(bool);
-void printPrefix(Print* _logOutput, int logLevel);
-void printTimestamp(Print *_logOutput);
-void serialLoop();
-void debug();
 
 // Print outputs
 size_t printChar(bool, const char *);

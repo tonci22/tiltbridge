@@ -1,18 +1,34 @@
-#include <ArduinoLog.h>
+#include <thorlog.h>
+#include <Arduino.h>
 
 #include "serialhandler.h"
 
-void serial()
-{
-    Serial.begin(BAUD);
-    Serial.setDebugOutput(true);
-    Serial.println();
-    Serial.flush();
-    Log.begin(ARDUINO_LOG_LEVEL, &Serial, true);
-    Log.setPrefix(printPrefix);
-    Log.notice(F("Serial logging started at %l.\r\n"), BAUD);
 
-    debug();
+// Wrapper class to adapt Arduino's Serial to ThorPrint
+class SerialPrintAdapter : public ThorPrint {
+public:
+    size_t print(char c) override { return Serial.print(c); }
+    size_t print(const char* str) override { return Serial.print(str); }
+    size_t print(int num, int base = 10) override { return Serial.print(num, base); }
+    size_t print(unsigned int num, int base = 10) override { return Serial.print(num, base); }
+    size_t print(long num, int base = 10) override { return Serial.print(num, base); }
+    size_t print(unsigned long num, int base = 10) override { return Serial.print(num, base); }
+    size_t print(double num) override { return Serial.print(num); }
+};
+
+// Global adapter instance
+SerialPrintAdapter serialAdapter;
+
+void printTimestamp(ThorPrint *_logOutput)
+{
+    char c[12];
+    sprintf(c, "%10lu ", millis());
+    _logOutput->print(c);
+    Serial.flush();
+}
+
+void printPrefix(ThorPrint* _logOutput, int logLevel) {
+    printTimestamp(_logOutput);
 }
 
 void debug() {
@@ -47,17 +63,17 @@ void debug() {
 #endif
 }
 
-void printPrefix(Print* _logOutput, int logLevel) {
-    printTimestamp(_logOutput);
-//    printLogLevel (_logOutput, logLevel);
-}
-
-void printTimestamp(Print *_logOutput)
+void serial()
 {
-    char c[12];
-    sprintf(c, "%10lu ", millis());
-    _logOutput->print(c);
+    Serial.begin(BAUD);
+    Serial.setDebugOutput(true);
+    Serial.println();
     Serial.flush();
+    Log.begin(ARDUINO_LOG_LEVEL, &serialAdapter, true);  // Use adapter
+    Log.setPrefix(printPrefix);
+    Log.notice("Serial logging started at %l.\r\n", BAUD);
+
+    debug();
 }
 
 size_t printDot()
