@@ -1,8 +1,9 @@
 #ifndef _SERIALLOG_H
 #define _SERIALLOG_H
 
+#include <cstddef>
+
 void serial();
-void toggleSerialCompat(bool);
 
 // Print outputs
 size_t printChar(bool, const char *);
@@ -14,11 +15,6 @@ size_t printCR(bool);
 void flush();
 void flush(bool);
 
-void nullDoc(const char *);
-
 #define prefLen 22
-
-// extern struct ThatVersion thatVersion;
-// extern const size_t capacitySerial;
 
 #endif //_SERIALLOG_H

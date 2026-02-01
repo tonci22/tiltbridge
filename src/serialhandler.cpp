@@ -1,30 +1,30 @@
+#include <cstdio>
+#include <esp_timer.h>
+#include <esp_log.h>
 #include <thorlog.h>
-#include <Arduino.h>
+#include <thorlog_espidf.h>
+
+// TODO(ESP-IDF): Remove this include when migrating to pure ESP-IDF
+#include <HardwareSerial.h>
+// TODO(ESP-IDF): Add these includes instead:
+// #include <driver/uart.h>
 
 #include "serialhandler.h"
 
+// Use the ESP-IDF print adapter from thorlog library
+static EspIdfPrint espIdfAdapter;
 
-// Wrapper class to adapt Arduino's Serial to ThorPrint
-class SerialPrintAdapter : public ThorPrint {
-public:
-    size_t print(char c) override { return Serial.print(c); }
-    size_t print(const char* str) override { return Serial.print(str); }
-    size_t print(int num, int base = 10) override { return Serial.print(num, base); }
-    size_t print(unsigned int num, int base = 10) override { return Serial.print(num, base); }
-    size_t print(long num, int base = 10) override { return Serial.print(num, base); }
-    size_t print(unsigned long num, int base = 10) override { return Serial.print(num, base); }
-    size_t print(double num) override { return Serial.print(num); }
-};
-
-// Global adapter instance
-SerialPrintAdapter serialAdapter;
+// Get milliseconds since boot using ESP-IDF timer
+static uint32_t millis_espidf() {
+    return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
+}
 
 void printTimestamp(ThorPrint *_logOutput)
 {
     char c[12];
-    sprintf(c, "%10lu ", millis());
+    sprintf(c, "%10lu ", (unsigned long)millis_espidf());
     _logOutput->print(c);
-    Serial.flush();
+    fflush(stdout);
 }
 
 void printPrefix(ThorPrint* _logOutput, int logLevel) {
@@ -57,7 +57,7 @@ void debug() {
     esp_log_level_set("NimBLEService", ESP_LOG_WARN);
     esp_log_level_set("NimBLEUtils", ESP_LOG_WARN);
     esp_log_level_set("NimBLEUUID", ESP_LOG_WARN);
-    
+
     esp_log_level_set("wifi", ESP_LOG_WARN);      // Enable WARN logs from WiFi stack
     esp_log_level_set("dhcpc", ESP_LOG_WARN);
 #endif
@@ -65,11 +65,28 @@ void debug() {
 
 void serial()
 {
+    // TODO(ESP-IDF): Replace Serial.begin/setDebugOutput with native UART init:
+    //
+    // const uart_config_t uart_config = {
+    //     .baud_rate = BAUD,
+    //     .data_bits = UART_DATA_8_BITS,
+    //     .parity = UART_PARITY_DISABLE,
+    //     .stop_bits = UART_STOP_BITS_1,
+    //     .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    //     .source_clk = UART_SCLK_DEFAULT,
+    // };
+    // uart_param_config(UART_NUM_0, &uart_config);
+    // uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+    //
+    // Note: ESP-IDF typically auto-configures UART0 for console output via
+    // menuconfig (CONFIG_ESP_CONSOLE_UART), so explicit init may not be needed.
+
     Serial.begin(BAUD);
     Serial.setDebugOutput(true);
-    Serial.println();
-    Serial.flush();
-    Log.begin(ARDUINO_LOG_LEVEL, &serialAdapter, true);  // Use adapter
+
+    printf("\n");
+    fflush(stdout);
+    Log.begin(ARDUINO_LOG_LEVEL, &espIdfAdapter, true);
     Log.setPrefix(printPrefix);
     Log.notice("Serial logging started at %l.\r\n", BAUD);
 
@@ -84,7 +101,8 @@ size_t printDot()
 size_t printDot(bool safe)
 {
 #ifdef ARDUINO_LOG_LEVEL
-    return Serial.print(F("."));
+    int result = printf(".");
+    return (result > 0) ? static_cast<size_t>(result) : 0;
 #else
     return 0;
 #endif
@@ -98,7 +116,8 @@ size_t printChar(const char *chr)
 size_t printChar(bool safe, const char *chr)
 {
 #ifdef ARDUINO_LOG_LEVEL
-    return Serial.println(chr);
+    int result = printf("%s\n", chr);
+    return (result > 0) ? static_cast<size_t>(result) : 0;
 #else
     return 0;
 #endif
@@ -112,7 +131,8 @@ size_t printCR()
 size_t printCR(bool safe)
 {
 #ifdef ARDUINO_LOG_LEVEL
-    return Serial.println();
+    int result = printf("\n");
+    return (result > 0) ? static_cast<size_t>(result) : 0;
 #else
     return 0;
 #endif
@@ -125,5 +145,7 @@ void flush()
 
 void flush(bool safe)
 {
-    Serial.flush();
+    // TODO(ESP-IDF): Can optionally use uart_wait_tx_done(UART_NUM_0, portMAX_DELAY)
+    // for guaranteed flush, but fflush(stdout) should work in most cases.
+    fflush(stdout);
 }
