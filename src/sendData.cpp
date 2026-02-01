@@ -3,8 +3,8 @@
 #include <Ticker.h>
 
 #include <WiFi.h>
-#include <MQTT.h>
 #include <WiFiClient.h>
+#include "mqtt_client.h"
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
@@ -21,8 +21,6 @@
 
 
 dataSendHandler data_sender; // Global data sender
-
-MQTTClient mqttClient(512);
 
 dataSendHandler::dataSendHandler() {}
 
@@ -506,64 +504,127 @@ bool dataSendHandler::send_to_google()
     return result;
 }
 
+void dataSendHandler::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    dataSendHandler *self = static_cast<dataSendHandler*>(handler_args);
+    esp_mqtt_event_handle_t event = static_cast<esp_mqtt_event_handle_t>(event_data);
+
+    switch (static_cast<esp_mqtt_event_id_t>(event_id)) {
+        case MQTT_EVENT_CONNECTED:
+            Log.notice(F("MQTT connected to broker.\r\n"));
+            self->mqtt_connected = true;
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            Log.warning(F("MQTT disconnected from broker.\r\n"));
+            self->mqtt_connected = false;
+            break;
+        case MQTT_EVENT_ERROR:
+            Log.error(F("MQTT error occurred.\r\n"));
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                Log.error(F("MQTT transport error: %d\r\n"), event->error_handle->esp_transport_sock_errno);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 void dataSendHandler::init_mqtt()
 {
     // Checking for the WiFi Status is done in the data sending loop, but we also need to be sure we are connected to WiFi when we initialize the MQTT client
-    if (WiFi.status() == WL_CONNECTED) {
-        if(mqtt_alreadyinit) {
-            Log.verbose(F("MQTT already initialized. Disconnecting.\r\n"));
-            mqttClient.disconnect();
-            delay(250);
-        }
-
-        if (strcmp(config.mqttBrokerHost, "") != 0 || strlen(config.mqttBrokerHost) != 0) {
-            IPAddress resolvedIP;
-            bool mdnsHost = isMDNS(config.mqttBrokerHost);
-
-            if (mdnsHost) {
-                resolveHost(config.mqttBrokerHost, resolvedIP);
-                Log.verbose(F("Initializing connection to MQTTBroker: %s (%s) on port: %d\r\n"),
-                    config.mqttBrokerHost, resolvedIP.toString().c_str(), config.mqttBrokerPort);
-            } else {
-                Log.verbose(F("Initializing connection to MQTTBroker: %s on port: %d\r\n"),
-                    config.mqttBrokerHost, config.mqttBrokerPort);
-            }
-
-            if (mqtt_alreadyinit) {
-                mqttClient.disconnect();
-                delay(250);
-                if (mdnsHost) {
-                    mqttClient.setHost(resolvedIP, config.mqttBrokerPort);
-                } else {
-                    mqttClient.setHost(config.mqttBrokerHost, config.mqttBrokerPort);
-                }
-            } else {
-                if (mdnsHost) {
-                    mqttClient.begin(resolvedIP, config.mqttBrokerPort, mqClient);
-                } else {
-                    mqttClient.begin(config.mqttBrokerHost, config.mqttBrokerPort, mqClient);
-                }
-            }
-            mqtt_alreadyinit = true;
-            mqttClient.setKeepAlive(config.mqttPushEvery);
-        }
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
     }
+
+    // If already initialized, stop and destroy the existing client
+    if (mqtt_alreadyinit && mqtt_client != nullptr) {
+        Log.verbose(F("MQTT already initialized. Stopping client.\r\n"));
+        esp_mqtt_client_stop(mqtt_client);
+        esp_mqtt_client_destroy(mqtt_client);
+        mqtt_client = nullptr;
+        mqtt_connected = false;
+        delay(250);
+    }
+
+    // Check if broker is configured
+    if (strcmp(config.mqttBrokerHost, "") == 0 && strlen(config.mqttBrokerHost) == 0) {
+        return;
+    }
+
+    // Resolve mDNS hostname if needed
+    char broker_host[256];
+    IPAddress resolvedIP;
+    bool mdnsHost = isMDNS(config.mqttBrokerHost);
+
+    if (mdnsHost) {
+        resolveHost(config.mqttBrokerHost, resolvedIP);
+        // Convert IPAddress to string for esp-mqtt
+        snprintf(broker_host, sizeof(broker_host), "%d.%d.%d.%d",
+                 resolvedIP[0], resolvedIP[1], resolvedIP[2], resolvedIP[3]);
+        Log.verbose(F("Initializing connection to MQTTBroker: %s (%s) on port: %d\r\n"),
+            config.mqttBrokerHost, broker_host, config.mqttBrokerPort);
+    } else {
+        strncpy(broker_host, config.mqttBrokerHost, sizeof(broker_host) - 1);
+        broker_host[sizeof(broker_host) - 1] = '\0';
+        Log.verbose(F("Initializing connection to MQTTBroker: %s on port: %d\r\n"),
+            config.mqttBrokerHost, config.mqttBrokerPort);
+    }
+
+    // Build the esp-mqtt configuration
+    esp_mqtt_client_config_t mqtt_cfg = {};
+    mqtt_cfg.broker.address.hostname = broker_host;
+    mqtt_cfg.broker.address.port = config.mqttBrokerPort;
+    mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+    mqtt_cfg.credentials.client_id = config.mdnsID;
+    mqtt_cfg.session.keepalive = config.mqttPushEvery;
+    mqtt_cfg.buffer.size = 512;
+    mqtt_cfg.buffer.out_size = 512;
+
+    // Set username/password if configured
+    if (strlen(config.mqttUsername) > 1) {
+        mqtt_cfg.credentials.username = config.mqttUsername;
+        mqtt_cfg.credentials.authentication.password = config.mqttPassword;
+    }
+
+    // Create the MQTT client
+    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    if (mqtt_client == nullptr) {
+        Log.error(F("Failed to initialize MQTT client.\r\n"));
+        return;
+    }
+
+    // Register event handler
+    esp_mqtt_client_register_event(mqtt_client, MQTT_EVENT_ANY, mqtt_event_handler, this);
+
+    // Start the client
+    esp_err_t err = esp_mqtt_client_start(mqtt_client);
+    if (err != ESP_OK) {
+        Log.error(F("Failed to start MQTT client: %d\r\n"), err);
+        esp_mqtt_client_destroy(mqtt_client);
+        mqtt_client = nullptr;
+        return;
+    }
+
+    mqtt_alreadyinit = true;
+    Log.verbose(F("MQTT client started.\r\n"));
 }
 
 void dataSendHandler::connect_mqtt()
 {
-    // Checking for the WiFi Status is done in the data sending loop, but we also need to be sure we are connected to WiFi when we connect to the MQTT broker
-    if (WiFi.status() == WL_CONNECTED) {
-        if(!mqtt_alreadyinit) {
-            // Since init is not called synchronously with the settings update when the user sets the MQTT broker, we need to
-            // wait until the MQTT client is initialized if it hasn't been done already.
-            return;
-        }
-        if (strlen(config.mqttUsername) > 1) {
-            mqttClient.connect(config.mdnsID, config.mqttUsername, config.mqttPassword);
-        } else {
-            mqttClient.connect(config.mdnsID);
-        }
+    // esp-mqtt handles auto-reconnection internally, so this function primarily
+    // ensures the client is initialized and can force a reconnection if needed
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+
+    if (!mqtt_alreadyinit || mqtt_client == nullptr) {
+        // Client not initialized yet, init_mqtt will handle connection
+        return;
+    }
+
+    // Force a reconnection attempt if disconnected
+    if (!mqtt_connected) {
+        esp_mqtt_client_reconnect(mqtt_client);
     }
 }
 
@@ -694,11 +755,11 @@ bool dataSendHandler::send_to_mqtt() {
         return false;
     }
 
-    if (!mqttClient.connected()) {
-        Log.warning(F("MQTT disconnected. Attempting to reconnect to MQTT Broker in loop\r\n"));
+    // esp-mqtt handles connection and reconnection internally via events
+    // We just check the connection status and optionally trigger a reconnect
+    if (!mqtt_connected && mqtt_client != nullptr) {
+        Log.warning(F("MQTT disconnected. Triggering reconnect attempt.\r\n"));
         connect_mqtt();
-    } else {
-        mqttClient.loop();
     }
 
     if (send_mqtt && !send_lock) {
@@ -885,14 +946,22 @@ bool dataSendHandler::publish_to_mqtt(const char* topic, JsonDocument& payload, 
     char payload_string[512];
     serializeJson(payload, payload_string);
 
-    if (!mqttClient.connected()) {
+    if (!mqtt_connected || mqtt_client == nullptr) {
         Log.warning(F("MQTT disconnected. Attempting to reconnect to MQTT Broker\r\n"));
         connect_mqtt();
+        // If still not connected, we can't publish
+        if (!mqtt_connected) {
+            Log.error(F("Failed to publish to MQTT - not connected\r\n"));
+            return false;
+        }
     }
 
-    bool result = mqttClient.publish(topic, payload_string, retain, 0);
-    if(result) {
-        Log.verbose(F("Published to MQTT\r\n"));
+    // esp_mqtt_client_publish returns message_id on success (>=0), -1 on failure
+    // Parameters: client, topic, data, len (0 = use strlen), qos (0), retain (0 or 1)
+    int msg_id = esp_mqtt_client_publish(mqtt_client, topic, payload_string, 0, 0, retain ? 1 : 0);
+    bool result = (msg_id >= 0);
+    if (result) {
+        Log.verbose(F("Published to MQTT (msg_id=%d)\r\n"), msg_id);
     } else {
         Log.error(F("Failed to publish to MQTT\r\n"));
     }
