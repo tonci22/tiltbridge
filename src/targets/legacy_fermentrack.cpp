@@ -3,6 +3,7 @@
 #include "jsonconfig.h"
 #include "sendData.h"
 #include "tilt/tiltScanner.h"
+#include "targets/send_json_str.h"
 
 
 bool dataSendHandler::send_to_legacy_fermentrack()
@@ -34,7 +35,7 @@ bool dataSendHandler::send_to_legacy_fermentrack()
 
             serializeJson(doc, tilt_data);
 
-            if (send_to_url(config.legacyFermentrackURL, tilt_data, content_json))
+            if (http_request(config.legacyFermentrackURL, httpMethod::HTTP_POST, tilt_data) == sendResult::success)
             {
                 Log.notice("Completed send to Legacy Fermentrack.\r\n");
             }

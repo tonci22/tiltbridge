@@ -1,11 +1,20 @@
+#ifndef SEND_JSON_STR_H
+#define SEND_JSON_STR_H
+
 #include <stddef.h>
 
 #include "esp_http_client.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 
-// TODO(idf_lib_swap): Replace ArduinoJson with cJSON (ESP-IDF native) or keep as header-only
 #include <ArduinoJson.hpp>
+
+// =============================================================================
+// Content type constants (shared across HTTP sending functions)
+// =============================================================================
+constexpr auto content_json = "application/json";
+constexpr auto content_x_www_form_urlencoded = "application/x-www-form-urlencoded";
+constexpr auto content_text_plain = "text/plain; charset=utf-8";
 
 // =============================================================================
 // ESP-IDF INITIALIZATION REQUIREMENTS
@@ -63,5 +72,53 @@ enum class httpMethod {
 };
 
 
-sendResult send_json_str(const char *payload, const char *url, httpMethod method);
-sendResult send_json_str(const char *payload, const char *url, char *response, size_t response_size, httpMethod method);
+// =============================================================================
+// HTTP Request Options
+// =============================================================================
+// Options struct for the unified http_request function. Provides extensibility
+// while maintaining reasonable defaults for common use cases.
+struct HttpRequestOptions {
+    const char* contentType = content_json;   // Content-Type header
+    bool skipCertValidation = true;           // Skip HTTPS cert validation (like Arduino setInsecure())
+    const char* bodyCheck = nullptr;          // String to verify in response body (nullptr = no check)
+    int timeoutMs = 6000;                     // Request timeout in milliseconds
+    const char* authHeader = nullptr;         // Authorization header value (e.g., "Token xxx")
+    const char* acceptHeader = content_json;  // Accept header value
+};
+
+// =============================================================================
+// Unified HTTP Request Function (Primary API)
+// =============================================================================
+/**
+ * @brief Send an HTTP request with full options support
+ *
+ * This is the primary unified HTTP sending function that supports:
+ * - All HTTP methods (GET, POST, PUT, PATCH, DELETE)
+ * - Custom content types
+ * - mDNS hostname resolution
+ * - HTTPS with optional certificate validation bypass
+ * - Response body retrieval
+ * - Response body verification
+ * - Custom authorization headers
+ *
+ * @param url The URL to send the request to (supports http://, https://, and .local mDNS)
+ * @param method The HTTP method to use
+ * @param payload The request body (can be nullptr for GET/DELETE)
+ * @param response Buffer to store response body (can be nullptr if not needed)
+ * @param response_size Size of the response buffer
+ * @param options Request options (content type, cert validation, etc.)
+ * @return sendResult::success on success, sendResult::failure on error, sendResult::retry if WiFi disconnected
+ */
+sendResult http_request(
+    const char* url,
+    httpMethod method,
+    const char* payload,
+    char* response,
+    size_t response_size,
+    const HttpRequestOptions& options = HttpRequestOptions{}
+);
+
+// Convenience overload for simple requests without response buffer
+sendResult http_request(const char* url, httpMethod method, const char* payload);
+
+#endif // SEND_JSON_STR_H

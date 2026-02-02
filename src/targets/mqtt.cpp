@@ -59,14 +59,13 @@ void dataSendHandler::init_mqtt()
 
     // Resolve mDNS hostname if needed
     char broker_host[256];
-    IPAddress resolvedIP;
     bool mdnsHost = isMDNS(config.mqttBrokerHost);
 
     if (mdnsHost) {
-        resolveHost(config.mqttBrokerHost, resolvedIP);
-        // Convert IPAddress to string for esp-mqtt
-        snprintf(broker_host, sizeof(broker_host), "%d.%d.%d.%d",
-                 resolvedIP[0], resolvedIP[1], resolvedIP[2], resolvedIP[3]);
+        if (!resolveHostToString(config.mqttBrokerHost, broker_host, sizeof(broker_host))) {
+            Log.error("Failed to resolve mDNS host: %s\r\n", config.mqttBrokerHost);
+            return;
+        }
         Log.verbose("Initializing connection to MQTTBroker: %s (%s) on port: %d\r\n",
             config.mqttBrokerHost, broker_host, config.mqttBrokerPort);
     } else {

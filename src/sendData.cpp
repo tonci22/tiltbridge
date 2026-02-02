@@ -2,14 +2,25 @@
 #include <ArduinoJson.h>
 #include <Ticker.h>
 
+// =============================================================================
+// TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
+// =============================================================================
+// WiFi.h is still needed for WiFi.status() check and some Arduino compatibility.
+// WiFiClient.h, WiFiClientSecure.h, and HTTPClient.h are being phased out in
+// favor of the unified http_request() function in send_json_str.h.
+// When fully converted, remove these includes.
 #include <WiFi.h>
 #include <WiFiClient.h>
-#include "mqtt_client.h"
+#include "mqtt_client.h"  // May need to keep this one even when dropping Arduino compatibility
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+// =============================================================================
 
 #include <thorlog.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "url_utils.h"
+#include "targets/send_json_str.h"
 
 #include "tilt/tiltScanner.h"
 #include "jsonconfig.h"
@@ -195,7 +206,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         char payload_string[BF_SIZE];
         serializeJson(j, payload_string);
 
-        if (!send_to_url(url, payload_string, content_json))
+        if (http_request(url, httpMethod::HTTP_POST, payload_string) != sendResult::success)
             result = false; // There was an error with the previous send
     }
     return result;
@@ -233,7 +244,7 @@ bool dataSendHandler::send_to_grainfather()
             char payload_string[GF_SIZE];
             serializeJson(j, payload_string);
 
-            if (!send_to_url(config.grainfatherURL[th.m_color].link, payload_string, content_json))
+            if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string) != sendResult::success)
                 result = false; // There was an error with the previous send
         }
         grainfatherTicker.once(GRAINFATHER_DELAY, [](){data_sender.send_grainfather = true;}); // Set up subsequent send to Grainfather
@@ -288,7 +299,7 @@ bool dataSendHandler::send_to_taplistio()
 
         Log.verbose("taplist.io: Sending %s Tilt to %s\r\n", tilt_color_names[th.m_color], config.taplistioURL);
 
-        result = send_to_url(config.taplistioURL, payload_string, content_json);
+        result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string) == sendResult::success);
     }
 
     taplistioTicker.once(config.taplistioPushEvery, [](){data_sender.send_taplistio = true;});
@@ -330,7 +341,9 @@ bool dataSendHandler::send_to_brewstatus()
                 snprintf(payload, payload_size, "SG=%s&Temp=%s&Color=%s&Timepoint=%.11f&Beer=Undefined&Comment=",
                         gravity, temp, tilt_color_names[th.m_color], ((double)std::time(0) + (config.TZoffset * 3600.0)) / 86400.0 + 25569.0);
                 
-                if (send_to_url(config.brewstatusURL, payload, content_x_www_form_urlencoded)) {
+                HttpRequestOptions options;
+                options.contentType = content_x_www_form_urlencoded;
+                if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0, options) == sendResult::success) {
                     Log.notice("Completed send to Brew Status.\r\n");
                 } else {
                     result = false;
@@ -354,20 +367,14 @@ bool dataSendHandler::send_to_google()
         send_gSheets = false;
         send_lock = true;
 
-        //tilt_scanner.deinit();
         JsonDocument payload;
         char payload_string[GSHEETS_JSON];
         JsonDocument retval;
-        int httpResponseCode;
         int numSent = 0;
-#if (ARDUINO_LOG_LEVEL == 6)
-        char buff[1024] = "";
-#endif
 
         // The google sheets handler only fires if we have both a Google Scripts URL to post to, and an email address.
         if (strlen(config.scriptsURL) >= GSCRIPTS_MIN_URL_LENGTH && strlen(config.scriptsEmail) >= GSCRIPTS_MIN_EMAIL_LENGTH) {
             Log.verbose("Checking for any pending Google Sheets pushes.\r\n");
-//            Log.verbose("Executing on core %i.\r\n", xPortGetCoreID());
             printMem();
 
             tilt_scanner.drop_expired_tilts();
@@ -394,57 +401,39 @@ bool dataSendHandler::send_to_google()
                     serializeJson(payload, payload_string);
                     payload.clear();
 
-                    HTTPClient http;
-                    WiFiClientSecure secureClient;
+                    Log.verbose("Sending the following payload to Google Sheets (%s):\r\n\t\t%s\r\n",
+                               tilt_color_names[th.m_color], payload_string);
 
-                    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);  // Follow the 301
-                    http.setConnectTimeout(6000);                           // Set 6 second timeout
-                    http.setTimeout(10000);                                 // Set 10 second timeout
-                    http.setReuse(false);
-                    secureClient.setInsecure();                             // Ignore SHA fingerprint
+                    // Use unified http_request with response buffer to get doclongurl
+                    char response[1024];
+                    HttpRequestOptions options;
+                    options.contentType = content_json;
+                    options.skipCertValidation = true;
+                    options.timeoutMs = 10000;  // 10 second timeout - Google Scripts can be slow
 
-                    if (!http.begin(secureClient, config.scriptsURL)) {      // Connect secure
-                        Log.error("Unable to create secure connection to %s.\r\n", config.scriptsURL);
-                        result = false;
+                    sendResult sendRes = http_request(config.scriptsURL, httpMethod::HTTP_POST,
+                                                      payload_string, response, sizeof(response), options);
+
+                    if (sendRes == sendResult::success) {
+                        // POST success - parse response for doclongurl
+                        Log.verbose("HTTP Response: 200\r\nFull Response:\r\n\t%s\r\n", response);
+                        deserializeJson(retval, response);
+
+                        if(strcmp(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>()) != 0) {
+                            Log.verbose("Storing new doclongurl: %s.\r\n", retval["doclongurl"].as<const char *>());
+                            strlcpy(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>(), 255);
+                            config.save();
+                        }
+                        retval.clear();
+                        numSent++;
                     } else {
-                        // Failed to open a connection
-                        Log.verbose("Created secure connection to %s.\r\n", config.scriptsURL);
-                        Log.verbose("Sending the following payload to Google Sheets (%s):\r\n\t\t%s\r\n", tilt_color_names[th.m_color], payload_string);
+                        // Post generated an error
+                        Log.error("Google send to %s Tilt failed. Response:\r\n%s\r\n",
+                            tilt_color_names[th.m_color], response);
+                        result = false;
+                    }
 
-                        http.addHeader("Content-Type", content_json);   // Specify content-type header
-                        httpResponseCode = http.POST(payload_string);               // Send the payload
-
-                        if (httpResponseCode == HTTP_CODE_OK) {  // HTTP_CODE_OK = 200
-                            // POST success
-#if (ARDUINO_LOG_LEVEL == 6)
-                            // We need to use a buffer in order to be able to use the response twice
-                            strlcpy(buff, http.getString().c_str(), 1024);
-                            Log.verbose("HTTP Response: 200\r\nFull Response:\r\n\t%s\r\n", buff);
-                            deserializeJson(retval, buff);
-//                                deserializeJson(retval, http.getString().c_str());
-#else
-                            deserializeJson(retval, http.getString().c_str());
-#endif
-
-                            if(strcmp(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>()) != 0) {
-                                Log.verbose("Storing new doclongurl: %s.\r\n", retval["doclongurl"].as<const char *>());
-                                strlcpy(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>(), 255);
-                                config.save();
-                            }
-                            retval.clear();
-                            numSent++;
-                        } else {
-                            // Post generated an error (response code != 200)
-                            Log.error("Google send to %s Tilt failed (%d): %s. Response:\r\n%s\r\n",
-                                tilt_color_names[th.m_color],
-                                httpResponseCode,
-                                http.errorToString(httpResponseCode).c_str(),
-                                http.getString().c_str());
-                            result = false;
-                        } // Response code != 200
-                    } // Good connection
-                    http.end();
-                    delay(100);  // Give garbage collection time to run
+                    vTaskDelay(pdMS_TO_TICKS(100));  // Give some time between requests
                 } // Check we have a sheet name for the color
             }
 
@@ -453,129 +442,9 @@ bool dataSendHandler::send_to_google()
         }
         gSheetsTicker.once(GSCRIPTS_DELAY, [](){data_sender.send_gSheets = true;}); // Set up subsequent send to Google Sheets
 
-        //tilt_scanner.init();
         send_lock = false;
     }
     return result;
-}
-
-
-bool dataSendHandler::send_to_url(const char *url, const char *dataToSend, const char *contentType, bool checkBody, const char* bodyCheck)
-{
-    // This handles the generic act of sending data to an endpoint
-    bool retVal = false;
-    bool result = false;
-    bool https = false;
-
-    if (strlen(dataToSend) > 5 && strlen(url) > 8)
-    {
-        bool validTarget = false;
-        ParsedUrl parsedUrl;
-        parseUrl(url, &parsedUrl);
-
-        // There is an issue where the built-in HTTP client for some reason won't resolve mDNS addresses. Instead, we'll
-        // resolve the address first, and then pass that to the client if needed.
-        IPAddress resolvedIP;
-        if (isMDNS(parsedUrl.host))
-        {
-            // Make sure we can resolve the address
-            if (resolveHost(parsedUrl.host, resolvedIP) && resolvedIP != INADDR_NONE)
-                validTarget = true;
-        }
-        else if (isValidIP(parsedUrl.host))
-            // We were passed an IP Address
-            validTarget = true;
-        else
-        {
-            // If it's not mDNS all we care about is that it's http
-            // if (strcmp(parsedUrl.scheme, "http") == 0)
-                validTarget = true;
-        }
-        if (validTarget) {
-            if (isMDNS(parsedUrl.host))
-                // Use the IP address we resolved (necessary for mDNS)
-                Log.verbose("Connecting to: %s at %s on port %l\r\n",
-                            parsedUrl.host,
-                            resolvedIP.toString().c_str(),
-                            parsedUrl.port);
-            else
-                Log.verbose("Connecting to: %s on port %l\r\n",
-                            parsedUrl.host,
-                            parsedUrl.port);
-        }
-        if (strcmp(parsedUrl.scheme, "https") == 0)
-            https=true;
-
-        if (validTarget) {
-            WiFiClientSecure *secureClient;
-            secureClient = new WiFiClientSecure();
-            {
-                // Add a scoping block for HTTPClient https to make sure it is destroyed before WiFiClientSecure *client is 
-                HTTPClient *http;
-                http = new HTTPClient();
-                secureClient->setInsecure(); // Don't perform certificate validation. This opens up MITM attacks, but I don't have memory otherwise.
-
-                // Determine if the URL is HTTP or HTTPS and initialize HTTPClient
-                if (https) {
-                    http->begin(*secureClient, url); // HTTPS
-                } else {
-                    http->begin(url); // HTTP
-                }
-
-                // Set headers
-                http->addHeader("Content-Type", contentType);
-                http->addHeader("Accept", content_json);
-
-                char userAgent[128];
-                snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", version(), branch(), build());
-                http->setUserAgent(userAgent);
-
-                yield();  // Yield before we lock up the radio
-
-                // Send the request
-                Log.verbose("Sent data: %s\r\n", dataToSend);
-                int httpResponseCode;
-                // httpResponseCode = http->sendRequest("POST", dataToSend);
-                httpResponseCode = http->POST(dataToSend);
-
-                // Optionally check the response
-                if (httpResponseCode > 0) {
-                    // HTTP header has been sent and Server response header has been handled
-                    Log.verbose("HTTP Response code: %d\r\n", httpResponseCode);
-
-                    if (checkBody) {
-                        String response = http->getString();
-                        if (response.indexOf(bodyCheck) >= 0) {
-                            result = true;
-                        } else {
-                            Log.error("Body check failed. Body: %s\r\n", response.c_str());
-                        }
-                    } else {
-                        result = (httpResponseCode == HTTP_CODE_OK);
-                    }
-                } else {
-                    Log.error("Error on sending POST: %s\r\n", http->errorToString(httpResponseCode).c_str());
-                    Log.error("Connection failed\r\n");
-                }
-
-                // Close connection
-                http->end();
-                delay(100);  // Give garbage collection time to run
-                delete http;
-            }
-            secureClient->stop();
-            delete secureClient;
-
-            return result;
-
-        } else {
-            Log.error("Invalid target: %s.\r\n", url);
-        }
-    } else {
-        Log.notice("No URL provided, or no data to send.\r\n");
-    }
-    // If we reached here, the send was unsuccessful
-    return false;
 }
 
 
@@ -588,96 +457,72 @@ bool dataSendHandler::send_to_influxdb()
         send_influxdb = false;
         send_lock = true;
 
-        if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && 
-            strlen(config.influxdbToken) > 0 && 
-            strlen(config.influxdbOrg) > 0 && 
-            strlen(config.influxdbBucket) > 0) {
-            
+        if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && strlen(config.influxdbToken) > 0 && strlen(config.influxdbOrg) > 0 && strlen(config.influxdbBucket) > 0) 
+        {
+
             Log.verbose("Calling send to InfluxDB.\r\n");
-            
+
             // Build the write API URL
             char writeURL[512];
-            snprintf(writeURL, sizeof(writeURL), "%s/api/v2/write?org=%s&bucket=%s&precision=s", 
+            snprintf(writeURL, sizeof(writeURL), "%s/api/v2/write?org=%s&bucket=%s&precision=s",
                      config.influxdbURL, config.influxdbOrg, config.influxdbBucket);
 
             // Build line protocol data
-            String lineData = "";
-            uint64_t timestamp = std::time(nullptr);
-            
+            char lineData[2048];
+            size_t lineDataLen = 0;
+            lineData[0] = '\0';
+
             tilt_scanner.drop_expired_tilts();
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 char gravity[10];
                 char temp[6];
                 char battery_str[4];
-                
+
                 th.cal_smooth_gravity_str(gravity, sizeof(gravity));
                 th.converted_temp(temp, sizeof(temp), false); // Use configured unit
                 th.get_weeks_battery(battery_str, sizeof(battery_str));
-                
+
                 // InfluxDB line protocol: measurement,tag1=value1 field1=value1,field2=value2 timestamp
                 char line[256];
-                snprintf(line, sizeof(line), 
+                int lineLen = snprintf(line, sizeof(line),
                         "tilt,color=%s,device_source=TiltBridge "
                         "gravity=%s,temperature=%s,temp_units=\"%s\",weeks_on_battery=%s\n",
                         tilt_color_names[th.m_color],
                         gravity, temp, config.tempUnit, battery_str);
-                
-                lineData += line;
+
+                // Append to lineData if there's room
+                if (lineDataLen + lineLen < sizeof(lineData) - 1) {
+                    strlcat(lineData, line, sizeof(lineData));
+                    lineDataLen += lineLen;
+                }
             }
 
-            if (lineData.length() > 0) {
-                // Send data using HTTP POST with line protocol
-                HTTPClient http;
-                WiFiClientSecure secureClient;
+            if (lineDataLen > 0) {
+                // Build authorization header
+                char authHeader[256];
+                snprintf(authHeader, sizeof(authHeader), "Token %s", config.influxdbToken);
 
-                // Determine if URL is HTTPS
-                bool useHTTPS = strncmp(config.influxdbURL, "https://", 8) == 0;
-                
-                if (useHTTPS) {
-                    secureClient.setInsecure(); // Don't verify certificates
-                    http.begin(secureClient, writeURL);
-                } else {
-                    http.begin(writeURL);
-                }
-
-                // Set headers for InfluxDB v2 API
-                http.addHeader("Authorization", String("Token ") + config.influxdbToken);
-                http.addHeader("Content-Type", "text/plain; charset=utf-8");
-                http.addHeader("Accept", "application/json");
-
-                char userAgent[128];
-                snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", 
-                         version(), branch(), build());
-                http.setUserAgent(userAgent);
+                // Configure request options
+                HttpRequestOptions options;
+                options.contentType = content_text_plain;
+                options.skipCertValidation = true;
+                options.authHeader = authHeader;
+                options.timeoutMs = 6000;
 
                 // Send the data
-                int httpResponseCode = http.POST(lineData);
+                sendResult sendRes = http_request(writeURL, httpMethod::HTTP_POST, lineData, nullptr, 0, options);
 
-                if (httpResponseCode > 0) {
-                    Log.verbose("InfluxDB HTTP Response code: %d\r\n", httpResponseCode);
-                    
-                    if (httpResponseCode >= 200 && httpResponseCode < 300) {
-                        Log.notice("Completed send to InfluxDB.\r\n");
-                    } else {
-                        Log.error("InfluxDB returned error code %d: %s\r\n", 
-                                 httpResponseCode, http.getString().c_str());
-                        result = false;
-                    }
+                if (sendRes == sendResult::success) {
+                    Log.notice("Completed send to InfluxDB.\r\n");
                 } else {
-                    Log.error("Error sending to InfluxDB: %s\r\n", 
-                             http.errorToString(httpResponseCode).c_str());
+                    Log.error("Error sending to InfluxDB\r\n");
                     result = false;
-                }
-
-                http.end();
-                if (useHTTPS) {
-                    secureClient.stop();
                 }
             } else {
                 Log.verbose("No Tilt data to send to InfluxDB.\r\n");
             }
         }
-        
+
         influxdbTicker.once(config.influxdbPushEvery, [](){data_sender.send_influxdb = true;}); // Set up subsequent send to InfluxDB
         send_lock = false;
     }

@@ -1,11 +1,19 @@
 #ifndef TILTBRIDGE_SENDDATA_H
 #define TILTBRIDGE_SENDDATA_H
 
+// =============================================================================
+// TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
+// =============================================================================
+// WiFiClient.h is still needed for some legacy code. When fully converted to
+// ESP-IDF, remove this include.
 #include <WiFiClient.h>
+// =============================================================================
+
 #include <Ticker.h>
 #include <ArduinoJson.h>
 #include "mqtt_client.h"
 #include "tilt/tiltHydrometer.h"
+#include "targets/send_json_str.h"
 
 #define GSCRIPTS_DELAY (10 * 60)       // 10 minute delay between pushes to Google Sheets directly
 #define BREWERS_FRIEND_DELAY (15 * 60) // 15 minute delay between pushes to Brewer's Friend
@@ -83,8 +91,6 @@ public:
 private:
     bool send_lock = false;
 
-    bool send_to_url(const char *url, const char *dataToSend, const char *contentType, bool checkBody = false, const char *bodyCheck = "");
-
     // MQTT Stuff
     esp_mqtt_client_handle_t mqtt_client = nullptr;
     bool mqtt_alreadyinit = false;
@@ -107,7 +113,10 @@ private:
 
 extern dataSendHandler data_sender;
 
-constexpr auto content_json = "application/json";
-constexpr auto content_x_www_form_urlencoded = "application/x-www-form-urlencoded";
+// Content type constants are now defined in targets/send_json_str.h
+// The following are kept for reference but are now provided by send_json_str.h:
+// - content_json = "application/json"
+// - content_x_www_form_urlencoded = "application/x-www-form-urlencoded"
+// - content_text_plain = "text/plain; charset=utf-8"
 
 #endif //TILTBRIDGE_SENDDATA_H

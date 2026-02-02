@@ -191,7 +191,7 @@ bool register_with_fermentrack_2() {
         serializeJson(doc, payload, sizeof(payload));
     }
 
-    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PUT);
+    sendResult result = http_request(url, httpMethod::HTTP_PUT, payload, response, sizeof(response));
 
     if(result != sendResult::success) {
         fermentrackRegistrationError = fermentrackRegErrorT::REGISTRATION_ENDPOINT_ERR;
@@ -273,7 +273,7 @@ bool send_status_to_fermentrack_2() {
 
     Log.info("Sending payload to Fermentrack 2: %s\r\n", payload);
 
-    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PUT);
+    sendResult result = http_request(url, httpMethod::HTTP_PUT, payload, response, sizeof(response));
 
     // If we failed to send the data, set an error code
     if(result != sendResult::success) {
@@ -336,7 +336,7 @@ bool process_messages_on_fermentrack_2() {
     Log.notice("Retrieving messages from Fermentrack 2 at %s\r\n", url);
 
     // Use HTTP GET to retrieve messages
-    sendResult result = send_json_str("", url, response, sizeof(response), httpMethod::HTTP_GET);
+    sendResult result = http_request(url, httpMethod::HTTP_GET, "", response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error retrieving messages from Fermentrack 2\r\n");
@@ -404,7 +404,7 @@ bool process_messages_on_fermentrack_2() {
                 // Get the base URL for the messages endpoint
                 if(ft2_get_url(url, sizeof(url), FermentrackAPIEndpoints::messages)) {
                     char patch_response[256];
-                    sendResult patch_result = send_json_str(patch_payload, url, patch_response, sizeof(patch_response), httpMethod::HTTP_PATCH);
+                    sendResult patch_result = http_request(url, httpMethod::HTTP_PATCH, patch_payload, patch_response, sizeof(patch_response));
 
                     if(patch_result == sendResult::success) {
                         Log.verbose("Successfully cleared message flags on Fermentrack 2\r\n");
@@ -516,7 +516,7 @@ bool ft2_get_calibration_coefficients(uint8_t color) {
     Log.notice("Retrieving calibration coefficients from Fermentrack 2 at %s\r\n", url);
 
     // Use HTTP GET to retrieve coefficients
-    sendResult result = send_json_str("", url, response, sizeof(response), httpMethod::HTTP_GET);
+    sendResult result = http_request(url, httpMethod::HTTP_GET, "", response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error retrieving calibration coefficients from Fermentrack 2\r\n");
@@ -594,7 +594,7 @@ bool ft2_set_calibration_coefficients(uint8_t color, double x0, double x1, doubl
 
     serializeJson(doc, payload, sizeof(payload));
 
-    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PATCH);
+    sendResult result = http_request(url, httpMethod::HTTP_PATCH, payload, response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error setting calibration coefficients on Fermentrack 2\r\n");
@@ -634,7 +634,7 @@ bool ft2_get_calibration_points(uint8_t color) {
     Log.notice("Retrieving calibration points from Fermentrack 2 at %s\r\n", url);
 
     // Use HTTP GET to retrieve points
-    sendResult result = send_json_str("", url, response, sizeof(response), httpMethod::HTTP_GET);
+    sendResult result = http_request(url, httpMethod::HTTP_GET, "", response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error retrieving calibration points from Fermentrack 2\r\n");
@@ -738,7 +738,7 @@ bool ft2_add_calibration_point(uint8_t color, double sensor_gravity, double meas
 
     serializeJson(doc, payload, sizeof(payload));
 
-    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_POST);
+    sendResult result = http_request(url, httpMethod::HTTP_POST, payload, response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error adding calibration point to Fermentrack 2\r\n");
@@ -782,7 +782,7 @@ bool ft2_delete_calibration_point(uint8_t color, double sensor_gravity) {
 
     serializeJson(doc, payload, sizeof(payload));
 
-    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_DELETE);
+    sendResult result = http_request(url, httpMethod::HTTP_DELETE, payload, response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error deleting calibration point from Fermentrack 2\r\n");
@@ -855,7 +855,7 @@ bool ft2_replace_all_calibration_points(uint8_t color) {
 
     Log.verbose("Sending %d calibration points to Fermentrack 2\r\n", points.size());
 
-    sendResult result = send_json_str(payload, url, response, sizeof(response), httpMethod::HTTP_PUT);
+    sendResult result = http_request(url, httpMethod::HTTP_PUT, payload, response, sizeof(response));
 
     if(result != sendResult::success) {
         Log.error("Error replacing calibration points on Fermentrack 2\r\n");
