@@ -4,6 +4,8 @@
 
 #include <thorlog.h>
 #include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
 
 #include "filesystem.h"
 
@@ -21,10 +23,27 @@
 
 
 #if (ARDUINO_LOG_LEVEL >= ARDUINO_LOG_LOG_LEVEL_INFO) && !defined(DISABLE_LOGGING)
-Ticker memCheck;
+TimerHandle_t memCheckTimer = nullptr;
 #endif
 
-Ticker reboot24;
+TimerHandle_t reboot24Timer = nullptr;
+
+// Timer callback for memory debug printing
+#if (ARDUINO_LOG_LEVEL >= ARDUINO_LOG_LOG_LEVEL_INFO) && !defined(DISABLE_LOGGING)
+static void memCheckTimerCallback(TimerHandle_t xTimer) {
+    const uint32_t free = ESP.getFreeHeap();
+    const uint32_t max = ESP.getMaxAllocHeap();
+    const uint8_t frag = 100 - (max * 100) / free;
+    Log.info("Free Heap: %d, Largest contiguous block: %d, Frag: %d%%\r\n", free, max, frag);
+}
+#endif
+
+// Timer callback for 24-hour reboot
+static void reboot24TimerCallback(TimerHandle_t xTimer) {
+    Log.notice("Rebooting on 24-hour timer." CR);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
 
 void printMem() {
     const uint32_t free = ESP.getFreeHeap();
@@ -65,14 +84,21 @@ void setup() {
     http_server.init();     // Initialize the web server
     initButtons();          // Initialize buttons
 
-    // Start independent timers
+    // Start independent timers using FreeRTOS software timers
     // ARDUINO_LOG_LOG_LEVEL_INFO is 4
 #if (ARDUINO_LOG_LEVEL >= ARDUINO_LOG_LOG_LEVEL_INFO) && !defined(DISABLE_LOGGING)
-    memCheck.attach(30, printMem);              // Memory debug print on timer
+    // Create periodic timer for memory debug printing (30 seconds)
+    memCheckTimer = xTimerCreate("MemCheck", pdMS_TO_TICKS(30000), pdTRUE, nullptr, memCheckTimerCallback);
+    if (memCheckTimer != nullptr) {
+        xTimerStart(memCheckTimer, 0);
+    }
 #endif
 
-    // Set a reboot timer for 24 hours
-    // reboot24.once(86400, reboot);
+    // Set a reboot timer for 24 hours (currently disabled)
+    // reboot24Timer = xTimerCreate("Reboot24", pdMS_TO_TICKS(86400000), pdFALSE, nullptr, reboot24TimerCallback);
+    // if (reboot24Timer != nullptr) {
+    //     xTimerStart(reboot24Timer, 0);
+    // }
 
 }
 

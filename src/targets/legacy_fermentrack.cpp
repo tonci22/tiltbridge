@@ -45,7 +45,7 @@ bool dataSendHandler::send_to_legacy_fermentrack()
                 Log.verbose("Error sending to Legacy Fermentrack.\r\n");
             }
         }
-        legacyFermentrackTicker.once(config.legacyFermentrackPushEvery, [](){data_sender.send_legacy_fermentrack = true;}); // Set up subsequent send to Fermentrack
+        data_sender.startTimer(data_sender.legacyFermentrackTimer, config.legacyFermentrackPushEvery); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();
         send_lock = false;
     }

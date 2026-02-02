@@ -1,6 +1,5 @@
 #include <ctime>
 #include <ArduinoJson.h>
-#include <Ticker.h>
 
 // =============================================================================
 // TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
@@ -35,22 +34,96 @@ dataSendHandler data_sender; // Global data sender
 
 dataSendHandler::dataSendHandler() {}
 
+// Timer callback functions for FreeRTOS software timers
+// These are static/free functions that set the semaphore flags
+static void legacyFermentrackTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_legacy_fermentrack = true;
+}
+
+static void fermentrackTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_fermentrack = true;
+}
+
+static void mqttTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_mqtt = true;
+}
+
+static void brewStatusTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_brewStatus = true;
+}
+
+static void brewfatherTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_brewfather = true;
+}
+
+static void brewersFriendTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_brewersFriend = true;
+}
+
+static void userTargetTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_userTarget = true;
+}
+
+static void gSheetsTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_gSheets = true;
+}
+
+static void grainfatherTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_grainfather = true;
+}
+
+static void taplistioTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_taplistio = true;
+}
+
+static void influxdbTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_influxdb = true;
+}
+
+void dataSendHandler::createTimers() {
+    // Create all send timers as one-shot timers (pdFALSE)
+    // Initial period is 1 tick - we'll change it when we start the timer
+    legacyFermentrackTimer = xTimerCreate("LegacyFT", pdMS_TO_TICKS(1000), pdFALSE, nullptr, legacyFermentrackTimerCallback);
+    fermentrackTimer = xTimerCreate("Fermentrack", pdMS_TO_TICKS(1000), pdFALSE, nullptr, fermentrackTimerCallback);
+    mqttTimer = xTimerCreate("MQTT", pdMS_TO_TICKS(1000), pdFALSE, nullptr, mqttTimerCallback);
+    brewStatusTimer = xTimerCreate("BrewStatus", pdMS_TO_TICKS(1000), pdFALSE, nullptr, brewStatusTimerCallback);
+    brewfatherTimer = xTimerCreate("Brewfather", pdMS_TO_TICKS(1000), pdFALSE, nullptr, brewfatherTimerCallback);
+    brewersFriendTimer = xTimerCreate("BrewersFriend", pdMS_TO_TICKS(1000), pdFALSE, nullptr, brewersFriendTimerCallback);
+    userTargetTimer = xTimerCreate("UserTarget", pdMS_TO_TICKS(1000), pdFALSE, nullptr, userTargetTimerCallback);
+    gSheetsTimer = xTimerCreate("GSheets", pdMS_TO_TICKS(1000), pdFALSE, nullptr, gSheetsTimerCallback);
+    grainfatherTimer = xTimerCreate("Grainfather", pdMS_TO_TICKS(1000), pdFALSE, nullptr, grainfatherTimerCallback);
+    taplistioTimer = xTimerCreate("Taplistio", pdMS_TO_TICKS(1000), pdFALSE, nullptr, taplistioTimerCallback);
+    influxdbTimer = xTimerCreate("InfluxDB", pdMS_TO_TICKS(1000), pdFALSE, nullptr, influxdbTimerCallback);
+}
+
+void dataSendHandler::startTimer(TimerHandle_t timer, uint32_t periodSeconds) {
+    if (timer != nullptr) {
+        // Stop the timer first (without triggering callback) to ensure clean restart
+        xTimerStop(timer, 0);
+        // Change period and start - xTimerChangePeriod implicitly starts the timer
+        xTimerChangePeriod(timer, pdMS_TO_TICKS(periodSeconds * 1000), 0);
+    }
+}
+
 void dataSendHandler::init()
 {
     init_mqtt();
 
-    // Set up timers
-    legacyFermentrackTicker.once(12, [](){data_sender.send_legacy_fermentrack = true;});      // Schedule first send to Legacy Fermentrack
-    fermentrackTicker.once(10, [](){data_sender.send_fermentrack = true;});      // Schedule first send to Fermentrack
-    mqttTicker.once(20, [](){data_sender.send_mqtt = true;});                    // Schedule first send to MQTT
-    brewStatusTicker.once(30, [](){data_sender.send_brewStatus = true;});        // Schedule first send to Brew Status
-    brewfatherTicker.once(40, [](){data_sender.send_brewfather = true;});        // Schedule first send to Brewfather
-    brewersFriendTicker.once(50, [](){data_sender.send_brewersFriend = true;});  // Schedule first send to Brewer's Friend
-    userTargetTicker.once(60, [](){data_sender.send_userTarget = true;});        // Schedule first send to User-defined JSON target
-    gSheetsTicker.once(70, [](){data_sender.send_gSheets = true;});              // Schedule first send to Google Sheets
-    grainfatherTicker.once(80, [](){data_sender.send_grainfather = true;});      // Schedule first send to Grainfather
-    taplistioTicker.once(90, [](){data_sender.send_taplistio = true;});          // Schedule first send to Taplist.io
-    influxdbTicker.once(100, [](){data_sender.send_influxdb = true;});           // Schedule first send to InfluxDB
+    // Create all FreeRTOS timers
+    createTimers();
+
+    // Schedule first sends with staggered delays to avoid overwhelming the system
+    startTimer(legacyFermentrackTimer, 12);      // Schedule first send to Legacy Fermentrack
+    startTimer(fermentrackTimer, 10);            // Schedule first send to Fermentrack
+    startTimer(mqttTimer, 20);                   // Schedule first send to MQTT
+    startTimer(brewStatusTimer, 30);             // Schedule first send to Brew Status
+    startTimer(brewfatherTimer, 40);             // Schedule first send to Brewfather
+    startTimer(brewersFriendTimer, 50);          // Schedule first send to Brewer's Friend
+    startTimer(userTargetTimer, 60);             // Schedule first send to User-defined JSON target
+    startTimer(gSheetsTimer, 70);                // Schedule first send to Google Sheets
+    startTimer(grainfatherTimer, 80);            // Schedule first send to Grainfather
+    startTimer(taplistioTimer, 90);              // Schedule first send to Taplist.io
+    startTimer(influxdbTimer, 100);              // Schedule first send to InfluxDB
 }
 
 void dataSendHandler::process()
@@ -89,7 +162,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to Brewer's Friend.\r\n");
             }
         }
-        brewersFriendTicker.once(BREWERS_FRIEND_DELAY, [](){data_sender.send_brewersFriend = true;}); // Set up subsequent send to Brewer's Friend
+        startTimer(brewersFriendTimer, BREWERS_FRIEND_DELAY); // Set up subsequent send to Brewer's Friend
         send_lock = false;
     }
 
@@ -110,7 +183,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to Brewfather.\r\n");
             }
         }
-        brewfatherTicker.once(BREWFATHER_DELAY, [](){data_sender.send_brewfather = true;}); // Set up subsequent send to Brewfather
+        startTimer(brewfatherTimer, BREWFATHER_DELAY); // Set up subsequent send to Brewfather
         send_lock = false;
     }
 
@@ -133,7 +206,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to User Target.\r\n");
             }
         }
-        userTargetTicker.once(USER_TARGET_DELAY, [](){data_sender.send_userTarget = true;}); // Set up subsequent send to User Target
+        startTimer(userTargetTimer, USER_TARGET_DELAY); // Set up subsequent send to User Target
         send_lock = false;
     }
     return retval;
@@ -247,7 +320,7 @@ bool dataSendHandler::send_to_grainfather()
             if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string) != sendResult::success)
                 result = false; // There was an error with the previous send
         }
-        grainfatherTicker.once(GRAINFATHER_DELAY, [](){data_sender.send_grainfather = true;}); // Set up subsequent send to Grainfather
+        startTimer(grainfatherTimer, GRAINFATHER_DELAY); // Set up subsequent send to Grainfather
         send_lock = false;
     }
     return result;
@@ -271,8 +344,10 @@ bool dataSendHandler::send_to_taplistio()
     }
 
 
-    // Since we're only using .once timers, we can just detach/recreate every time and be fine
-    taplistioTicker.detach();
+    // Since we're using one-shot timers, stop the timer before restarting with new period
+    if (taplistioTimer != nullptr) {
+        xTimerStop(taplistioTimer, 0);
+    }
 
     // Attempt to send.
     send_taplistio = false;
@@ -302,7 +377,7 @@ bool dataSendHandler::send_to_taplistio()
         result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string) == sendResult::success);
     }
 
-    taplistioTicker.once(config.taplistioPushEvery, [](){data_sender.send_taplistio = true;});
+    startTimer(taplistioTimer, config.taplistioPushEvery);
     send_lock = false;
     return result;
 }
@@ -351,7 +426,7 @@ bool dataSendHandler::send_to_brewstatus()
                 }
             }
         }
-        brewStatusTicker.once(config.brewstatusPushEvery, [](){data_sender.send_brewStatus = true;}); // Set up subsequent send to Brew Status
+        startTimer(brewStatusTimer, config.brewstatusPushEvery); // Set up subsequent send to Brew Status
         send_lock = false;
     }
     return result;
@@ -440,7 +515,7 @@ bool dataSendHandler::send_to_google()
             Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
 
         }
-        gSheetsTicker.once(GSCRIPTS_DELAY, [](){data_sender.send_gSheets = true;}); // Set up subsequent send to Google Sheets
+        startTimer(gSheetsTimer, GSCRIPTS_DELAY); // Set up subsequent send to Google Sheets
 
         send_lock = false;
     }
@@ -523,7 +598,7 @@ bool dataSendHandler::send_to_influxdb()
             }
         }
 
-        influxdbTicker.once(config.influxdbPushEvery, [](){data_sender.send_influxdb = true;}); // Set up subsequent send to InfluxDB
+        startTimer(influxdbTimer, config.influxdbPushEvery); // Set up subsequent send to InfluxDB
         send_lock = false;
     }
     return result;

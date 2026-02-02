@@ -168,7 +168,7 @@ bool dataSendHandler::send_to_mqtt() {
             prepare_general_payload(&th, tilt_topic);
         }
 
-        mqttTicker.once(config.mqttPushEvery, [](){ data_sender.send_mqtt = true; });
+        data_sender.startTimer(data_sender.mqttTimer, config.mqttPushEvery);
         send_lock = false;
     }
 

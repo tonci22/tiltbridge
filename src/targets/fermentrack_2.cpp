@@ -126,8 +126,7 @@ bool dataSendHandler::send_to_fermentrack()
 
 
         // Set up for the next send
-        // TODO(idf_lib_swap): Replace Ticker with esp_timer when sendData.h is converted
-        fermentrackTicker.once(FERMENTRACK_DELAY, [](){data_sender.send_fermentrack = true;}); // Set up subsequent send to Fermentrack
+        data_sender.startTimer(data_sender.fermentrackTimer, FERMENTRACK_DELAY); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();
         send_lock = false;
     }

@@ -9,7 +9,8 @@
 #include <WiFiClient.h>
 // =============================================================================
 
-#include <Ticker.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
 #include <ArduinoJson.h>
 #include "mqtt_client.h"
 #include "tilt/tiltHydrometer.h"
@@ -62,18 +63,22 @@ public:
     bool send_to_influxdb();
 
 
-    // Send Timers
-    Ticker legacyFermentrackTicker;
-    Ticker fermentrackTicker;
-    Ticker brewersFriendTicker;
-    Ticker brewfatherTicker;
-    Ticker userTargetTicker;
-    Ticker grainfatherTicker;
-    Ticker brewStatusTicker;
-    Ticker taplistioTicker;
-    Ticker gSheetsTicker;
-    Ticker mqttTicker;
-    Ticker influxdbTicker;
+    // Send Timers (FreeRTOS software timers)
+    TimerHandle_t legacyFermentrackTimer;
+    TimerHandle_t fermentrackTimer;
+    TimerHandle_t brewersFriendTimer;
+    TimerHandle_t brewfatherTimer;
+    TimerHandle_t userTargetTimer;
+    TimerHandle_t grainfatherTimer;
+    TimerHandle_t brewStatusTimer;
+    TimerHandle_t taplistioTimer;
+    TimerHandle_t gSheetsTimer;
+    TimerHandle_t mqttTimer;
+    TimerHandle_t influxdbTimer;
+
+    // Timer management methods
+    void createTimers();
+    void startTimer(TimerHandle_t timer, uint32_t periodSeconds);
 
     // Send Semaphores
     bool send_legacy_fermentrack = false;
@@ -112,11 +117,5 @@ private:
 
 
 extern dataSendHandler data_sender;
-
-// Content type constants are now defined in targets/send_json_str.h
-// The following are kept for reference but are now provided by send_json_str.h:
-// - content_json = "application/json"
-// - content_x_www_form_urlencoded = "application/x-www-form-urlencoded"
-// - content_text_plain = "text/plain; charset=utf-8"
 
 #endif //TILTBRIDGE_SENDDATA_H
