@@ -1,23 +1,35 @@
-/* 
+/*
  * Fermentrack 2 Support
- * 
+ *
  * TiltBridges register themselves with Fermentrack 2, initiated by the user entering the Fermentrack 2
  * information (host, port, and username) in the web interface. The TiltBridge will then send a registration
- * request to Fermentrack 2, which will respond with a Device ID and API key. The TiltBridge does not store the 
- * username, but will store the Device ID and API key. From then forward, the Device ID and API key are used to 
+ * request to Fermentrack 2, which will respond with a Device ID and API key. The TiltBridge does not store the
+ * username, but will store the Device ID and API key. From then forward, the Device ID and API key are used to
  * identify the TiltBridge to Fermentrack 2.
- * 
+ *
  * For now, TiltBridge configuration options cannot be set from within Fermentrack 2, but at some point in the
  * future I may add bidirectional syncing of things like gravity/temperature calibration settings.
- * 
+ *
  */
 
-
-#include <Arduino.h>
-#include <ArduinoJson.h>
 #include <ctime>
-#include "Ticker.h"
+#include <cstdio>
+
 #include <thorlog.h>
+
+// =============================================================================
+// TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
+// =============================================================================
+// This include prevents lwip/Arduino IPAddress.h header conflicts.
+// When fully converted to ESP-IDF, remove this include entirely.
+#include <WiFi.h>
+// =============================================================================
+
+// TODO(idf_lib_swap): Replace ArduinoJson with cJSON (ESP-IDF native) or keep as header-only
+#include <ArduinoJson.h>
+
+#include "esp_timer.h"
+#include "esp_system.h"
 
 #include "sendData.h"
 #include "version.h"
@@ -115,6 +127,7 @@ bool dataSendHandler::send_to_fermentrack()
 
 
         // Set up for the next send
+        // TODO(idf_lib_swap): Replace Ticker with esp_timer when sendData.h is converted
         fermentrackTicker.once(FERMENTRACK_DELAY, [](){data_sender.send_fermentrack = true;}); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();
         send_lock = false;
@@ -467,9 +480,9 @@ void action_fermentrack_messages() {
     // Process the restart_device message last, as it will restart the device
     if(fermentrackMessageFlags.pendingRestartDevice) {
         Log.notice("Restarting device as requested by Fermentrack 2\r\n");
-        
-        // The ESP.restart() function is platform-specific
-        ESP.restart();
+
+        // ESP-IDF restart function
+        esp_restart();
         // Note: The pendingRestartDevice flag will be cleared when the device restarts
     }
 }
@@ -665,12 +678,15 @@ bool ft2_get_calibration_points(uint8_t color) {
                 }
             }
             
-            // Save to file
-            File file = FILESYSTEM.open(filename, "w");
+            // Save to file using POSIX API
+            FILE *file = fopen(filename, "w");
             if(file) {
-                serializeJson(calDoc, file);
-                file.close();
-                Log.notice("Updated %d calibration points for %s Tilt\r\n", 
+                // Serialize to a buffer first, then write
+                char jsonBuffer[2048];
+                size_t len = serializeJson(calDoc, jsonBuffer, sizeof(jsonBuffer));
+                fwrite(jsonBuffer, 1, len, file);
+                fclose(file);
+                Log.notice("Updated %d calibration points for %s Tilt\r\n",
                            points.size(), tilt_color_names[color]);
             } else {
                 Log.error("Failed to save calibration points file\r\n");

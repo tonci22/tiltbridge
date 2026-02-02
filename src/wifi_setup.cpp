@@ -3,6 +3,7 @@
 #include "url_utils.h"
 #include <WiFiManager.h>
 #include <esp_timer.h>
+#include "esp_system.h"
 
 #include "bridge_lcd.h"
 #include "jsonconfig.h"
@@ -32,7 +33,7 @@ void disconnectWiFi() {
     WiFi.disconnect(true, true);
     WiFi.begin("0","0");  // Fixes a bug where WiFi.disconnect() sometimes won't always clear the settings
     vTaskDelay(1000);  // Give everything a moment to settle before resetting
-    ESP.restart();
+    esp_restart();
 }
 
 void mdnsReset() {
@@ -41,7 +42,7 @@ void mdnsReset() {
     MDNS.end();
     if (!MDNS.begin(config.mdnsID)) {
         Log.error("Error resetting MDNS responder.");
-        ESP.restart();
+        esp_restart();
     } else {
         Log.notice("mDNS responder restarted, hostname: %s.local.\r\n", WiFi.getHostname());
         MDNS.addService("http", "tcp", WEB_SERVER_PORT);
@@ -89,7 +90,7 @@ void initWiFi() {
 
     if (!wm.autoConnect(WIFI_SETUP_AP_NAME, WIFI_SETUP_AP_PASS)) {
         Log.warning("Failed to connect and/or hit timeout. Restarting.\r\n");
-        ESP.restart();
+        esp_restart();
     } else {
         // We finished with portal (We were configured)
         WiFi.softAPdisconnect(true);
@@ -112,7 +113,7 @@ void initWiFi() {
         // Additionally, there is a bug where the HTTP server doesn't spin up after the AP shuts down. Not sure where
         // that issue is, but this solves it.
         delay(3000); // Add a small delay to ensure WiFi is settled
-        ESP.restart();
+        esp_restart();
     }
 
     if (!MDNS.begin(config.mdnsID)) {
@@ -171,7 +172,7 @@ void reconnectWiFi() {
                 lcd.display_wifi_reconnect_failed();
                 Log.error("Unable to reconnect WiFi, restarting.\r\n");
                 delay(1000);
-                ESP.restart();
+                esp_restart();
             }
         }
     }

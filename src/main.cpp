@@ -3,6 +3,7 @@
 // More details (including license details) can be found in the files accompanying this source code.
 
 #include <thorlog.h>
+#include "esp_system.h"
 
 #include "filesystem.h"
 
@@ -36,7 +37,7 @@ void reboot()
 {
     Log.notice("Rebooting on 24-hour timer." CR);
     delay(500);
-    ESP.restart();
+    esp_restart();
 }
 
 void setup() {
@@ -95,7 +96,7 @@ void loop() {
         http_server.restart_requested = false;
         tilt_scanner.wait_until_scan_complete(); // Wait for scans to complete
         delay(1000);
-        ESP.restart();                           // Restart the TiltBridge
+        esp_restart();                           // Restart the TiltBridge
     }
 
     if (doWiFiReset || http_server.wifi_reset_requested) {
