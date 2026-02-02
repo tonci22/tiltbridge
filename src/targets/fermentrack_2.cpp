@@ -25,7 +25,6 @@
 #include <WiFi.h>
 // =============================================================================
 
-// TODO(idf_lib_swap): Replace ArduinoJson with cJSON (ESP-IDF native) or keep as header-only
 #include <ArduinoJson.h>
 
 #include "esp_timer.h"
