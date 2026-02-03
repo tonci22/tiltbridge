@@ -1,11 +1,12 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/timers.h>
+
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
 
-
-#include <LCBUrl.h>
-#include <ArduinoLog.h>
-#include <Ticker.h>
+#include "url_utils.h"
+#include <thorlog.h>
 
 #include "filesystem.h"
 
@@ -26,8 +27,45 @@
 
 
 httpServer http_server;
-Ticker sendNowTicker;
 AsyncWebServer asyncWebServer(WEBPORT);
+
+// Timer handles for triggering immediate sends from HTTP configuration updates
+static TimerHandle_t sendNowLegacyFTTimer = nullptr;
+static TimerHandle_t sendNowFTTimer = nullptr;
+static TimerHandle_t sendNowGSheetsTimer = nullptr;
+static TimerHandle_t sendNowBrewersFriendTimer = nullptr;
+static TimerHandle_t sendNowBrewfatherTimer = nullptr;
+static TimerHandle_t sendNowUserTargetTimer = nullptr;
+static TimerHandle_t sendNowGrainfatherTimer = nullptr;
+static TimerHandle_t sendNowBrewStatusTimer = nullptr;
+static TimerHandle_t sendNowTaplistioTimer = nullptr;
+static TimerHandle_t sendNowMqttTimer = nullptr;
+static TimerHandle_t sendNowInfluxdbTimer = nullptr;
+
+// Timer callbacks for send-now triggers
+static void sendNowLegacyFTCallback(TimerHandle_t xTimer) { data_sender.send_legacy_fermentrack = true; }
+static void sendNowFTCallback(TimerHandle_t xTimer) { data_sender.send_fermentrack = true; }
+static void sendNowGSheetsCallback(TimerHandle_t xTimer) { data_sender.send_gSheets = true; }
+static void sendNowBrewersFriendCallback(TimerHandle_t xTimer) { data_sender.send_brewersFriend = true; }
+static void sendNowBrewfatherCallback(TimerHandle_t xTimer) { data_sender.send_brewfather = true; }
+static void sendNowUserTargetCallback(TimerHandle_t xTimer) { data_sender.send_userTarget = true; }
+static void sendNowGrainfatherCallback(TimerHandle_t xTimer) { data_sender.send_grainfather = true; }
+static void sendNowBrewStatusCallback(TimerHandle_t xTimer) { data_sender.send_brewStatus = true; }
+static void sendNowTaplistioCallback(TimerHandle_t xTimer) { data_sender.send_taplistio = true; }
+static void sendNowMqttCallback(TimerHandle_t xTimer) { data_sender.send_mqtt = true; }
+static void sendNowInfluxdbCallback(TimerHandle_t xTimer) { data_sender.send_influxdb = true; }
+
+// Helper to start a send-now timer (creates if needed, then starts)
+static void startSendNowTimer(TimerHandle_t& timer, const char* name, TimerCallbackFunction_t callback, uint32_t delaySecs) {
+    if (timer == nullptr) {
+        timer = xTimerCreate(name, pdMS_TO_TICKS(delaySecs * 1000), pdFALSE, nullptr, callback);
+    } else {
+        xTimerChangePeriod(timer, pdMS_TO_TICKS(delaySecs * 1000), 0);
+    }
+    if (timer != nullptr) {
+        xTimerStart(timer, 0);
+    }
+}
 
 
 
@@ -41,17 +79,16 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     // mDNS ID
     if(json["mdnsID"].is<const char*>()) {
         // Set hostname
-        LCBUrl url;
-        if (!url.isValidLabel(json["mdnsID"])) {
-            Log.warning(F("Settings update error, [mdnsID]:(%s) not valid.\r\n"), json["mdnsID"]);
+        if (!isValidLabel(json["mdnsID"].as<const char*>())) {
+            Log.warning("Settings update error, [mdnsID]:(%s) not valid.\r\n", json["mdnsID"]);
             failCount++;
         } else {
             if (strcmp(config.mdnsID, json["mdnsID"].as<const char*>()) != 0) {
                 hostnamechanged = true;
                 strlcpy(config.mdnsID, json["mdnsID"].as<const char*>(), 32);
-                Log.notice(F("Settings update, [mdnsID]:(%s) applied.\r\n"), json["mdnsID"].as<const char*>());
+                Log.notice("Settings update, [mdnsID]:(%s) applied.\r\n", json["mdnsID"].as<const char*>());
             } else {
-                Log.notice(F("Settings update, [mdnsID]:(%s) NOT applied - no change.\r\n"), json["mdnsID"].as<const char*>());
+                Log.notice("Settings update, [mdnsID]:(%s) NOT applied - no change.\r\n", json["mdnsID"].as<const char*>());
             }
         }
     }
@@ -60,14 +97,14 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     if(json["tzOffset"].is<int8_t>()) {
         if(json["tzOffset"].as<int8_t>() < -12 || json["tzOffset"].as<int8_t>() > 14) {
             // Out of range
-            Log.warning(F("Settings update error, [tzOffset]:(%d) not valid.\r\n"), json["tzOffset"].as<int8_t>());
+            Log.warning("Settings update error, [tzOffset]:(%d) not valid.\r\n", json["tzOffset"].as<int8_t>());
         } else {
             // In range
             config.TZoffset = json["tzOffset"];
-            Log.notice(F("Settings update, [tzOffset]:(%d) applied.\r\n"), json["tzOffset"].as<int8_t>());
+            Log.notice("Settings update, [tzOffset]:(%d) applied.\r\n", json["tzOffset"].as<int8_t>());
         }
     } else {
-        // Log.warning(F("Settings update error, [tzOffset]:(%s) (as str) not valid.\r\n"), json["tzOffset"].as<const char*>());
+        // Log.warning("Settings update error, [tzOffset]:(%s) (as str) not valid.\r\n", json["tzOffset"].as<const char*>());
         // failCount++;
     }
 
@@ -76,14 +113,14 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     if(json["tempUnit"].is<const char*>()) {
         if(strcmp(json["tempUnit"].as<const char*>(), "C") != 0 &&  strcmp(json["tempUnit"].as<const char*>(), "F") != 0) {
             // Not C/F
-            Log.warning(F("Settings update error, [tempUnit]:(%s) not valid.\r\n"), json["tempUnit"].as<const char*>());
+            Log.warning("Settings update error, [tempUnit]:(%s) not valid.\r\n", json["tempUnit"].as<const char*>());
         } else {
             // Is C/F
             strlcpy(config.tempUnit, json["tempUnit"].as<const char*>(), 2);
-            Log.notice(F("Settings update, [tempUnit]:(%s) applied.\r\n"), json["tempUnit"].as<const char*>());
+            Log.notice("Settings update, [tempUnit]:(%s) applied.\r\n", json["tempUnit"].as<const char*>());
         }
     } else {
-        // Log.warning(F("Settings update error, [tempUnit]:(%s) not valid.\r\n"), json["tempUnit"].as<const char*>());
+        // Log.warning("Settings update error, [tempUnit]:(%s) not valid.\r\n", json["tempUnit"].as<const char*>());
         // failCount++;
     }
 
@@ -91,14 +128,14 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     if(json["smoothFactor"].is<uint8_t>()) {
         if(json["smoothFactor"].as<uint8_t>() < 0 || json["smoothFactor"].as<uint8_t>() > 99) {
             // Out of range
-            Log.warning(F("Settings update error, [smoothFactor]:(%d) not valid.\r\n"), json["smoothFactor"].as<uint8_t>());
+            Log.warning("Settings update error, [smoothFactor]:(%d) not valid.\r\n", json["smoothFactor"].as<uint8_t>());
         } else {
             // In range
             config.smoothFactor = json["smoothFactor"];
-            Log.notice(F("Settings update, [smoothFactor]:(%d) applied.\r\n"), json["smoothFactor"].as<uint8_t>());
+            Log.notice("Settings update, [smoothFactor]:(%d) applied.\r\n", json["smoothFactor"].as<uint8_t>());
         }
     } else {
-        // Log.warning(F("Settings update error, [smoothFactor]:(%s) not valid.\r\n"), json["smoothFactor"].as<const char*>());
+        // Log.warning("Settings update error, [smoothFactor]:(%s) not valid.\r\n", json["smoothFactor"].as<const char*>());
         // failCount++;
     }
 
@@ -108,28 +145,28 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
             http_server.lcd_reinit_rqd = true;
         config.invertTFT = json["invertTFT"];
         if(json["invertTFT"].as<bool>())
-            Log.notice(F("Settings update, [invertTFT]:(True) applied.\r\n"));
+            Log.notice("Settings update, [invertTFT]:(True) applied.\r\n");
         else
-            Log.notice(F("Settings update, [invertTFT]:(False) applied.\r\n"));
+            Log.notice("Settings update, [invertTFT]:(False) applied.\r\n");
     } else {
-        // Log.warning(F("Settings update error, [invertTFT]:(%s) not valid.\r\n"), json["invertTFT"].as<const char*>());
+        // Log.warning("Settings update error, [invertTFT]:(%s) not valid.\r\n", json["invertTFT"].as<const char*>());
         // failCount++;
     }
 
 
     // Process everything we were passed
     if (failCount) {
-        Log.error(F("Error: Invalid controller configuration.\r\n"));
+        Log.error("Error: Invalid controller configuration.\r\n");
     } else {
         if (config.save()) {
             if (hostnamechanged) {
                 // We reset hostname, process
                 hostnamechanged = false;
                 http_server.name_reset_requested = true;
-                Log.notice(F("Received new mDNSid, queued network reset.\r\n"));
+                Log.notice("Received new mDNSid, queued network reset.\r\n");
             }
         } else {
-            Log.error(F("Error: Unable to save controller configuration data.\r\n"));
+            Log.error("Error: Unable to save controller configuration data.\r\n");
             failCount++;
         }
     }
@@ -141,13 +178,13 @@ bool updateJsonSettingBool(const JsonDocument& json, const char* key, bool& conf
     if (json[key].is<bool>()) {
         configVar = json[key].as<bool>();
         if(json[key].as<bool>())
-            Log.notice(F("Settings update, [%s]:(True) applied.\r\n"), key);
+            Log.notice("Settings update, [%s]:(True) applied.\r\n", key);
         else
-            Log.notice(F("Settings update, [%s]:(False) applied.\r\n"), key);
+            Log.notice("Settings update, [%s]:(False) applied.\r\n", key);
         return true;
     } else {
         // Not a valid bool
-        // Log.warning(F("Settings update error, [%s]:(%s) not valid.\r\n"), key, json[key].as<const char*>());
+        // Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
     }
     return false;
 }
@@ -156,16 +193,16 @@ bool updateJsonSetting(const JsonDocument& json, const char* key, char* configVa
     if (json[key].is<const char*>()) {
         if(strlen(json[key].as<const char*>()) > maxLen) {
             // Too long
-            Log.warning(F("Settings update error, [%s]:(%s) too long.\r\n"), key, json[key].as<const char*>());
+            Log.warning("Settings update error, [%s]:(%s) too long.\r\n", key, json[key].as<const char*>());
         } else {
             // Valid string
             strlcpy(configVar, json[key].as<const char*>(), maxLen);
-            Log.notice(F("Settings update, [%s]:(%s) applied.\r\n"), key, json[key].as<const char*>());
+            Log.notice("Settings update, [%s]:(%s) applied.\r\n", key, json[key].as<const char*>());
             return true;
         }
     } else {
         // Not a valid string
-        Log.warning(F("Settings update error, [%s]:(%s) not valid.\r\n"), key, json[key].as<const char*>());
+        Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
     }
     
     return false;
@@ -174,11 +211,11 @@ bool updateJsonSetting(const JsonDocument& json, const char* key, char* configVa
 bool updateJsonSetting(const JsonDocument& json, const char* key, uint16_t& configVar) {
     if (json[key].is<uint16_t>()) {
         configVar = json[key].as<uint16_t>();
-        Log.notice(F("Settings update, [%s]:(%d) applied.\r\n"), key, json[key].as<uint16_t>());
+        Log.notice("Settings update, [%s]:(%d) applied.\r\n", key, json[key].as<uint16_t>());
         return true;
     } else {
         // Not a valid uint16_t
-        Log.warning(F("Settings update error, [%s]:(%s) not valid.\r\n"), key, json[key].as<const char*>());
+        Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
     }
     return false;
 }
@@ -195,9 +232,9 @@ bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUp
 
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid upstream configuration.\r\n"));
+        Log.error("Error: Invalid upstream configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save calibration configuration data.\r\n"));
+        Log.error("Error: Unable to save calibration configuration data.\r\n");
         failCount++;
     }
 
@@ -222,7 +259,7 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
         if(!updateJsonSetting(json, FermentrackSettings::legacyFermentrackPushEvery, config.legacyFermentrackPushEvery))
             failCount++;
         if(config.legacyFermentrackPushEvery < 30 || config.legacyFermentrackPushEvery > 43200) {
-            Log.warning(F("Settings update error, [legacyFermentrackPushEvery]:(%d) not valid.\r\n"), config.legacyFermentrackPushEvery);
+            Log.warning("Settings update error, [legacyFermentrackPushEvery]:(%d) not valid.\r\n", config.legacyFermentrackPushEvery);
             config.legacyFermentrackPushEvery = 30;
             failCount++;
         }
@@ -239,7 +276,7 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
         if(!updateJsonSetting(json, FermentrackSettings::fermentrackPort, config.fermentrackPort))
             failCount++;
         if(config.fermentrackPort < 10 || config.fermentrackPort > 65535) {
-            Log.warning(F("Settings update error, [fermentrackPort]:(%d) not valid.\r\n"), config.fermentrackPort);
+            Log.warning("Settings update error, [fermentrackPort]:(%d) not valid.\r\n", config.fermentrackPort);
             config.fermentrackPort = 80;
             failCount++;
         }
@@ -252,17 +289,17 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
 
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Fermentrack target configuration.\r\n"));
+        Log.error("Error: Invalid Fermentrack target configuration.\r\n");
     } else {
         if (!config.save()) {
-            Log.error(F("Error: Unable to save Fermentrack target configuration data.\r\n"));
+            Log.error("Error: Unable to save Fermentrack target configuration data.\r\n");
             failCount++;
         } else {
             // Now that we've saved, trigger the send
             if(update_legacy)  // Trigger a send to Legacy Fermentrack/BPR in 3 seconds using the updated URL
-                sendNowTicker.once(3, [](){data_sender.send_legacy_fermentrack = true;});
+                startSendNowTimer(sendNowLegacyFTTimer, "SendLegacyFT", sendNowLegacyFTCallback, 3);
             if(update_ft2)  // Trigger a send to Fermentrack 2 in 5 seconds using the updated URL
-                sendNowTicker.once(5, [](){data_sender.send_fermentrack = true;});
+                startSendNowTimer(sendNowFTTimer, "SendFT", sendNowFTCallback, 5);
         }
     }
 
@@ -279,7 +316,7 @@ bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamU
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsEmail, config.scriptsEmail, 256))
         failCount++;
     if(strlen(config.scriptsURL) > 26 && strlen(config.scriptsEmail) > 5)  // Trigger a send to Google in 5 seconds using the updated URL
-        sendNowTicker.once(5, [](){data_sender.send_gSheets = true;});
+        startSendNowTimer(sendNowGSheetsTimer, "SendGSheets", sendNowGSheetsCallback, 5);
 
     // Loop through each of the keys associated with the sheet names, and update the relevant config entry
     uint8_t i=0;
@@ -295,9 +332,9 @@ bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamU
     
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Google Sheets configuration.\r\n"));
+        Log.error("Error: Invalid Google Sheets configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save Google Sheets configuration data.\r\n"));
+        Log.error("Error: Unable to save Google Sheets configuration data.\r\n");
         failCount++;
     }
 
@@ -312,14 +349,14 @@ bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstream
     if(!updateJsonSetting(json, BrewersFriendSettings::brewersFriendKey, config.brewersFriendKey, 64))
         failCount++;
     if(strlen(config.brewersFriendKey) > 1)  // Trigger a send to Brewers Friend
-        sendNowTicker.once(5, [](){data_sender.send_brewersFriend = true;});
+        startSendNowTimer(sendNowBrewersFriendTimer, "SendBF", sendNowBrewersFriendCallback, 5);
 
     
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Brewer's Friend configuration.\r\n"));
+        Log.error("Error: Invalid Brewer's Friend configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save Brewer's Friend configuration data.\r\n"));
+        Log.error("Error: Unable to save Brewer's Friend configuration data.\r\n");
         failCount++;
     }
 
@@ -334,14 +371,14 @@ bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpd
     if(!updateJsonSetting(json, BrewfatherSettings::brewfatherKey, config.brewfatherKey, 64))
         failCount++;
     if(strlen(config.brewfatherKey) > 1)  // Trigger a send to Brewfather
-        sendNowTicker.once(5, [](){data_sender.send_brewfather = true;});
+        startSendNowTimer(sendNowBrewfatherTimer, "SendBrewfather", sendNowBrewfatherCallback, 5);
 
     
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Brewfather configuration.\r\n"));
+        Log.error("Error: Invalid Brewfather configuration.\r\n");
     } else  if (!config.save()) {
-        Log.error(F("Error: Unable to save Brewfather configuration data.\r\n"));
+        Log.error("Error: Unable to save Brewfather configuration data.\r\n");
         failCount++;
     }
 
@@ -356,14 +393,14 @@ bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpd
     if(!updateJsonSetting(json, UserTargetSettings::userTargetURL, config.userTargetURL, 128))
         failCount++;
     if(strlen(config.userTargetURL) > 1)  // Trigger a send to the user target
-        sendNowTicker.once(5, [](){data_sender.send_userTarget = true;});
+        startSendNowTimer(sendNowUserTargetTimer, "SendUserTarget", sendNowUserTargetCallback, 5);
  
     
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid user target configuration.\r\n"));
+        Log.error("Error: Invalid user target configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save user target configuration data.\r\n"));
+        Log.error("Error: Unable to save user target configuration data.\r\n");
         failCount++;
     }
 
@@ -386,14 +423,14 @@ bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUp
         i++;  // Also track index
     }
 
-    sendNowTicker.once(5, [](){data_sender.send_grainfather = true;});  // Always trigger a resend to grainfather
+    startSendNowTimer(sendNowGrainfatherTimer, "SendGrainfather", sendNowGrainfatherCallback, 5);  // Always trigger a resend to grainfather
 
     
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Grainfather configuration.\r\n"));
+        Log.error("Error: Invalid Grainfather configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save Grainfather configuration data.\r\n"));
+        Log.error("Error: Unable to save Grainfather configuration data.\r\n");
         failCount++;
     }
 
@@ -408,7 +445,7 @@ bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpd
     if(!updateJsonSetting(json, BrewstatusSettings::brewstatusURL, config.brewstatusURL, 256))
         failCount++;
     if(strlen(config.brewstatusURL) > 11)  // Trigger a send to BrewStatus in 5 seconds using the updated URL
-        sendNowTicker.once(5, [](){data_sender.send_brewStatus = true;});
+        startSendNowTimer(sendNowBrewStatusTimer, "SendBrewStatus", sendNowBrewStatusCallback, 5);
 
     if(!updateJsonSetting(json, BrewstatusSettings::brewstatusPushEvery, config.brewstatusPushEvery))
         failCount++;
@@ -418,9 +455,9 @@ bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpd
 
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Brewstatus configuration.\r\n"));
+        Log.error("Error: Invalid Brewstatus configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save Brewstatus configuration data.\r\n"));
+        Log.error("Error: Unable to save Brewstatus configuration data.\r\n");
         failCount++;
     }
 
@@ -435,7 +472,7 @@ bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpda
     if(!updateJsonSetting(json, TaplistioSettings::taplistioURL, config.taplistioURL, 256))
         failCount++;
     if(strlen(config.taplistioURL) > 11)  // Trigger a send to TaplistIO in 5 seconds using the updated URL
-        sendNowTicker.once(5, [](){data_sender.send_taplistio = true;});
+        startSendNowTimer(sendNowTaplistioTimer, "SendTaplistio", sendNowTaplistioCallback, 5);
 
     if(!updateJsonSetting(json, TaplistioSettings::taplistioPushEvery, config.taplistioPushEvery))
         failCount++;
@@ -444,9 +481,9 @@ bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpda
 
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Taplist.io configuration.\r\n"));
+        Log.error("Error: Invalid Taplist.io configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save Taplist.io configuration data.\r\n"));
+        Log.error("Error: Unable to save Taplist.io configuration data.\r\n");
         failCount++;
     }
 
@@ -478,15 +515,15 @@ bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
 
     // Trigger a send to MQTT
     http_server.mqtt_init_rqd = true;
-    sendNowTicker.once(5, [](){data_sender.send_taplistio = true;});
+    startSendNowTimer(sendNowMqttTimer, "SendMQTT", sendNowMqttCallback, 5);
 
 
 
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid Taplist.io configuration.\r\n"));
+        Log.error("Error: Invalid Taplist.io configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save Taplist.io configuration data.\r\n"));
+        Log.error("Error: Unable to save Taplist.io configuration data.\r\n");
         failCount++;
     }
 
@@ -509,13 +546,13 @@ bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdat
         failCount++;
 
     if(strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH)  // Trigger a send to InfluxDB in 5 seconds using the updated settings
-        sendNowTicker.once(5, [](){data_sender.send_influxdb = true;});
+        startSendNowTimer(sendNowInfluxdbTimer, "SendInfluxDB", sendNowInfluxdbCallback, 5);
 
     // Save
     if(failCount>0) {
-        Log.error(F("Error: Invalid InfluxDB configuration.\r\n"));
+        Log.error("Error: Invalid InfluxDB configuration.\r\n");
     } else if (!config.save()) {
-        Log.error(F("Error: Unable to save InfluxDB configuration data.\r\n"));
+        Log.error("Error: Unable to save InfluxDB configuration data.\r\n");
         failCount++;
     }
 
@@ -691,25 +728,25 @@ void httpServer::setJsonPages() {
 // #endif
 
 //     web_server->on("/resetwifi/", HTTP_GET, [&]() {
-//         Log.verbose(F("Processing /resetwifi/.\r\n"));
+//         Log.verbose("Processing /resetwifi/.\r\n");
 //         request->send(200, F("text/plain"), F("Ok."));
 //         http_server.wifi_reset_requested = true;
 //     });
 
 //     web_server->on("/resetapp/", HTTP_GET, [&]() {
-//         Log.verbose(F("Processing /resetapp/.\r\n"));
+//         Log.verbose("Processing /resetapp/.\r\n");
 //         request->send(200, F("text/plain"), F("Ok."));
 //         http_server.factoryreset_requested = true;
 //     });
 
 //     web_server->on("/oktoreset/", HTTP_GET, [&]() {
-//         Log.verbose(F("Processing /oktoreset/.\r\n"));
+//         Log.verbose("Processing /oktoreset/.\r\n");
 //         request->send(200, F("text/plain"), F("Ok."));
 //         http_server.restart_requested = true;
 //     });
 
 //     web_server->on("/ping/", HTTP_ANY, [&]() {
-//         Log.verbose(F("Processing /ping/.\r\n"));
+//         Log.verbose("Processing /ping/.\r\n");
 //         request->send(200, F("text/plain"), F("Ok."));
 //     });
 // }
@@ -763,5 +800,5 @@ void httpServer::init() {
     // DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
 
     asyncWebServer.begin();
-    Log.notice(F("HTTP server started. Open: http://%s.local/ to view application.\r\n"), WiFi.getHostname());
+    Log.notice("HTTP server started. Open: http://%s.local/ to view application.\r\n", config.mdnsID);
 }

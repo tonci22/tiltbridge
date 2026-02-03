@@ -1,52 +1,122 @@
 #include <ctime>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#include <thorlog.h>
 #include <ArduinoJson.h>
-#include <Ticker.h>
 
-#include <WiFi.h>
-#include <MQTT.h>
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
-#include <HTTPClient.h>
-
-#include <ArduinoLog.h>
-#include <LCBUrl.h>
+#include "url_utils.h"
+#include "targets/send_json_str.h"
 
 #include "tilt/tiltScanner.h"
+#include "mqtt_client.h"  // for init_mqtt()
 #include "jsonconfig.h"
-#include "version.h"
 #include "http_server.h"
 #include "main.h"  // for printMem()
+#include "wifi_setup.h"
 
 #include "sendData.h"
 
 
 dataSendHandler data_sender; // Global data sender
 
-MQTTClient mqttClient(512);
-
 dataSendHandler::dataSendHandler() {}
+
+// Timer callback functions for FreeRTOS software timers
+// These are static/free functions that set the semaphore flags
+static void legacyFermentrackTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_legacy_fermentrack = true;
+}
+
+static void fermentrackTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_fermentrack = true;
+}
+
+static void mqttTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_mqtt = true;
+}
+
+static void brewStatusTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_brewStatus = true;
+}
+
+static void brewfatherTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_brewfather = true;
+}
+
+static void brewersFriendTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_brewersFriend = true;
+}
+
+static void userTargetTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_userTarget = true;
+}
+
+static void gSheetsTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_gSheets = true;
+}
+
+static void grainfatherTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_grainfather = true;
+}
+
+static void taplistioTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_taplistio = true;
+}
+
+static void influxdbTimerCallback(TimerHandle_t xTimer) {
+    data_sender.send_influxdb = true;
+}
+
+void dataSendHandler::createTimers() {
+    // Create all send timers as one-shot timers (pdFALSE)
+    // Initial period is 1 tick - we'll change it when we start the timer
+    legacyFermentrackTimer = xTimerCreate("LegacyFT", pdMS_TO_TICKS(1000), pdFALSE, nullptr, legacyFermentrackTimerCallback);
+    fermentrackTimer = xTimerCreate("Fermentrack", pdMS_TO_TICKS(1000), pdFALSE, nullptr, fermentrackTimerCallback);
+    mqttTimer = xTimerCreate("MQTT", pdMS_TO_TICKS(1000), pdFALSE, nullptr, mqttTimerCallback);
+    brewStatusTimer = xTimerCreate("BrewStatus", pdMS_TO_TICKS(1000), pdFALSE, nullptr, brewStatusTimerCallback);
+    brewfatherTimer = xTimerCreate("Brewfather", pdMS_TO_TICKS(1000), pdFALSE, nullptr, brewfatherTimerCallback);
+    brewersFriendTimer = xTimerCreate("BrewersFriend", pdMS_TO_TICKS(1000), pdFALSE, nullptr, brewersFriendTimerCallback);
+    userTargetTimer = xTimerCreate("UserTarget", pdMS_TO_TICKS(1000), pdFALSE, nullptr, userTargetTimerCallback);
+    gSheetsTimer = xTimerCreate("GSheets", pdMS_TO_TICKS(1000), pdFALSE, nullptr, gSheetsTimerCallback);
+    grainfatherTimer = xTimerCreate("Grainfather", pdMS_TO_TICKS(1000), pdFALSE, nullptr, grainfatherTimerCallback);
+    taplistioTimer = xTimerCreate("Taplistio", pdMS_TO_TICKS(1000), pdFALSE, nullptr, taplistioTimerCallback);
+    influxdbTimer = xTimerCreate("InfluxDB", pdMS_TO_TICKS(1000), pdFALSE, nullptr, influxdbTimerCallback);
+}
+
+void dataSendHandler::startTimer(TimerHandle_t timer, uint32_t periodSeconds) {
+    if (timer != nullptr) {
+        // Stop the timer first (without triggering callback) to ensure clean restart
+        xTimerStop(timer, 0);
+        // Change period and start - xTimerChangePeriod implicitly starts the timer
+        xTimerChangePeriod(timer, pdMS_TO_TICKS(periodSeconds * 1000), 0);
+    }
+}
 
 void dataSendHandler::init()
 {
     init_mqtt();
 
-    // Set up timers
-    legacyFermentrackTicker.once(12, [](){data_sender.send_legacy_fermentrack = true;});      // Schedule first send to Legacy Fermentrack
-    fermentrackTicker.once(10, [](){data_sender.send_fermentrack = true;});      // Schedule first send to Fermentrack
-    mqttTicker.once(20, [](){data_sender.send_mqtt = true;});                    // Schedule first send to MQTT
-    brewStatusTicker.once(30, [](){data_sender.send_brewStatus = true;});        // Schedule first send to Brew Status
-    brewfatherTicker.once(40, [](){data_sender.send_brewfather = true;});        // Schedule first send to Brewfather
-    brewersFriendTicker.once(50, [](){data_sender.send_brewersFriend = true;});  // Schedule first send to Brewer's Friend
-    userTargetTicker.once(60, [](){data_sender.send_userTarget = true;});        // Schedule first send to User-defined JSON target
-    gSheetsTicker.once(70, [](){data_sender.send_gSheets = true;});              // Schedule first send to Google Sheets
-    grainfatherTicker.once(80, [](){data_sender.send_grainfather = true;});      // Schedule first send to Grainfather
-    taplistioTicker.once(90, [](){data_sender.send_taplistio = true;});          // Schedule first send to Taplist.io
-    influxdbTicker.once(100, [](){data_sender.send_influxdb = true;});           // Schedule first send to InfluxDB
+    // Create all FreeRTOS timers
+    createTimers();
+
+    // Schedule first sends with staggered delays to avoid overwhelming the system
+    startTimer(legacyFermentrackTimer, 12);      // Schedule first send to Legacy Fermentrack
+    startTimer(fermentrackTimer, 10);            // Schedule first send to Fermentrack
+    startTimer(mqttTimer, 20);                   // Schedule first send to MQTT
+    startTimer(brewStatusTimer, 30);             // Schedule first send to Brew Status
+    startTimer(brewfatherTimer, 40);             // Schedule first send to Brewfather
+    startTimer(brewersFriendTimer, 50);          // Schedule first send to Brewer's Friend
+    startTimer(userTargetTimer, 60);             // Schedule first send to User-defined JSON target
+    startTimer(gSheetsTimer, 70);                // Schedule first send to Google Sheets
+    startTimer(grainfatherTimer, 80);            // Schedule first send to Grainfather
+    startTimer(taplistioTimer, 90);              // Schedule first send to Taplist.io
+    startTimer(influxdbTimer, 100);              // Schedule first send to InfluxDB
 }
 
 void dataSendHandler::process()
 {
-    if (WiFi.status() == WL_CONNECTED) {
+    if (is_wifi_connected()) {
         send_to_legacy_fermentrack();
         send_to_fermentrack();
         send_to_bf_and_bf();
@@ -59,51 +129,6 @@ void dataSendHandler::process()
     }
 }
 
-bool dataSendHandler::send_to_legacy_fermentrack()
-{
-    bool result = true;
-
-    if (send_legacy_fermentrack && !send_lock)
-    {
-        // Fermentrack
-        send_legacy_fermentrack = false;
-        send_lock = true;
-//        tilt_scanner.deinit();
-
-        if (strlen(config.legacyFermentrackURL) >= FERMENTRACK_MIN_URL_LENGTH) {
-            Log.verbose(F("Calling send to Legacy Fermentrack.\r\n"));
-            JsonDocument doc;
-            char tilt_data[TILT_ALL_DATA_SIZE + 128];
-
-            // Load the Tilt data from the scanner
-            JsonDocument tilt_doc;
-            // This is the only call to tilt_to_json_legacy
-            // The main difference vs tilt_to_json is that it sends a dict with the color as the key rather than an array.
-            // When we discontinue Legacy Fermentrack support this can also be discontinued
-            // This also only ever sends raw gravity
-            tilt_scanner.tilt_to_json_legacy(tilt_doc);
-
-            doc["mdns_id"] = config.mdnsID;
-            doc["tilts"] = tilt_doc;
-
-            serializeJson(doc, tilt_data);
-
-            if (send_to_url(config.legacyFermentrackURL, tilt_data, content_json))
-            {
-                Log.notice(F("Completed send to Legacy Fermentrack.\r\n"));
-            }
-            else
-            {
-                result = false; // There was an error with the previous send
-                Log.verbose(F("Error sending to Legacy Fermentrack.\r\n"));
-            }
-        }
-        legacyFermentrackTicker.once(config.legacyFermentrackPushEvery, [](){data_sender.send_legacy_fermentrack = true;}); // Set up subsequent send to Fermentrack
-//        tilt_scanner.init();
-        send_lock = false;
-    }
-    return result;
-}
 
 bool dataSendHandler::send_to_bf_and_bf()
 {
@@ -114,18 +139,18 @@ bool dataSendHandler::send_to_bf_and_bf()
         // Brewer's Friend
         data_sender.send_brewersFriend = false;
         if (strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH) {
-            Log.verbose(F("Calling send to Brewer's Friend.\r\n"));
+            Log.verbose("Calling send to Brewer's Friend.\r\n");
             retval = data_sender.send_to_bf_and_bf(BF_MEANS_BREWERS_FRIEND);
             if (retval)
             {
-                Log.notice(F("Completed send to Brewer's Friend.\r\n"));
+                Log.notice("Completed send to Brewer's Friend.\r\n");
             }
             else
             {
-                Log.verbose(F("Error sending to Brewer's Friend.\r\n"));
+                Log.verbose("Error sending to Brewer's Friend.\r\n");
             }
         }
-        brewersFriendTicker.once(BREWERS_FRIEND_DELAY, [](){data_sender.send_brewersFriend = true;}); // Set up subsequent send to Brewer's Friend
+        startTimer(brewersFriendTimer, BREWERS_FRIEND_DELAY); // Set up subsequent send to Brewer's Friend
         send_lock = false;
     }
 
@@ -135,18 +160,18 @@ bool dataSendHandler::send_to_bf_and_bf()
         // Brewfather
         data_sender.send_brewfather = false;
         if (strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH) {
-            Log.verbose(F("Calling send to Brewfather.\r\n"));
+            Log.verbose("Calling send to Brewfather.\r\n");
             retval = data_sender.send_to_bf_and_bf(BF_MEANS_BREWFATHER);
             if (retval)
             {
-                Log.notice(F("Completed send to Brewfather.\r\n"));
+                Log.notice("Completed send to Brewfather.\r\n");
             }
             else
             {
-                Log.verbose(F("Error sending to Brewfather.\r\n"));
+                Log.verbose("Error sending to Brewfather.\r\n");
             }
         }
-        brewfatherTicker.once(BREWFATHER_DELAY, [](){data_sender.send_brewfather = true;}); // Set up subsequent send to Brewfather
+        startTimer(brewfatherTimer, BREWFATHER_DELAY); // Set up subsequent send to Brewfather
         send_lock = false;
     }
 
@@ -158,18 +183,18 @@ bool dataSendHandler::send_to_bf_and_bf()
         data_sender.send_userTarget = false;
         if (strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
         {
-            Log.verbose(F("Calling send to User Target.\r\n"));
+            Log.verbose("Calling send to User Target.\r\n");
             retval = data_sender.send_to_bf_and_bf(BF_MEANS_USER_TARGET);
             if (retval)
             {
-                Log.notice(F("Completed send to User Target.\r\n"));
+                Log.notice("Completed send to User Target.\r\n");
             }
             else
             {
-                Log.verbose(F("Error sending to User Target.\r\n"));
+                Log.verbose("Error sending to User Target.\r\n");
             }
         }
-        userTargetTicker.once(USER_TARGET_DELAY, [](){data_sender.send_userTarget = true;}); // Set up subsequent send to User Target
+        startTimer(userTargetTimer, USER_TARGET_DELAY); // Set up subsequent send to User Target
         send_lock = false;
     }
     return retval;
@@ -191,7 +216,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     {
         if (strlen(config.brewfatherKey) <= BREWFATHER_MIN_KEY_LENGTH)
         {
-            Log.verbose(F("Brewfather key not populated. Returning.\r\n"));
+            Log.verbose("Brewfather key not populated. Returning.\r\n");
             return false;
         }
         strcpy(url, "http://log.brewfather.net/stream?id=");
@@ -201,7 +226,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     {
         if (strlen(config.brewersFriendKey) <= BREWERS_FRIEND_MIN_KEY_LENGTH)
         {
-            Log.verbose(F("Brewer's Friend key not populated. Returning.\r\n"));
+            Log.verbose("Brewer's Friend key not populated. Returning.\r\n");
             return false;
         }
         strcpy(url, "https://log.brewersfriend.com/stream/");
@@ -211,14 +236,14 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     {
         if (strlen(config.userTargetURL) <= USER_TARGET_MIN_URL_LENGTH)
         {
-            Log.verbose(F("User target URL not populated. Returning.\r\n"));
+            Log.verbose("User target URL not populated. Returning.\r\n");
             return false;
         }
         strcpy(url, config.userTargetURL);
     }
     else
     {
-        Log.error(F("Invalid value of which_bf passed to send_to_bf_and_bf.\r\n"));
+        Log.error("Invalid value of which_bf passed to send_to_bf_and_bf.\r\n");
         return false;
     }
 
@@ -229,7 +254,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         char gravity[10];
         char temp[6];
 
-        Log.verbose(F("Tilt loaded with color name: %s\r\n"), tilt_color_names[th.m_color]);
+        Log.verbose("Tilt loaded with color name: %s\r\n", tilt_color_names[th.m_color]);
         j["name"] = tilt_color_names[th.m_color];
         th.converted_temp(temp, sizeof(temp), true); // Always in Fahrenheit
         j["temp"] = temp;
@@ -242,7 +267,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         char payload_string[BF_SIZE];
         serializeJson(j, payload_string);
 
-        if (!send_to_url(url, payload_string, content_json))
+        if (http_request(url, httpMethod::HTTP_POST, payload_string) != sendResult::success)
             result = false; // There was an error with the previous send
     }
     return result;
@@ -266,11 +291,11 @@ bool dataSendHandler::send_to_grainfather()
             if (strlen(config.grainfatherURL[th.m_color].link) == 0)
                 continue;
 
-            Log.verbose(F("Calling send to Grainfather.\r\n"));
+            Log.verbose("Calling send to Grainfather.\r\n");
             char gravity[10];
             char temp[6];
             JsonDocument j;
-            Log.verbose(F("Tilt loaded with color name: %s\r\n"), tilt_color_names[th.m_color]);
+            Log.verbose("Tilt loaded with color name: %s\r\n", tilt_color_names[th.m_color]);
             th.converted_temp(temp, sizeof(temp), true); // Always in Fahrenheit
             j["Temp"] = temp;
             j["Unit"] = "F";
@@ -280,10 +305,10 @@ bool dataSendHandler::send_to_grainfather()
             char payload_string[GF_SIZE];
             serializeJson(j, payload_string);
 
-            if (!send_to_url(config.grainfatherURL[th.m_color].link, payload_string, content_json))
+            if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string) != sendResult::success)
                 result = false; // There was an error with the previous send
         }
-        grainfatherTicker.once(GRAINFATHER_DELAY, [](){data_sender.send_grainfather = true;}); // Set up subsequent send to Grainfather
+        startTimer(grainfatherTimer, GRAINFATHER_DELAY); // Set up subsequent send to Grainfather
         send_lock = false;
     }
     return result;
@@ -302,13 +327,15 @@ bool dataSendHandler::send_to_taplistio()
     if (!send_taplistio) {
         return false;
     } else if (send_lock) {
-        Log.verbose(F("taplist.io: send lock set.\r\n"));
+        Log.verbose("taplist.io: send lock set.\r\n");
         return false;
     }
 
 
-    // Since we're only using .once timers, we can just detach/recreate every time and be fine
-    taplistioTicker.detach();
+    // Since we're using one-shot timers, stop the timer before restarting with new period
+    if (taplistioTimer != nullptr) {
+        xTimerStop(taplistioTimer, 0);
+    }
 
     // Attempt to send.
     send_taplistio = false;
@@ -333,12 +360,12 @@ bool dataSendHandler::send_to_taplistio()
         
         serializeJson(j, payload_string);
 
-        Log.verbose(F("taplist.io: Sending %s Tilt to %s\r\n"), tilt_color_names[th.m_color], config.taplistioURL);
+        Log.verbose("taplist.io: Sending %s Tilt to %s\r\n", tilt_color_names[th.m_color], config.taplistioURL);
 
-        result = send_to_url(config.taplistioURL, payload_string, content_json);
+        result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string) == sendResult::success);
     }
 
-    taplistioTicker.once(config.taplistioPushEvery, [](){data_sender.send_taplistio = true;});
+    startTimer(taplistioTimer, config.taplistioPushEvery);
     send_lock = false;
     return result;
 }
@@ -356,7 +383,7 @@ bool dataSendHandler::send_to_brewstatus()
         send_brewStatus = false;
         send_lock = true;
         if (strlen(config.brewstatusURL) > BREWSTATUS_MIN_URL_LENGTH) {
-            Log.verbose(F("Calling send to Brew Status.\r\n"));
+            Log.verbose("Calling send to Brew Status.\r\n");
 
             // The payload should look like this when sent to Brewstatus:
             // ('Request payload:', 'SG=1.019&Temp=71.0&Color=ORANGE&Timepoint=43984.33630927084&Beer=Beer&Comment=Comment')
@@ -377,15 +404,17 @@ bool dataSendHandler::send_to_brewstatus()
                 snprintf(payload, payload_size, "SG=%s&Temp=%s&Color=%s&Timepoint=%.11f&Beer=Undefined&Comment=",
                         gravity, temp, tilt_color_names[th.m_color], ((double)std::time(0) + (config.TZoffset * 3600.0)) / 86400.0 + 25569.0);
                 
-                if (send_to_url(config.brewstatusURL, payload, content_x_www_form_urlencoded)) {
-                    Log.notice(F("Completed send to Brew Status.\r\n"));
+                HttpRequestOptions options;
+                options.contentType = content_x_www_form_urlencoded;
+                if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0, options) == sendResult::success) {
+                    Log.notice("Completed send to Brew Status.\r\n");
                 } else {
                     result = false;
-                    Log.verbose(F("Error sending to Brew Status.\r\n"));
+                    Log.verbose("Error sending to Brew Status.\r\n");
                 }
             }
         }
-        brewStatusTicker.once(config.brewstatusPushEvery, [](){data_sender.send_brewStatus = true;}); // Set up subsequent send to Brew Status
+        startTimer(brewStatusTimer, config.brewstatusPushEvery); // Set up subsequent send to Brew Status
         send_lock = false;
     }
     return result;
@@ -401,20 +430,14 @@ bool dataSendHandler::send_to_google()
         send_gSheets = false;
         send_lock = true;
 
-        //tilt_scanner.deinit();
         JsonDocument payload;
         char payload_string[GSHEETS_JSON];
         JsonDocument retval;
-        int httpResponseCode;
         int numSent = 0;
-#if (ARDUINO_LOG_LEVEL == 6)
-        char buff[1024] = "";
-#endif
 
         // The google sheets handler only fires if we have both a Google Scripts URL to post to, and an email address.
         if (strlen(config.scriptsURL) >= GSCRIPTS_MIN_URL_LENGTH && strlen(config.scriptsEmail) >= GSCRIPTS_MIN_EMAIL_LENGTH) {
-            Log.verbose(F("Checking for any pending Google Sheets pushes.\r\n"));
-//            Log.verbose(F("Executing on core %i.\r\n"), xPortGetCoreID());
+            Log.verbose("Checking for any pending Google Sheets pushes.\r\n");
             printMem();
 
             tilt_scanner.drop_expired_tilts();
@@ -427,7 +450,7 @@ bool dataSendHandler::send_to_google()
 
                     // If there's a sheet name saved, then we should send the data
                     if (numSent == 0)
-                        Log.notice(F("Beginning GSheets check-in.\r\n"));
+                        Log.notice("Beginning GSheets check-in.\r\n");
                     payload["Beer"] = config.gsheets_config[th.m_color].name;
                     th.converted_temp(temp, sizeof(temp), true); // Always in Fahrenheit
                     payload["Temp"] = temp;
@@ -441,479 +464,52 @@ bool dataSendHandler::send_to_google()
                     serializeJson(payload, payload_string);
                     payload.clear();
 
-                    HTTPClient http;
-                    WiFiClientSecure secureClient;
+                    Log.verbose("Sending the following payload to Google Sheets (%s):\r\n\t\t%s\r\n",
+                               tilt_color_names[th.m_color], payload_string);
 
-                    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);  // Follow the 301
-                    http.setConnectTimeout(6000);                           // Set 6 second timeout
-                    http.setTimeout(10000);                                 // Set 10 second timeout
-                    http.setReuse(false);
-                    secureClient.setInsecure();                             // Ignore SHA fingerprint
+                    // Use unified http_request with response buffer to get doclongurl
+                    char response[1024];
+                    HttpRequestOptions options;
+                    options.contentType = content_json;
+                    options.skipCertValidation = true;
+                    options.timeoutMs = 10000;  // 10 second timeout - Google Scripts can be slow
 
-                    if (!http.begin(secureClient, config.scriptsURL)) {      // Connect secure
-                        Log.error(F("Unable to create secure connection to %s.\r\n"), config.scriptsURL);
-                        result = false;
+                    sendResult sendRes = http_request(config.scriptsURL, httpMethod::HTTP_POST,
+                                                      payload_string, response, sizeof(response), options);
+
+                    if (sendRes == sendResult::success) {
+                        // POST success - parse response for doclongurl
+                        Log.verbose("HTTP Response: 200\r\nFull Response:\r\n\t%s\r\n", response);
+                        deserializeJson(retval, response);
+
+                        if(strcmp(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>()) != 0) {
+                            Log.verbose("Storing new doclongurl: %s.\r\n", retval["doclongurl"].as<const char *>());
+                            strlcpy(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>(), 255);
+                            config.save();
+                        }
+                        retval.clear();
+                        numSent++;
                     } else {
-                        // Failed to open a connection
-                        Log.verbose(F("Created secure connection to %s.\r\n"), config.scriptsURL);
-                        Log.verbose(F("Sending the following payload to Google Sheets (%s):\r\n\t\t%s\r\n"), tilt_color_names[th.m_color], payload_string);
+                        // Post generated an error
+                        Log.error("Google send to %s Tilt failed. Response:\r\n%s\r\n",
+                            tilt_color_names[th.m_color], response);
+                        result = false;
+                    }
 
-                        http.addHeader(F("Content-Type"), content_json);   // Specify content-type header
-                        httpResponseCode = http.POST(payload_string);               // Send the payload
-
-                        if (httpResponseCode == HTTP_CODE_OK) {  // HTTP_CODE_OK = 200
-                            // POST success
-#if (ARDUINO_LOG_LEVEL == 6)
-                            // We need to use a buffer in order to be able to use the response twice
-                            strlcpy(buff, http.getString().c_str(), 1024);
-                            Log.verbose(F("HTTP Response: 200\r\nFull Response:\r\n\t%s\r\n"), buff);
-                            deserializeJson(retval, buff);
-//                                deserializeJson(retval, http.getString().c_str());
-#else
-                            deserializeJson(retval, http.getString().c_str());
-#endif
-
-                            if(strcmp(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>()) != 0) {
-                                Log.verbose(F("Storing new doclongurl: %s.\r\n"), retval["doclongurl"].as<const char *>());
-                                strlcpy(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>(), 255);
-                                config.save();
-                            }
-                            retval.clear();
-                            numSent++;
-                        } else {
-                            // Post generated an error (response code != 200)
-                            Log.error(F("Google send to %s Tilt failed (%d): %s. Response:\r\n%s\r\n"),
-                                tilt_color_names[th.m_color],
-                                httpResponseCode,
-                                http.errorToString(httpResponseCode).c_str(),
-                                http.getString().c_str());
-                            result = false;
-                        } // Response code != 200
-                    } // Good connection
-                    http.end();
-                    delay(100);  // Give garbage collection time to run
+                    vTaskDelay(pdMS_TO_TICKS(100));  // Give some time between requests
                 } // Check we have a sheet name for the color
             }
 
-            Log.notice(F("Submitted %l sheet%s to Google.\r\n"), numSent, (numSent== 1) ? "" : "s");
+            Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
 
         }
-        gSheetsTicker.once(GSCRIPTS_DELAY, [](){data_sender.send_gSheets = true;}); // Set up subsequent send to Google Sheets
+        startTimer(gSheetsTimer, GSCRIPTS_DELAY); // Set up subsequent send to Google Sheets
 
-        //tilt_scanner.init();
         send_lock = false;
     }
     return result;
 }
 
-void dataSendHandler::init_mqtt()
-{
-    LCBUrl url;
-
-    // Checking for the WiFi Status is done in the data sending loop, but we also need to be sure we are connected to WiFi when we initialize the MQTT client
-    if (WiFi.status() == WL_CONNECTED) {
-        if(mqtt_alreadyinit) {
-            Log.verbose(F("MQTT already initialized. Disconnecting.\r\n"));
-            mqttClient.disconnect();
-            delay(250);
-        }
-
-        if (strcmp(config.mqttBrokerHost, "") != 0 || strlen(config.mqttBrokerHost) != 0) {
-            if (url.isMDNS(config.mqttBrokerHost)) {
-                Log.verbose(F("Initializing connection to MQTTBroker: %s (%s) on port: %d\r\n"),
-                    config.mqttBrokerHost, url.getIP(config.mqttBrokerHost).toString().c_str(), config.mqttBrokerPort);
-            } else {
-                Log.verbose(F("Initializing connection to MQTTBroker: %s on port: %d\r\n"),
-                    config.mqttBrokerHost, config.mqttBrokerPort);
-            }
-
-            if (mqtt_alreadyinit) {
-                mqttClient.disconnect();
-                delay(250);
-                if (url.isMDNS(config.mqttBrokerHost)) {
-                    mqttClient.setHost(url.getIP(config.mqttBrokerHost), config.mqttBrokerPort);
-                } else {
-                    mqttClient.setHost(config.mqttBrokerHost, config.mqttBrokerPort);
-                }
-            } else {
-                if (url.isMDNS(config.mqttBrokerHost)) {
-                    mqttClient.begin(url.getIP(config.mqttBrokerHost), config.mqttBrokerPort, mqClient);
-                } else {
-                    mqttClient.begin(config.mqttBrokerHost, config.mqttBrokerPort, mqClient);
-                }
-            }
-            mqtt_alreadyinit = true;
-            mqttClient.setKeepAlive(config.mqttPushEvery);
-        }
-    }
-}
-
-void dataSendHandler::connect_mqtt()
-{
-    // Checking for the WiFi Status is done in the data sending loop, but we also need to be sure we are connected to WiFi when we connect to the MQTT broker
-    if (WiFi.status() == WL_CONNECTED) {
-        if(!mqtt_alreadyinit) {
-            // Since init is not called synchronously with the settings update when the user sets the MQTT broker, we need to
-            // wait until the MQTT client is initialized if it hasn't been done already.
-            return;
-        }
-        if (strlen(config.mqttUsername) > 1) {
-            mqttClient.connect(config.mdnsID, config.mqttUsername, config.mqttPassword);
-        } else {
-            mqttClient.connect(config.mdnsID);
-        }
-    }
-}
-
-String lcburl_getAfterPath(LCBUrl url) // Get anything after the path
-{
-    String afterpath = "";
-
-    if (url.getQuery().length() > 0) {
-        afterpath = "?" + url.getQuery();
-    }
-
-    if (url.getFragment().length() > 0) {
-        afterpath = afterpath + "#" + url.getFragment();
-    }
-
-    return afterpath;
-}
-
-bool dataSendHandler::send_to_url(const char *url, const char *dataToSend, const char *contentType, bool checkBody, const char* bodyCheck)
-{
-    // This handles the generic act of sending data to an endpoint
-    bool retVal = false;
-    bool result = false;
-    bool https = false;
-
-    if (strlen(dataToSend) > 5 && strlen(url) > 8)
-    {
-        bool validTarget = false;
-        {
-            // Placing LCBUrl in its own scoping block, as something about it is causing issues with stack memory
-            LCBUrl lcburl;
-            lcburl.setUrl(url);
-
-            // There is an issue where the built-in HTTP client for some reason won't resolve mDNS addresses. Instead, we'll
-            // resolve the address first, and then pass that to the client if needed. 
-            if (lcburl.isMDNS(lcburl.getHost().c_str()))
-            {
-                // Make sure we can resolve the address
-                if (lcburl.getIP(lcburl.getHost().c_str()) != INADDR_NONE)
-                    validTarget = true;
-            }
-            else if (lcburl.isValidIP(lcburl.getIP(lcburl.getHost().c_str()).toString().c_str()))
-                // We were passed an IP Address
-                validTarget = true;
-            else
-            {
-                // If it's not mDNS all we care about is that it's http
-                // if (lcburl.getScheme() == "http")
-                    validTarget = true;
-            }
-            if (validTarget) {
-                if (lcburl.isMDNS(lcburl.getHost().c_str()))
-                    // Use the IP address we resolved (necessary for mDNS)
-                    Log.verbose(F("Connecting to: %s at %s on port %l\r\n"),
-                                lcburl.getHost().c_str(),
-                                lcburl.getIP(lcburl.getHost().c_str() ).toString().c_str(),
-                                lcburl.getPort());
-                else
-                    Log.verbose(F("Connecting to: %s on port %l\r\n"),
-                                lcburl.getHost().c_str(),
-                                lcburl.getPort());
-            }
-            if (lcburl.getScheme() == "https")
-                https=true;
-        }
-
-        if (validTarget) {
-            WiFiClientSecure *secureClient;
-            secureClient = new WiFiClientSecure();
-            {
-                // Add a scoping block for HTTPClient https to make sure it is destroyed before WiFiClientSecure *client is 
-                HTTPClient *http;
-                http = new HTTPClient();
-                secureClient->setInsecure(); // Don't perform certificate validation. This opens up MITM attacks, but I don't have memory otherwise.
-
-                // Determine if the URL is HTTP or HTTPS and initialize HTTPClient
-                if (https) {
-                    http->begin(*secureClient, url); // HTTPS
-                } else {
-                    http->begin(url); // HTTP
-                }
-
-                // Set headers
-                http->addHeader(F("Content-Type"), contentType);
-                http->addHeader(F("Accept"), content_json);
-
-                char userAgent[128];
-                snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", version(), branch(), build());
-                http->setUserAgent(userAgent);
-
-                yield();  // Yield before we lock up the radio
-
-                // Send the request
-                Log.verbose(F("Sent data: %s\r\n"), dataToSend);
-                int httpResponseCode;
-                // httpResponseCode = http->sendRequest("POST", dataToSend);
-                httpResponseCode = http->POST(dataToSend);
-
-                // Optionally check the response
-                if (httpResponseCode > 0) {
-                    // HTTP header has been sent and Server response header has been handled
-                    Log.verbose(F("HTTP Response code: %d\r\n"), httpResponseCode);
-
-                    if (checkBody) {
-                        String response = http->getString();
-                        if (response.indexOf(bodyCheck) >= 0) {
-                            result = true;
-                        } else {
-                            Log.error(F("Body check failed. Body: %s\r\n"), response.c_str());
-                        }
-                    } else {
-                        result = (httpResponseCode == HTTP_CODE_OK);
-                    }
-                } else {
-                    Log.error(F("Error on sending POST: %s\r\n"), http->errorToString(httpResponseCode).c_str());
-                    Log.error(F("Connection failed\r\n"));
-                }
-
-                // Close connection
-                http->end();
-                delay(100);  // Give garbage collection time to run
-                delete http;
-            }
-            secureClient->stop();
-            delete secureClient;
-
-            return result;
-
-        } else {
-            Log.error(F("Invalid target: %s.\r\n"), url);
-        }
-    } else {
-        Log.notice(F("No URL provided, or no data to send.\r\n"));
-    }
-    // If we reached here, the send was unsuccessful
-    return false;
-}
-
-
-bool dataSendHandler::send_to_mqtt() {
-    bool result = false;
-
-    if (strcmp(config.mqttBrokerHost, "") == 0 || strlen(config.mqttBrokerHost) == 0) {
-        // No MQTT broker configured
-        return false;
-    }
-
-    if (!mqttClient.connected()) {
-        Log.warning(F("MQTT disconnected. Attempting to reconnect to MQTT Broker in loop\r\n"));
-        connect_mqtt();
-    } else {
-        mqttClient.loop();
-    }
-
-    if (send_mqtt && !send_lock) {
-        send_mqtt = false;
-        send_lock = true;
-
-        Log.verbose(F("Publishing available results to MQTT Broker.\r\n"));
-
-        tilt_scanner.drop_expired_tilts();
-
-        for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
-            char tilt_topic[50] = {'\0'};
-            snprintf(tilt_topic, 50, "%s/tilt_%s", config.mqttTopic, tilt_color_names[th.m_color]);
-
-            // Prepare and send each of the four payloads
-            prepare_temperature_payload(&th, tilt_topic);
-            prepare_gravity_payload(&th, tilt_topic);
-            prepare_battery_payload(&th, tilt_topic);
-            prepare_general_payload(&th, tilt_topic);
-        }
-
-        mqttTicker.once(config.mqttPushEvery, [](){ data_sender.send_mqtt = true; });
-        send_lock = false;
-    }
-
-    return result;
-}
-
-
-void dataSendHandler::enrich_announcement(const char* topic, const char* tilt_color, JsonDocument& payload) {
-    payload["stat_t"] = topic;
-    char deviceName[20];
-    snprintf(deviceName, sizeof(deviceName), "Tilt %s", tilt_color);
-    payload["dev"]["name"] = deviceName;
-    payload["dev"]["ids"] = tilt_color;
-    payload["dev"]["mdl"] = "Tilt Hydrometer";
-    payload["dev"]["mf"] = "Baron Brew Equipment LLC";
-    payload["dev"]["sw"] = version();
-    payload["dev"]["sa"] = "Brewery";  // Suggested Area
-
-    char ip_address_url[25] = "http://";
-    {
-        char ip[16];
-        sprintf(ip, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
-        strncat(ip_address_url, ip, 16);
-        strcat(ip_address_url, "/");
-    }
-
-
-    payload["dev"]["cu"] = ip_address_url;
-    // model and hw_version could be added, but it would require the Tilt object to determine Tilt vs. Tilt Pro
-
-
-    payload["json_attr_t"] = topic;
-    payload["json_attr_tpl"] = "{ \"Uptime\": \"{{ value_json.timeStamp }}\" }\n";
-
-
-}
-
-
-void dataSendHandler::prepare_temperature_payload(tiltHydrometer *th, const char* tilt_topic) {
-    //Home Assistant Config Topic for Temperature
-    char m_topic[90];
-    char tilt_sensor_name[35];
-    char uniq_id[30];
-    char unit[10] = "\u00b0"; // Unicode for degree symbol
-    JsonDocument payload;
-
-    // Construct the MQTT topic string for temperature
-    sprintf(m_topic, "homeassistant/sensor/%s_tilt_%s/temperature/config", config.mqttTopic, tilt_color_names[th->m_color]);
-
-    // Set up payload fields
-    strcat(unit, config.tempUnit); // Append temperature unit after degree symbol
-    payload["dev_cla"] = "temperature";
-    payload["unit_of_meas"] = unit;
-    payload["ic"] = "mdi:thermometer-lines";
-    
-    // Construct sensor name
-    snprintf(tilt_sensor_name, sizeof(tilt_sensor_name), "Tilt Temperature - %s", tilt_color_names[th->m_color]);
-    payload["name"] = tilt_sensor_name;
-
-    // Value template
-    payload["val_tpl"] = "{{value_json.Temp}}";
-
-    // Unique ID
-    snprintf(uniq_id, sizeof(uniq_id), "tiltbridge_tilt%sT", tilt_color_names[th->m_color]);
-    payload["uniq_id"] = uniq_id;
-
-    enrich_announcement(tilt_topic, tilt_color_names[th->m_color], payload);
-    // Serialize and publish
-    publish_to_mqtt(m_topic, payload, true); // Retain flag set to true
-}
-
-
-void dataSendHandler::prepare_gravity_payload(tiltHydrometer *th, const char* tilt_topic) {
-    //Home Assistant Config Topic for Sp Gravity
-    char m_topic[90];
-    char tilt_sensor_name[35];
-    char uniq_id[30];
-    JsonDocument payload;
-
-    // Construct the MQTT topic string for specific gravity
-    sprintf(m_topic, "homeassistant/sensor/%s_tilt_%sG/sp_gravity/config", config.mqttTopic, tilt_color_names[th->m_color]);
-
-    // Set up payload fields
-    payload["unit_of_meas"] = "SG";
-    payload["ic"] = "mdi:trending-down";
-    
-    // Construct sensor name
-    snprintf(tilt_sensor_name, sizeof(tilt_sensor_name), "Tilt Specific Gravity - %s", tilt_color_names[th->m_color]);
-    payload["name"] = tilt_sensor_name;
-
-    // Value template
-    payload["val_tpl"] = "{{value_json.SG}}";
-
-    // Unique ID
-    snprintf(uniq_id, sizeof(uniq_id), "tiltbridge_tilt%sG", tilt_color_names[th->m_color]);
-    payload["uniq_id"] = uniq_id;
-
-    enrich_announcement(tilt_topic, tilt_color_names[th->m_color], payload);
-    // Serialize and publish
-    publish_to_mqtt(m_topic, payload, true); // Retain flag set to true
-}
-
-void dataSendHandler::prepare_battery_payload(tiltHydrometer *th, const char* tilt_topic) {
-    //Home Assistant Config Topic for Weeks On Battery
-    char m_topic[90];
-    char tilt_sensor_name[35];
-    char uniq_id[30];
-    JsonDocument payload;
-
-    // Construct the MQTT topic string for weeks on battery
-    sprintf(m_topic, "homeassistant/sensor/%s_tilt_%sWoB/weeks_on_battery/config", config.mqttTopic, tilt_color_names[th->m_color]);
-
-    // Set up payload fields
-    payload["unit_of_meas"] = "weeks";
-    payload["ic"] = "mdi:battery";
-    
-    // Construct sensor name
-    snprintf(tilt_sensor_name, sizeof(tilt_sensor_name), "Tilt Weeks On Battery - %s", tilt_color_names[th->m_color]);
-    payload["name"] = tilt_sensor_name;
-
-    // Value template
-    payload["val_tpl"] = "{{value_json.WoB}}";
-
-    // Unique ID
-    snprintf(uniq_id, sizeof(uniq_id), "tiltbridge_tilt%sWoB", tilt_color_names[th->m_color]);
-    payload["uniq_id"] = uniq_id;
-
-    enrich_announcement(tilt_topic, tilt_color_names[th->m_color], payload);
-    // Serialize and publish
-    publish_to_mqtt(m_topic, payload, true); // Retain flag set to true
-}
-
-void dataSendHandler::prepare_general_payload(tiltHydrometer *th, const char* tilt_topic) {
-    //General payload with sensor data
-    char m_topic[90];
-    char gravity[10];
-    char temp[6];
-    char battery_str[4]; // large enough for 0-255 and the null terminator
-    JsonDocument payload;
-
-    // Construct the MQTT topic string for general sensor data
-    strcpy(m_topic, tilt_topic);
-
-    // Populate payload with sensor data
-    payload["Color"] = tilt_color_names[th->m_color];
-    payload["timeStamp"] = (int)std::time(0);
-    payload["fermunits"] = "SG";
-    th->cal_smooth_gravity_str(gravity, sizeof(gravity));
-    payload["SG"] = gravity;
-    th->converted_temp(temp, 6, false);
-    payload["Temp"] = temp;
-    payload["tempunits"] = config.tempUnit;
-    th->get_weeks_battery(battery_str, 4);
-    payload["WoB"] = battery_str;
-
-    // Serialize and publish
-    publish_to_mqtt(m_topic, payload, false); // Retain flag set to false for general data
-}
-
-
-bool dataSendHandler::publish_to_mqtt(const char* topic, JsonDocument& payload, bool retain) {
-    char payload_string[512];
-    serializeJson(payload, payload_string);
-
-    if (!mqttClient.connected()) {
-        Log.warning(F("MQTT disconnected. Attempting to reconnect to MQTT Broker\r\n"));
-        connect_mqtt();
-    }
-
-    bool result = mqttClient.publish(topic, payload_string, retain, 0);
-    if(result) {
-        Log.verbose(F("Published to MQTT\r\n"));
-    } else {
-        Log.error(F("Failed to publish to MQTT\r\n"));
-    }
-    delay(10);
-    return result;
-}
 
 bool dataSendHandler::send_to_influxdb()
 {
@@ -924,97 +520,73 @@ bool dataSendHandler::send_to_influxdb()
         send_influxdb = false;
         send_lock = true;
 
-        if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && 
-            strlen(config.influxdbToken) > 0 && 
-            strlen(config.influxdbOrg) > 0 && 
-            strlen(config.influxdbBucket) > 0) {
-            
-            Log.verbose(F("Calling send to InfluxDB.\r\n"));
-            
+        if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && strlen(config.influxdbToken) > 0 && strlen(config.influxdbOrg) > 0 && strlen(config.influxdbBucket) > 0) 
+        {
+
+            Log.verbose("Calling send to InfluxDB.\r\n");
+
             // Build the write API URL
             char writeURL[512];
-            snprintf(writeURL, sizeof(writeURL), "%s/api/v2/write?org=%s&bucket=%s&precision=s", 
+            snprintf(writeURL, sizeof(writeURL), "%s/api/v2/write?org=%s&bucket=%s&precision=s",
                      config.influxdbURL, config.influxdbOrg, config.influxdbBucket);
 
             // Build line protocol data
-            String lineData = "";
-            uint64_t timestamp = std::time(nullptr);
-            
+            char lineData[2048];
+            size_t lineDataLen = 0;
+            lineData[0] = '\0';
+
             tilt_scanner.drop_expired_tilts();
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 char gravity[10];
                 char temp[6];
                 char battery_str[4];
-                
+
                 th.cal_smooth_gravity_str(gravity, sizeof(gravity));
                 th.converted_temp(temp, sizeof(temp), false); // Use configured unit
                 th.get_weeks_battery(battery_str, sizeof(battery_str));
-                
+
                 // InfluxDB line protocol: measurement,tag1=value1 field1=value1,field2=value2 timestamp
                 char line[256];
-                snprintf(line, sizeof(line), 
+                int lineLen = snprintf(line, sizeof(line),
                         "tilt,color=%s,device_source=TiltBridge "
                         "gravity=%s,temperature=%s,temp_units=\"%s\",weeks_on_battery=%s\n",
                         tilt_color_names[th.m_color],
                         gravity, temp, config.tempUnit, battery_str);
-                
-                lineData += line;
+
+                // Append to lineData if there's room
+                if (lineDataLen + lineLen < sizeof(lineData) - 1) {
+                    strlcat(lineData, line, sizeof(lineData));
+                    lineDataLen += lineLen;
+                }
             }
 
-            if (lineData.length() > 0) {
-                // Send data using HTTP POST with line protocol
-                HTTPClient http;
-                WiFiClientSecure secureClient;
+            if (lineDataLen > 0) {
+                // Build authorization header
+                char authHeader[256];
+                snprintf(authHeader, sizeof(authHeader), "Token %s", config.influxdbToken);
 
-                // Determine if URL is HTTPS
-                bool useHTTPS = strncmp(config.influxdbURL, "https://", 8) == 0;
-                
-                if (useHTTPS) {
-                    secureClient.setInsecure(); // Don't verify certificates
-                    http.begin(secureClient, writeURL);
-                } else {
-                    http.begin(writeURL);
-                }
-
-                // Set headers for InfluxDB v2 API
-                http.addHeader(F("Authorization"), String("Token ") + config.influxdbToken);
-                http.addHeader(F("Content-Type"), "text/plain; charset=utf-8");
-                http.addHeader(F("Accept"), "application/json");
-
-                char userAgent[128];
-                snprintf(userAgent, sizeof(userAgent), "tiltbridge/%s (branch %s; build %s)", 
-                         version(), branch(), build());
-                http.setUserAgent(userAgent);
+                // Configure request options
+                HttpRequestOptions options;
+                options.contentType = content_text_plain;
+                options.skipCertValidation = true;
+                options.authHeader = authHeader;
+                options.timeoutMs = 6000;
 
                 // Send the data
-                int httpResponseCode = http.POST(lineData);
+                sendResult sendRes = http_request(writeURL, httpMethod::HTTP_POST, lineData, nullptr, 0, options);
 
-                if (httpResponseCode > 0) {
-                    Log.verbose(F("InfluxDB HTTP Response code: %d\r\n"), httpResponseCode);
-                    
-                    if (httpResponseCode >= 200 && httpResponseCode < 300) {
-                        Log.notice(F("Completed send to InfluxDB.\r\n"));
-                    } else {
-                        Log.error(F("InfluxDB returned error code %d: %s\r\n"), 
-                                 httpResponseCode, http.getString().c_str());
-                        result = false;
-                    }
+                if (sendRes == sendResult::success) {
+                    Log.notice("Completed send to InfluxDB.\r\n");
                 } else {
-                    Log.error(F("Error sending to InfluxDB: %s\r\n"), 
-                             http.errorToString(httpResponseCode).c_str());
+                    Log.error("Error sending to InfluxDB\r\n");
                     result = false;
                 }
-
-                http.end();
-                if (useHTTPS) {
-                    secureClient.stop();
-                }
             } else {
-                Log.verbose(F("No Tilt data to send to InfluxDB.\r\n"));
+                Log.verbose("No Tilt data to send to InfluxDB.\r\n");
             }
         }
-        
-        influxdbTicker.once(config.influxdbPushEvery, [](){data_sender.send_influxdb = true;}); // Set up subsequent send to InfluxDB
+
+        startTimer(influxdbTimer, config.influxdbPushEvery); // Set up subsequent send to InfluxDB
         send_lock = false;
     }
     return result;
