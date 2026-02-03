@@ -1,17 +1,10 @@
 #ifndef TILTBRIDGE_SENDDATA_H
 #define TILTBRIDGE_SENDDATA_H
 
-// =============================================================================
-// TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
-// =============================================================================
-// WiFiClient.h is still needed for some legacy code. When fully converted to
-// ESP-IDF, remove this include.
-#include <WiFiClient.h>
-// =============================================================================
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/timers.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/timers.h>
 #include <ArduinoJson.h>
+
 #include "mqtt_client.h"
 #include "tilt/tiltHydrometer.h"
 #include "targets/send_json_str.h"

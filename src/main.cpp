@@ -2,10 +2,11 @@
 // Please note - This source code (along with other files) are provided under license.
 // More details (including license details) can be found in the files accompanying this source code.
 
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/timers.h>
+
 #include <thorlog.h>
-#include "esp_system.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/timers.h"
 
 #include "filesystem.h"
 
