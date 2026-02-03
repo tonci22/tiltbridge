@@ -1,10 +1,14 @@
-#include <thorlog.h>
-#include <ESPmDNS.h>
-#include "url_utils.h"
-#include <WiFiManager.h>
 #include <esp_timer.h>
-#include "esp_system.h"
+#include <esp_system.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
+#include <ESPmDNS.h>
 
+#include <thorlog.h>
+#include <WiFiManager.h>
+
+
+#include "url_utils.h"
 #include "bridge_lcd.h"
 #include "jsonconfig.h"
 #include "http_server.h"
@@ -61,7 +65,9 @@ void initWiFi() {
     }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
     WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-        Log.notice("WiFi connected, IP: %s\r\n", WiFi.localIP().toString().c_str());
+        char ip[16];
+        get_local_ip(ip, sizeof(ip));
+        Log.notice("WiFi connected, IP: %s\r\n", ip);
     }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
 
     WiFiManager wm;
@@ -130,7 +136,7 @@ void initWiFi() {
 
     char ip_address_url[25] = "http://";
     char ip[16];
-    sprintf(ip, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
+    get_local_ip(ip, sizeof(ip));
     strncat(ip_address_url, ip, 16);
     strcat(ip_address_url, "/");
 
@@ -143,7 +149,7 @@ uint8_t WLcount = 0;
 int64_t WLNextAt = 0;
 
 void reconnectWiFi() {
-    if (WiFi.status() != WL_CONNECTED) {
+    if (!is_wifi_connected()) {
         // WiFi is down - Reconnect
         if(WLcount == 0) {
             // First time we noticed the WiFi is out
@@ -162,7 +168,7 @@ void reconnectWiFi() {
         ++WLcount;
 
         // Check if we reconnected
-        if (WiFi.status() != WL_CONNECTED) {
+        if (!is_wifi_connected()) {
             if (WLcount <= MAX_CONNECT_ATTEMPTS) {
                 // Not reconnected, but still have attempts left to reconnect
                 // printDot(true);
@@ -177,7 +183,7 @@ void reconnectWiFi() {
         }
     }
 
-    if (WiFi.status() == WL_CONNECTED && WLcount != 0) {
+    if (is_wifi_connected() && WLcount != 0) {
         // We reconnected successfully
         Log.error("Reconnected to WiFi\r\n");
         mdnsReset();  // Make sure that we reconnect mDNS
@@ -185,4 +191,20 @@ void reconnectWiFi() {
         WLcount = 0;
     }
 
+}
+
+bool is_wifi_connected() {
+    wifi_ap_record_t ap_info;
+    return esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
+}
+
+bool get_local_ip(char* ip_str, size_t len) {
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+        snprintf(ip_str, len, IPSTR, IP2STR(&ip_info.ip));
+        return true;
+    }
+    ip_str[0] = '\0';
+    return false;
 }

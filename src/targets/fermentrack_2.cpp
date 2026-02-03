@@ -14,21 +14,12 @@
 
 #include <ctime>
 #include <cstdio>
+#include <esp_timer.h>
+#include <esp_system.h>
 
 #include <thorlog.h>
-
-// =============================================================================
-// TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
-// =============================================================================
-// This include prevents lwip/Arduino IPAddress.h header conflicts.
-// When fully converted to ESP-IDF, remove this include entirely.
-#include <WiFi.h>
-// =============================================================================
-
 #include <ArduinoJson.h>
 
-#include "esp_timer.h"
-#include "esp_system.h"
 
 #include "sendData.h"
 #include "version.h"

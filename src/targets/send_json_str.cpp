@@ -1,7 +1,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <thorlog.h>
+
 
 // =============================================================================
 // TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
@@ -14,12 +14,14 @@
 #include <WiFi.h>
 // =============================================================================
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_http_client.h"
-#include "esp_netif.h"
-#include "esp_crt_bundle.h"
-#include "esp_tls.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_http_client.h>
+#include <esp_netif.h>
+#include <esp_crt_bundle.h>
+#include <esp_tls.h>
+
+#include <thorlog.h>
 
 #include "send_json_str.h"
 #include "url_utils.h"

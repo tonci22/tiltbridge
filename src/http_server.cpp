@@ -1,12 +1,12 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/timers.h>
+
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
-#include <WiFi.h>
 
 #include "url_utils.h"
 #include <thorlog.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/timers.h"
 
 #include "filesystem.h"
 
@@ -800,5 +800,5 @@ void httpServer::init() {
     // DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
 
     asyncWebServer.begin();
-    Log.notice("HTTP server started. Open: http://%s.local/ to view application.\r\n", WiFi.getHostname());
+    Log.notice("HTTP server started. Open: http://%s.local/ to view application.\r\n", config.mdnsID);
 }

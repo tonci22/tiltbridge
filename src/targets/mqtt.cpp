@@ -1,8 +1,8 @@
 #include <ctime>
 #include <thorlog.h>
-#include <WiFi.h>
 
 #include "jsonconfig.h"
+#include "wifi_setup.h"
 #include "sendData.h"
 #include "tilt/tiltScanner.h"
 #include "mqtt_client.h"
@@ -38,7 +38,7 @@ void dataSendHandler::mqtt_event_handler(void *handler_args, esp_event_base_t ba
 void dataSendHandler::init_mqtt()
 {
     // Checking for the WiFi Status is done in the data sending loop, but we also need to be sure we are connected to WiFi when we initialize the MQTT client
-    if (WiFi.status() != WL_CONNECTED) {
+    if (!is_wifi_connected()) {
         return;
     }
 
@@ -118,7 +118,7 @@ void dataSendHandler::connect_mqtt()
 {
     // esp-mqtt handles auto-reconnection internally, so this function primarily
     // ensures the client is initialized and can force a reconnection if needed
-    if (WiFi.status() != WL_CONNECTED) {
+    if (!is_wifi_connected()) {
         return;
     }
 
@@ -191,7 +191,7 @@ void dataSendHandler::enrich_announcement(const char* topic, const char* tilt_co
     char ip_address_url[25] = "http://";
     {
         char ip[16];
-        sprintf(ip, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
+        get_local_ip(ip, sizeof(ip));
         strncat(ip_address_url, ip, 16);
         strcat(ip_address_url, "/");
     }

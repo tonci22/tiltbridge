@@ -1,31 +1,19 @@
 #include <ctime>
-#include <ArduinoJson.h>
-
-// =============================================================================
-// TODO(idf_lib_swap): ARDUINO COMPATIBILITY - REMOVE WHEN FULLY CONVERTED
-// =============================================================================
-// WiFi.h is still needed for WiFi.status() check and some Arduino compatibility.
-// WiFiClient.h, WiFiClientSecure.h, and HTTPClient.h are being phased out in
-// favor of the unified http_request() function in send_json_str.h.
-// When fully converted, remove these includes.
-#include <WiFi.h>
-#include <WiFiClient.h>
-#include "mqtt_client.h"  // May need to keep this one even when dropping Arduino compatibility
-#include <WiFiClientSecure.h>
-#include <HTTPClient.h>
-// =============================================================================
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <thorlog.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include <ArduinoJson.h>
+
 #include "url_utils.h"
 #include "targets/send_json_str.h"
 
 #include "tilt/tiltScanner.h"
+#include "mqtt_client.h"  // for init_mqtt()
 #include "jsonconfig.h"
-#include "version.h"
 #include "http_server.h"
 #include "main.h"  // for printMem()
+#include "wifi_setup.h"
 
 #include "sendData.h"
 
@@ -128,7 +116,7 @@ void dataSendHandler::init()
 
 void dataSendHandler::process()
 {
-    if (WiFi.status() == WL_CONNECTED) {
+    if (is_wifi_connected()) {
         send_to_legacy_fermentrack();
         send_to_fermentrack();
         send_to_bf_and_bf();
