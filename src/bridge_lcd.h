@@ -12,19 +12,19 @@
 // LCD_TFT_ESPI - For smaller TFT displays
 
 #ifdef LCD_SSD1306
-#include <SSD1306Wire.h>
+#include <LovyanGFX.hpp>
+#include "lovyan_config.h"
 #define SSD1306_FONT_HEIGHT     10
 #define SSD_LINE_CLEARANCE      2
-#define SSD1306_FONT            ArialMT_Plain_10
 #define TILTS_PER_PAGE          5 // The actual number is one fewer than this - the first row is used for headers
 #define HAVE_LCD                1
 
 #elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
 
 // For the LCD_TFT displays, we're connecting via SPI
+// LovyanGFX handles SPI internally, no separate SPI include needed
 #include <LovyanGFX.hpp>
 #include "lovyan_config.h"
-#include <SPI.h>
 
 #define FF_NORMAL               &FreeSans9pt7b
 
@@ -67,6 +67,7 @@ public:
     void display_wifi_success_screen(const char *mdns_url, const char *ip_address_url);
     void display_wifi_reset_screen();
     void display_ota_update_screen();
+    void display_wifi_connecting_screen(const char *ssid);
     void display_wifi_disconnected_screen();
     void display_wifi_reconnect_failed();
 
@@ -85,7 +86,7 @@ private:
     inline void init_power();
 
     void print_tilt_to_line(tiltHydrometer *tilt, uint8_t line);
-    bool i2c_device_at_address(byte address, int sda_pin, int scl_pin);
+    bool i2c_device_at_address(uint8_t address, int sda_pin, int scl_pin);
 
 #ifdef LCD_TFT_M5STICKC
     enum class M5Variant { Plus, Plus2 };
@@ -97,11 +98,9 @@ private:
     void display_tilt_screen(uint8_t screen_number);    // Not in impl
     void display();
 
-#ifdef LCD_SSD1306
-    SSD1306Wire *oled_display;
-#elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
+#if defined(HAVE_LCD)
     lgfx::LGFX_Device *tft;
-#endif // LCD_SSD1306
+#endif
 
     bool displaying_wifi_dc_screen = false;
     uint8_t tilt_pages_in_run;  // Number of pages in the current loop through the active tilts (# active tilts / 3)

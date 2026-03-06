@@ -3,8 +3,12 @@
 // More details (including license details) can be found in the files accompanying this source code.
 
 #include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <freertos/timers.h>
+#include <nvs_flash.h>
+#include <esp_bus.h>
 
 #include <thorlog.h>
 
@@ -15,6 +19,7 @@
 #include "tilt/tiltScanner.h"
 #include "http_server.h"
 #include "wifi_setup.h"
+#include "mdns_setup.h"
 #include "sendData.h"
 #include "jsonconfig.h"
 #include "bridge_lcd.h"
@@ -32,9 +37,9 @@ TimerHandle_t reboot24Timer = nullptr;
 // Timer callback for memory debug printing
 #if (ARDUINO_LOG_LEVEL >= ARDUINO_LOG_LOG_LEVEL_INFO) && !defined(DISABLE_LOGGING)
 static void memCheckTimerCallback(TimerHandle_t xTimer) {
-    const uint32_t free = ESP.getFreeHeap();
-    const uint32_t max = ESP.getMaxAllocHeap();
-    const uint8_t frag = 100 - (max * 100) / free;
+    const uint32_t free = esp_get_free_heap_size();
+    const uint32_t max = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint8_t frag = (free > 0) ? (100 - (max * 100) / free) : 0;
     Log.info("Free Heap: %d, Largest contiguous block: %d, Frag: %d%%\r\n", free, max, frag);
 }
 #endif
@@ -47,42 +52,60 @@ static void reboot24TimerCallback(TimerHandle_t xTimer) {
 }
 
 void printMem() {
-    const uint32_t free = ESP.getFreeHeap();
-    const uint32_t max = ESP.getMaxAllocHeap();
-    const uint8_t frag = 100 - (max * 100) / free;
+    const uint32_t free = esp_get_free_heap_size();
+    const uint32_t max = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint8_t frag = (free > 0) ? (100 - (max * 100) / free) : 0;
     Log.info("Free Heap: %d, Largest contiguous block: %d, Frag: %d%%\r\n", free, max, frag);
 }
 
 void reboot()
 {
     Log.notice("Rebooting on 24-hour timer." CR);
-    delay(500);
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }
 
 void setup() {
+
+    esp_log_level_set("esp_bus", ESP_LOG_VERBOSE);
+
+    // Initialize esp_bus (required for esp_wifi_manager events)
+    ESP_LOGI("tiltbridge", "Initializing esp_bus.");
+    ESP_ERROR_CHECK(esp_bus_init());
+
     serial();
 
     Log.verbose("Loading config.\r\n");
     // Initialize the filesystem 
     // (reformat if unable to initialize, though this will present broader problems as we won't have the web interface)
-    if (!FILESYSTEM.begin(true)) {
-        Log.verbose("Unable to initialize filesystem.\r\n");
+    if (!filesystem_init(true)) {
+        Log.error("Unable to initialize filesystem.\r\n");
     }
     config.load();
 
     Log.verbose("Initializing LCD.\r\n");
     lcd.init();
+    lcd.display_logo();
 
-    Log.verbose("Initializing WiFi.\r\n");
+    // Initialize NVS (required for esp_wifi_manager)
+    esp_err_t nvs_ret = nvs_flash_init();
+    if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        Log.warning("NVS partition was truncated, erasing and reinitializing.\r\n");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs_ret);
+
+
+
+    Log.info("Initializing WiFi.\r\n");
     initWiFi();
 
-    Log.verbose("Initializing scanner.\r\n");
+    Log.info("Initializing scanner.\r\n");
     tilt_scanner.init();                        // Initialize the BLE scanner
     tilt_scanner.wait_until_scan_complete();    // Wait until the initial scan completes
 
     data_sender.init();     // Initialize the data sender
-    http_server.init();     // Initialize the web server
     initButtons();          // Initialize buttons
 
     // Start independent timers using FreeRTOS software timers
@@ -122,15 +145,15 @@ void loop() {
         Log.verbose("Resetting controller.\r\n");
         http_server.restart_requested = false;
         tilt_scanner.wait_until_scan_complete(); // Wait for scans to complete
-        delay(1000);
+        vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();                           // Restart the TiltBridge
     }
 
     if (doWiFiReset || http_server.wifi_reset_requested) {
         Log.verbose("Resetting WiFi configuration.\r\n");
-        http_server.wifi_reset_requested = false; 
+        http_server.wifi_reset_requested = false;
         tilt_scanner.wait_until_scan_complete(); // Wait for scans to complete
-        delay(1000);
+        vTaskDelay(pdMS_TO_TICKS(1000));
         doWiFiReset = false;
         disconnectWiFi();
     }
@@ -164,4 +187,28 @@ void loop() {
     reconnectWiFi();
 
     screenFlip(); // This must be in the loop
+}
+
+// Main loop task for FreeRTOS
+static void loopTask(void* pvParameters) {
+    for (;;) {
+        loop();
+        vTaskDelay(pdMS_TO_TICKS(10));  // Small delay to allow other tasks to run
+    }
+}
+
+// ESP-IDF entry point
+extern "C" void app_main(void) {
+    setup();
+
+    // Create the main loop task
+    xTaskCreatePinnedToCore(
+        loopTask,       // Task function
+        "loopTask",     // Task name
+        8192,           // Stack size (bytes)
+        nullptr,        // Task parameters
+        1,              // Priority
+        nullptr,        // Task handle
+        1               // Core ID (run on core 1, leaving core 0 for WiFi/BLE)
+    );
 }

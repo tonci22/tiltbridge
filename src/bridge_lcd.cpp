@@ -1,13 +1,15 @@
 #include <thorlog.h>
-
-#ifdef LCD_SSD1306
-#include <Wire.h>
-#endif
+#include <esp_timer.h>
 
 #include "jsonconfig.h"
 #include "tilt/tiltScanner.h"
 #include "bridge_lcd.h"
 #include "wifi_setup.h"
+
+// ESP-IDF replacement for Arduino millis()
+static inline unsigned long millis() {
+    return (unsigned long)(esp_timer_get_time() / 1000ULL);
+}
 
 bridge_lcd lcd;
 
@@ -64,6 +66,15 @@ void bridge_lcd::display_wifi_connect_screen(const char *ap_name, const char *ap
     print_line("settings portal after connecting to WiFi", 10);
 #endif
 
+    display();
+}
+
+void bridge_lcd::display_wifi_connecting_screen(const char *ssid) {
+    clear();
+    print_line("Connecting to WiFi:", 1);
+    print_line(ssid, 2);
+    print_line("", 3);
+    print_line("Please wait...", 4);
     display();
 }
 
@@ -130,6 +141,7 @@ void bridge_lcd::display_logo(bool fromReset) {}
 // void bridge_lcd::checkTouch() {}
 
 void bridge_lcd::display_wifi_connect_screen(const char *ap_name, const char *ap_pass) {}
+void bridge_lcd::display_wifi_connecting_screen(const char *ssid) {}
 void bridge_lcd::display_wifi_success_screen(const char *mdns_url, const char *ip_address_url) {}
 void bridge_lcd::display_wifi_reset_screen() {}
 void bridge_lcd::display_ota_update_screen() {}

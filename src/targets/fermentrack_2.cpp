@@ -282,7 +282,7 @@ bool send_status_to_fermentrack_2() {
         if(success) {
             // We successfully sent the device status
             Log.verbose("Fermentrack 2 status successfully sent. Device ID: %s\r\n", config.fermentrackDeviceID);
-            
+
             // Check if there are messages to retrieve
             if(doc["has_messages"].is<bool>()) {
                 fermentrackMessageFlags.hasMessages = doc["has_messages"].as<bool>();
@@ -298,11 +298,10 @@ bool send_status_to_fermentrack_2() {
     } else {
         // Invalid response
         fermentrackStatusError = fermentrackStatusErrorT::STATUS_ENDPOINT_ERR;
-    } 
+    }
 
     return true;
 }
-
 
 bool process_messages_on_fermentrack_2() {
     char url[256] = "";
@@ -869,4 +868,3 @@ bool ft2_replace_all_calibration_points(uint8_t color) {
 
     return true;
 }
-

@@ -1,210 +1,282 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#include <cstring>
 #include <esp_timer.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
-#include <ESPmDNS.h>
+#include <esp_event.h>
+#include "mdns_setup.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <thorlog.h>
-#include <WiFiManager.h>
-
+#include <esp_wifi_manager.h>
+#include <esp_bus.h>
+#include <esp_log.h>
 
 #include "url_utils.h"
 #include "bridge_lcd.h"
-#include "jsonconfig.h"
+#include "jsonconfig.h"  // For config struct and global instance
+#include "idf_http_server.h"
 #include "http_server.h"
 
 #include "wifi_setup.h"
 
+// Track WiFi connection state to distinguish initial connection from reconnection.
+// This flag is set to true when WiFi disconnects and reset to false when reconnected.
+// Used to determine appropriate LCD display: success screen (initial) vs logo (reconnection).
+static bool wifi_was_disconnected = false;
 
-bool shouldSaveConfig = false;
+// Event callback for WiFi connecting (attempting to connect to a network)
+static void on_wifi_connecting(const char *event, const void *data, size_t len, void *ctx) {
+    if (data == nullptr || len == 0) {
+        return;
+    }
+    const char *ssid = (const char *)data;
+    Log.info("WiFi connecting to %s\r\n", ssid);
 
-void saveParamsCallback() {
-    // Callback notifying us of the need to save config
-    shouldSaveConfig = true;
+    // Don't clobber the AP screen with "connecting to..." during background reconnect attempts
+    wifi_status_t status;
+    if (wifi_manager_get_status(&status) == ESP_OK && status.ap_active) {
+        return;
+    }
+
+    lcd.display_wifi_connecting_screen(ssid);
 }
 
-void apCallback(WiFiManager *myWiFiManager) {
-    // Callback to display the WiFi LCD notification and set bandwidth
-    Log.verbose("Entered config mode: SSID: %s, IP: %s\r\n", myWiFiManager->getConfigPortalSSID().c_str(), WiFi.softAPIP().toString().c_str());
-    lcd.display_wifi_connect_screen(myWiFiManager->getConfigPortalSSID().c_str(), WIFI_SETUP_AP_PASS);
-    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);  // Set the bandwidth of ESP32 interface 
+// Event callback for WiFi connected
+static void on_wifi_connected(const char *event, const void *data, size_t len, void *ctx) {
+    if (data == nullptr || len < sizeof(wifi_connected_t)) {
+        Log.warning("WiFi connected event received with invalid payload\r\n");
+        return;
+    }
+    const wifi_connected_t *info = (const wifi_connected_t *)data;
+    Log.notice("WiFi connected to %s, channel %d, RSSI %d\r\n", info->ssid, info->channel, info->rssi);
+}
+
+// Event callback for WiFi got IP
+static void on_wifi_got_ip(const char *event, const void *data, size_t len, void *ctx) {
+    wifi_status_t status;
+    if (wifi_manager_get_status(&status) == ESP_OK) {
+        Log.notice("WiFi got IP: %s\r\n", status.ip);
+
+        if (wifi_was_disconnected) {
+            // This is a reconnection after a disconnect
+            Log.notice("Reconnected to WiFi after disconnect\r\n");
+            mdnsReset();  // Re-establish mDNS services
+            lcd.display_logo();
+            wifi_was_disconnected = false;
+        } else {
+            // Initial connection - display success screen with access URLs
+            char mdns_url[50] = "http://";
+            strncat(mdns_url, config.mdnsID, 31);
+            strcat(mdns_url, ".local/");
+
+            char ip_address_url[25] = "http://";
+            strncat(ip_address_url, status.ip, 16);
+            strcat(ip_address_url, "/");
+
+            lcd.display_wifi_success_screen(mdns_url, ip_address_url);
+        }
+    }
+}
+
+// Event callback for WiFi disconnected
+static void on_wifi_disconnected(const char *event, const void *data, size_t len, void *ctx) {
+    if (data == nullptr || len < sizeof(wifi_disconnected_t)) {
+        Log.warning("WiFi disconnected event received with invalid payload\r\n");
+        return;
+    }
+    const wifi_disconnected_t *info = (const wifi_disconnected_t *)data;
+    Log.warning("WiFi disconnected from %s, reason: %d. Auto-reconnect in progress.\r\n", info->ssid, info->reason);
+
+    // Update state and LCD/UI to show the disconnected state
+    wifi_was_disconnected = true;
+    lcd.display_wifi_disconnected_screen();
+}
+
+// Event callback for AP started
+static void on_wifi_ap_started(const char *event, const void *data, size_t len, void *ctx) {
+    wifi_ap_status_t ap_status;
+    Log.info("WiFi AP started for configuration.\r\n");
+    if (wifi_manager_get_ap_status(&ap_status) == ESP_OK) {
+        Log.info("AP started: SSID: %s, IP: %s\r\n", ap_status.ssid, ap_status.ip);
+        lcd.display_wifi_connect_screen(ap_status.ssid, WIFI_SETUP_AP_PASS);
+        esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);  // Set the bandwidth of ESP32 interface
+    }
+}
+
+// Event callback for provisioning stopped — initialize the HTTP server routes
+static void on_provisioning_stopped(const char *event, const void *data, size_t len, void *ctx) {
+    Log.info("WiFi provisioning stopped, initializing HTTP server.\r\n");
+    http_server.init();
+}
+
+// Event callback for variable changes (e.g., mdns_name changed via WiFi manager API)
+static void on_var_changed(const char *event, const void *data, size_t len, void *ctx) {
+    if (data == nullptr || len < sizeof(wifi_var_t)) {
+        return;
+    }
+    const wifi_var_t *var = (const wifi_var_t *)data;
+
+    if (strcmp(var->key, "mdns_name") == 0 && strlen(var->value) > 0) {
+        if (isValidHostName(var->value) && strcmp(var->value, config.mdnsID) != 0) {
+            Log.notice("mDNS name changed via WiFi manager: %s\r\n", var->value);
+            strlcpy(config.mdnsID, var->value, sizeof(config.mdnsID));
+            config.save();
+            mdnsReset();
+        }
+    }
 }
 
 void disconnectWiFi() {
     Log.notice("Resetting WiFi settings via disconnectWiFi()\r\n");
-    WiFi.mode(WIFI_AP_STA);
-    WiFi.persistent(true);  // This is implicit at startup, but I want to set it explicitly here to ensure credentials are deleted
-    WiFi.disconnect(true, true);
-    WiFi.begin("0","0");  // Fixes a bug where WiFi.disconnect() sometimes won't always clear the settings
-    vTaskDelay(1000);  // Give everything a moment to settle before resetting
+    wifi_manager_disconnect();
+    wifi_manager_factory_reset();
+    vTaskDelay(pdMS_TO_TICKS(1000));  // Give everything a moment to settle before resetting
     esp_restart();
 }
 
-void mdnsReset() {
-    // tilt_scanner.wait_until_scan_complete(); // Wait for scans to complete
-    http_server.name_reset_requested = false;
-    MDNS.end();
-    if (!MDNS.begin(config.mdnsID)) {
-        Log.error("Error resetting MDNS responder.");
-        esp_restart();
-    } else {
-        Log.notice("mDNS responder restarted, hostname: %s.local.\r\n", WiFi.getHostname());
-        MDNS.addService("http", "tcp", WEB_SERVER_PORT);
-        MDNS.addService("tiltbridge", "tcp", WEB_SERVER_PORT);
-    }
-}
 
 void initWiFi() {
 
-    WiFi.mode(WIFI_STA); // Explicitly set mode, ESP defaults to STA+AP
-    WiFi.setSleep(WIFI_PS_NONE); // Disable WiFi power saving for better stability
+    esp_log_level_set("wifi_mgr", ESP_LOG_VERBOSE);
+    esp_log_level_set("tiltbridge", ESP_LOG_VERBOSE);
+    esp_log_level_set("esp_bus", ESP_LOG_VERBOSE);
 
-    // Set up WiFi event handlers for better diagnostics
-    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-        Log.warning("WiFi disconnected, reason: %d\r\n", info.wifi_sta_disconnected.reason);
-    }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    // Initialize TCP/IP stack before starting HTTP server
+    // esp_netif_init() is safe to call multiple times
+    ESP_ERROR_CHECK(esp_netif_init());
 
-    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-        char ip[16];
-        get_local_ip(ip, sizeof(ip));
-        Log.notice("WiFi connected, IP: %s\r\n", ip);
-    }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+    // Create default event loop if not already created
+    esp_err_t evt_ret = esp_event_loop_create_default();
+    if (evt_ret != ESP_OK && evt_ret != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(evt_ret);  // Only fail on unexpected errors
+    }
 
-    WiFiManager wm;
-#if ARDUINO_LOG_LEVEL == 6
-    wm.setDebugOutput(true); // Use debug if we are at max log level
-#else
-    wm.setDebugOutput(false);
-#endif
+    // Start HTTP server early so we can share it with wifi_manager
+    // This prevents port conflicts when wifi_manager's HTTP server is torn down
+    esp_err_t http_ret = idf_httpd_start();
+    if (http_ret != ESP_OK) {
+        Log.error("Failed to start HTTP server early: %s\r\n", esp_err_to_name(http_ret));
+    }
 
-    wm.setSaveConfigCallback(saveParamsCallback);   // Signals settings change
-    wm.setAPCallback(apCallback);                   // Set up when portal fires
-    wm.setConfigPortalTimeout(5 * 60);              // Timeout portal in 5 mins
+    // Subscribe to WiFi events
+    esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_CONNECTING), on_wifi_connecting, NULL);
+    esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_CONNECTED), on_wifi_connected, NULL);
+    esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_GOT_IP), on_wifi_got_ip, NULL);
+    // esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_DISCONNECTED), on_wifi_disconnected, NULL);
+    esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_AP_START), on_wifi_ap_started, NULL);
+    esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_VAR_CHANGED), on_var_changed, NULL);
+    esp_bus_sub(WIFI_EVT(WIFI_MGR_EVT_PROVISIONING_STOPPED), on_provisioning_stopped, NULL);
 
-    wm.setHostname(config.mdnsID);  // Allow DHCP to get proper name
-    // wm.setWiFiAutoReconnect(true);  // Enable auto reconnect (should remove need for reconnectWiFi()) - Note, this doesn't seem to be supported for anything other than ESP8266, so disabling it here in favor of the manual implementation in the loop
-    wm.setWiFiAPChannel(1);         // Pick the most common channel, safe for all countries
-    wm.setCleanConnect(true);       // Always disconnect before connecting
-    // Commenting out setCountry until https://github.com/tzapu/WiFiManager/issues/1309 is fixed
-    // wm.setCountry("US");            // US country code is most restrictive, use for all countries
+    // Default variables for WiFi manager - mdns_name is used to set the mDNS hostname
+    // This provides a default value; if NVS has a stored value, that takes precedence
+    static wifi_var_t default_vars[] = {
+        {"mdns_name", "tiltbridge"},
+    };
 
-    wm.setCustomHeadElement("<style type=\"text/css\">body {background-image: url(\"data:image/svg+xml;utf8,%3Csvg%20id%3D%22Layer_1%22%20data-name%3D%22Layer%201%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20231.62%20169.18%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%20width%3D%2281.067%22%20height%3D%2259.213%22%3E%3Cdefs%3E%3Cstyle%3E.cls-1%7Bfill%3A%23f7f8fa%7D%3C%2Fstyle%3E%3C%2Fdefs%3E%3Cg%20id%3D%22tb_logo%22%3E%3Cg%3E%3Cpath%20class%3D%22cls-1%22%20d%3D%22M31.77%2C13.6A29.88%2C29.88%2C0%2C0%2C1%2C74%2C13.6a2.42%2C2.42%2C0%2C0%2C0%2C3.42-3.43%2C34.73%2C34.73%2C0%2C0%2C0-49.11%2C0%2C2.42%2C2.42%2C0%2C0%2C0%2C3.42%2C3.43Z%22%2F%3E%3Cpath%20class%3D%22cls-1%22%20d%3D%22M67.93%2C22.13A2.42%2C2.42%2C0%2C0%2C0%2C69.64%2C18a23.65%2C23.65%2C0%2C0%2C0-33.47%2C0%2C2.42%2C2.42%2C0%2C0%2C0%2C3.42%2C3.42%2C18.84%2C18.84%2C0%2C0%2C1%2C26.63%2C0A2.42%2C2.42%2C0%2C0%2C0%2C67.93%2C22.13Z%22%2F%3E%3Cpath%20class%3D%22cls-1%22%20d%3D%22M43.91%2C25.73a2.42%2C2.42%2C0%2C0%2C0%2C3.42%2C3.43%2C7.88%2C7.88%2C0%2C0%2C1%2C11.15%2C0%2C2.43%2C2.43%2C0%2C0%2C0%2C3.43-3.43A12.75%2C12.75%2C0%2C0%2C0%2C43.91%2C25.73Z%22%2F%3E%3C%2Fg%3E%3Cpath%20class%3D%22cls-1%22%20d%3D%22M103.39%2C61.76H91.7C80%2C61.76%2C70.34%2C57.24%2C63%2C48.32a45.48%2C45.48%2C0%2C0%2C1-7.38-12.7%2C3.85%2C3.85%2C0%2C0%2C1-5.36%2C0A45.31%2C45.31%2C0%2C0%2C1%2C43%2C48.19%2C35.71%2C35.71%2C0%2C0%2C1%2C14.12%2C61.76H2.42a2.42%2C2.42%2C0%2C0%2C0%2C0%2C4.84h101a2.42%2C2.42%2C0%2C0%2C0%2C0-4.84Zm-52.9%2C0H34.08A42.36%2C42.36%2C0%2C0%2C0%2C46.7%2C51.26%2C52%2C52%2C0%2C0%2C0%2C50.49%2C46Zm4.84%2C0V46a50.35%2C50.35%2C0%2C0%2C0%2C3.78%2C5.3%2C42.49%2C42.49%2C0%2C0%2C0%2C12.62%2C10.5Z%22%2F%3E%3Ccircle%20class%3D%22cls-1%22%20cx%3D%2252.91%22%20cy%3D%2232.86%22%20r%3D%222.81%22%2F%3E%3Cg%3E%3Cpath%20class%3D%22cls-1%22%20d%3D%22M22.39%2C77.09A2.44%2C2.44%2C0%2C0%2C1%2C20%2C74.65V64.52a2.45%2C2.45%2C0%2C0%2C1%2C4.89%2C0V74.65A2.45%2C2.45%2C0%2C0%2C1%2C22.39%2C77.09Z%22%2F%3E%3Cpath%20class%3D%22cls-1%22%20d%3D%22M83.42%2C77.09A2.45%2C2.45%2C0%2C0%2C1%2C81%2C74.65V64.52a2.45%2C2.45%2C0%2C0%2C1%2C4.89%2C0V74.65A2.45%2C2.45%2C0%2C0%2C1%2C83.42%2C77.09Z%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cuse%20xlink%3Ahref%3D%22%23tb_logo%22%20x%3D%220%22%20y%3D%220%22%2F%3E%3Cuse%20xlink%3Ahref%3D%22%23tb_logo%22%20x%3D%22115.81%22%20y%3D%220%22%2F%3E%3Cuse%20xlink%3Ahref%3D%22%23tb_logo%22%20x%3D%22-57.905%22%20y%3D%2284.59%22%2F%3E%3Cuse%20xlink%3Ahref%3D%22%23tb_logo%22%20x%3D%2257.905%22%20y%3D%2284.59%22%2F%3E%3Cuse%20xlink%3Ahref%3D%22%23tb_logo%22%20x%3D%22173.715%22%20y%3D%2284.59%22%2F%3E%3C%2Fsvg%3E\")}</style>");
+    // Configure WiFi Manager
+    wifi_manager_config_t wifi_config = {
+        .default_networks = NULL,
+        .default_network_count = 0,
+        .default_vars = default_vars,
+        .default_var_count = sizeof(default_vars) / sizeof(default_vars[0]),
+        .max_retry_per_network = 3,
+        .retry_interval_ms = 5000,
+        .retry_max_interval_ms = 60000,
+        .auto_reconnect = true,
+        .provisioning_mode = WIFI_PROV_ON_FAILURE,  // If we fail to connect to any known network, start provisioning (SoftAP + captive portal)
+        .stop_provisioning_on_connect = true,       // Stop the AP and captive portal and deregister httpd endpoints once we successfully connect to a WiFi network
+        .provisioning_teardown_delay_ms = 5000,
+        .http_post_prov_mode = WIFI_HTTP_API_ONLY,  // Unregister captive portal/webui routes after provisioning so TiltBridge can register its own
+        .default_ap = {
+            .ssid = WIFI_SETUP_AP_NAME,
+            .password = WIFI_SETUP_AP_PASS,
+            .channel = 1,
+            .max_connections = 4,
+            .hidden = false,
+            .ip = "192.168.4.1",
+            .netmask = "255.255.255.0",
+            .gateway = "192.168.4.1",
+            .dhcp_start = "192.168.4.2",
+            .dhcp_end = "192.168.4.20",
+        },
+        .always_use_ap_defaults = true, // Ignore any saved AP config - we want to ensure the captive portal is always available and consistent
+        .enable_ap = true,
+        .http = {
+            .httpd = idf_httpd_get_handle(),  // Share our HTTP server with wifi_manager
+            .api_base_path = "/api/wifi",
+            .enable_auth = false,
+            .auth_username = NULL,
+            .auth_password = NULL,
+        },
+        .mdns = {
+            .enable = false,  // Disabled - using ESPmDNS directly for custom services
+        },
+        .ble = {
+            .enable = false,
+            .device_name = NULL,
+        },
+    };
 
-    // config.mdnsID is the default name that will appear on the form
-    WiFiManagerParameter custom_mdns_name("mdns", "Device (mDNS) Name", config.mdnsID, 20);
-    wm.addParameter(&custom_mdns_name);
-
-    if (!wm.autoConnect(WIFI_SETUP_AP_NAME, WIFI_SETUP_AP_PASS)) {
-        Log.warning("Failed to connect and/or hit timeout. Restarting.\r\n");
+    // Initialize WiFi Manager
+    esp_err_t err = wifi_manager_init(&wifi_config);
+    if (err != ESP_OK) {
+        Log.error("Failed to initialize WiFi Manager: %d\r\n", err);
+        vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
-    } else {
-        // We finished with portal (We were configured)
-        WiFi.softAPdisconnect(true);
-        WiFi.mode(WIFI_STA);
     }
 
-    if (shouldSaveConfig) {
-        // If we connected, then let's save the mDNS name
-        if (strcmp(custom_mdns_name.getValue(), config.mdnsID) != 0) {
-            // If the mDNS name is valid, save it.
-            if (isValidHostName(custom_mdns_name.getValue())) {
-                strlcpy(config.mdnsID, custom_mdns_name.getValue(), 31);
-                config.save();
-            } else {
-                // If the mDNS name is invalid, reset the WiFi configuration and restart the ESP8266
-                disconnectWiFi();
-            }
-        }
-        // Doing this to reset the DHCP name, the portal should never pop
-        // Additionally, there is a bug where the HTTP server doesn't spin up after the AP shuts down. Not sure where
-        // that issue is, but this solves it.
-        delay(3000); // Add a small delay to ensure WiFi is settled
+    // Wait for connection (5 minute timeout)
+    err = wifi_manager_wait_connected(5 * 60 * 1000);
+    if (err != ESP_OK) {
+        Log.error("WiFi connection timeout. Restarting device.\r\n");
+        vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     }
 
-    if (!MDNS.begin(config.mdnsID)) {
-        Log.error("Error setting up MDNS responder.\r\n");
-    }
+    // wifi_manager handles its own provisioning teardown after the configured delay
+    // (stop_provisioning_on_connect + provisioning_teardown_delay_ms)
 
-    MDNS.addService("http", "tcp", WEB_SERVER_PORT);       // technically we should wait on this, but I'm impatient.
-    MDNS.addService("tiltbridge", "tcp", WEB_SERVER_PORT); // for lookups
+    // Sync mDNS name FROM config TO wifi_manager (config file is the source of truth).
+    // The on_var_changed callback handles the reverse direction for real-time changes.
+    wifi_manager_set_var("mdns_name", config.mdnsID);
 
-    // Display a screen so the user can see how to access the Tiltbridge
-    char mdns_url[50] = "http://";
-    strncat(mdns_url, config.mdnsID, 31);
-    strcat(mdns_url, ".local/");
-
-    char ip_address_url[25] = "http://";
-    char ip[16];
-    get_local_ip(ip, sizeof(ip));
-    strncat(ip_address_url, ip, 16);
-    strcat(ip_address_url, "/");
-
-    lcd.display_wifi_success_screen(mdns_url, ip_address_url);
+    initMDNS();
 }
 
-#define MAX_CONNECT_ATTEMPTS 50
-#define TIME_BETWEEN_ATTEMPTS 6000  // Minimum time between attempts (milliseconds)
-uint8_t WLcount = 0;
-int64_t WLNextAt = 0;
-
+// Check WiFi connectivity and trigger reconnect if needed.
+// Called from the main loop to ensure the manager's auto-reconnect is engaged.
 void reconnectWiFi() {
-    if (!is_wifi_connected()) {
-        // WiFi is down - Reconnect
-        if(WLcount == 0) {
-            // First time we noticed the WiFi is out
-            Log.notice("WiFi is disconnected, reconnecting. (%d/%d)\r\n", WLcount, MAX_CONNECT_ATTEMPTS);
-            lcd.display_wifi_disconnected_screen();
-            // WiFi.begin();
-            delay(1000); // Ensuring the "disconnected" screen appears for at least one second
-        } else if(WLNextAt >= esp_timer_get_time()) {
-            // Haven't hit the timer for the next reconnect attempt - just return
-            return;
-        }
-
-        // Try to reconnect
-        WiFi.reconnect();
-        WLNextAt = esp_timer_get_time() + (1000 * TIME_BETWEEN_ATTEMPTS);
-        ++WLcount;
-
-        // Check if we reconnected
-        if (!is_wifi_connected()) {
-            if (WLcount <= MAX_CONNECT_ATTEMPTS) {
-                // Not reconnected, but still have attempts left to reconnect
-                // printDot(true);
-                Log.notice("WiFi is still disconnected. (%d/%d)\r\n", WLcount, MAX_CONNECT_ATTEMPTS);
-            } else {
-                // We failed to reconnect.
-                lcd.display_wifi_reconnect_failed();
-                Log.error("Unable to reconnect WiFi, restarting.\r\n");
-                delay(1000);
-                esp_restart();
-            }
-        }
+    if (!wifi_manager_is_connected()) {
+        wifi_manager_connect(NULL);
     }
-
-    if (is_wifi_connected() && WLcount != 0) {
-        // We reconnected successfully
-        Log.error("Reconnected to WiFi\r\n");
-        mdnsReset();  // Make sure that we reconnect mDNS
-        lcd.display_logo();
-        WLcount = 0;
-    }
-
 }
 
 bool is_wifi_connected() {
-    wifi_ap_record_t ap_info;
-    return esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
+    return wifi_manager_is_connected();
 }
 
 bool get_local_ip(char* ip_str, size_t len) {
+    // Primary: use esp_wifi_manager's status API
+    wifi_status_t status;
+    if (wifi_manager_get_status(&status) == ESP_OK && strlen(status.ip) > 0) {
+        strlcpy(ip_str, status.ip, len);
+        return true;
+    }
+
+    // Fallback: use ESP-IDF netif API directly
+    // This handles edge cases where wifi_manager status might not be updated yet
     esp_netif_ip_info_t ip_info;
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
         snprintf(ip_str, len, IPSTR, IP2STR(&ip_info.ip));
         return true;
     }
+
     ip_str[0] = '\0';
     return false;
 }

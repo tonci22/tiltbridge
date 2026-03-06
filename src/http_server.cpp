@@ -1,15 +1,14 @@
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <freertos/timers.h>
 
 #include <ArduinoJson.h>
-#include <AsyncJson.h>
-#include <ESPAsyncWebServer.h>
+#include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <esp_system.h>
 
 #include "url_utils.h"
-#include <thorlog.h>
-
-#include "filesystem.h"
-
+#include "thorlog.h"
 
 #include "resetreasons.h"
 #include "uptime.h"
@@ -19,15 +18,24 @@
 #include "sendData.h"
 #include "JsonKeys.h"
 
+#include <esp_wifi_manager.h>
+
 #include "http_server.h"
-
-#include "extended_async_json_handler.h"
-#include "targets/fermentrack_2.h"
+#include "idf_http_server.h"
+#include "idf_json_utils.h"
+#include "idf_static_files.h"
 #include "http_calibration.h"
+#include "targets/fermentrack_2.h"
 
+static const char *TAG = "http_server";
 
 httpServer http_server;
-AsyncWebServer asyncWebServer(WEBPORT);
+
+// Helper function to clear name reset flag without requiring http_server.h include
+// This avoids ESPAsyncWebServer/ESP-IDF http_parser.h enum conflicts
+void http_server_clear_name_reset() {
+    http_server.name_reset_requested = false;
+}
 
 // Timer handles for triggering immediate sends from HTTP configuration updates
 static TimerHandle_t sendNowLegacyFTTimer = nullptr;
@@ -68,17 +76,105 @@ static void startSendNowTimer(TimerHandle_t& timer, const char* name, TimerCallb
 }
 
 
+//=============================================================================
+// JSON Response Generators (GET handlers)
+//=============================================================================
 
-// Settings Page Handlers
-bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static void http_json(JsonDocument &doc) {
+    doc = tilt_scanner.tilt_to_json();
+}
+
+static void settings_json(JsonDocument &doc) {
+    doc = config.to_json_external();
+}
+
+static void this_version(JsonDocument &doc) {
+    doc["version"] = version();
+    doc["branch"] = branch();
+    doc["build"] = build();
+    doc["hardware"] = hardware();
+}
+
+static void uptime_json(JsonDocument &doc) {
+    const int days = uptimeDays();
+    const int hours = uptimeHours();
+    const int minutes = uptimeMinutes();
+    const int seconds = uptimeSeconds();
+    const int millis = uptimeMillis();
+
+    doc["days"] = days;
+    doc["hours"] = hours;
+    doc["minutes"] = minutes;
+    doc["seconds"] = seconds;
+    doc["millis"] = millis;
+}
+
+static void heap_json(JsonDocument &doc) {
+    const uint32_t free = esp_get_free_heap_size();
+    const uint32_t max = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint8_t frag = (free > 0) ? (100 - (max * 100) / free) : 0;
+
+    doc["free"] = free;
+    doc["max"] = max;
+    doc["frag"] = frag;
+}
+
+static void reset_reason_json(JsonDocument &doc) {
+    const int reset = (int)esp_reset_reason();
+
+    doc["reason"] = resetReason[reset];
+    doc["description"] = resetDescription[reset];
+}
+
+
+//=============================================================================
+// Settings Update Handlers (PUT/POST handlers)
+//=============================================================================
+
+static bool updateJsonSettingBool(const JsonDocument& json, const char* key, bool& configVar) {
+    if (json[key].is<bool>()) {
+        configVar = json[key].as<bool>();
+        if(json[key].as<bool>())
+            Log.notice("Settings update, [%s]:(True) applied.\r\n", key);
+        else
+            Log.notice("Settings update, [%s]:(False) applied.\r\n", key);
+        return true;
+    }
+    return false;
+}
+
+static bool updateJsonSetting(const JsonDocument& json, const char* key, char* configVar, uint16_t maxLen) {
+    if (json[key].is<const char*>()) {
+        if(strlen(json[key].as<const char*>()) > maxLen) {
+            Log.warning("Settings update error, [%s]:(%s) too long.\r\n", key, json[key].as<const char*>());
+        } else {
+            strlcpy(configVar, json[key].as<const char*>(), maxLen);
+            Log.notice("Settings update, [%s]:(%s) applied.\r\n", key, json[key].as<const char*>());
+            return true;
+        }
+    } else {
+        Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
+    }
+    return false;
+}
+
+static bool updateJsonSetting(const JsonDocument& json, const char* key, uint16_t& configVar) {
+    if (json[key].is<uint16_t>()) {
+        configVar = json[key].as<uint16_t>();
+        Log.notice("Settings update, [%s]:(%d) applied.\r\n", key, json[key].as<uint16_t>());
+        return true;
+    } else {
+        Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
+    }
+    return false;
+}
+
+static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
     bool hostnamechanged = false;
 
-
-    //////  Generic Settings
     // mDNS ID
     if(json["mdnsID"].is<const char*>()) {
-        // Set hostname
         if (!isValidLabel(json["mdnsID"].as<const char*>())) {
             Log.warning("Settings update error, [mdnsID]:(%s) not valid.\r\n", json["mdnsID"]);
             failCount++;
@@ -96,47 +192,31 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     // tzOffset
     if(json["tzOffset"].is<int8_t>()) {
         if(json["tzOffset"].as<int8_t>() < -12 || json["tzOffset"].as<int8_t>() > 14) {
-            // Out of range
             Log.warning("Settings update error, [tzOffset]:(%d) not valid.\r\n", json["tzOffset"].as<int8_t>());
         } else {
-            // In range
             config.TZoffset = json["tzOffset"];
             Log.notice("Settings update, [tzOffset]:(%d) applied.\r\n", json["tzOffset"].as<int8_t>());
         }
-    } else {
-        // Log.warning("Settings update error, [tzOffset]:(%s) (as str) not valid.\r\n", json["tzOffset"].as<const char*>());
-        // failCount++;
     }
-
 
     // tempUnit
     if(json["tempUnit"].is<const char*>()) {
-        if(strcmp(json["tempUnit"].as<const char*>(), "C") != 0 &&  strcmp(json["tempUnit"].as<const char*>(), "F") != 0) {
-            // Not C/F
+        if(strcmp(json["tempUnit"].as<const char*>(), "C") != 0 && strcmp(json["tempUnit"].as<const char*>(), "F") != 0) {
             Log.warning("Settings update error, [tempUnit]:(%s) not valid.\r\n", json["tempUnit"].as<const char*>());
         } else {
-            // Is C/F
             strlcpy(config.tempUnit, json["tempUnit"].as<const char*>(), 2);
             Log.notice("Settings update, [tempUnit]:(%s) applied.\r\n", json["tempUnit"].as<const char*>());
         }
-    } else {
-        // Log.warning("Settings update error, [tempUnit]:(%s) not valid.\r\n", json["tempUnit"].as<const char*>());
-        // failCount++;
     }
 
     // smoothFactor
     if(json["smoothFactor"].is<uint8_t>()) {
         if(json["smoothFactor"].as<uint8_t>() < 0 || json["smoothFactor"].as<uint8_t>() > 99) {
-            // Out of range
             Log.warning("Settings update error, [smoothFactor]:(%d) not valid.\r\n", json["smoothFactor"].as<uint8_t>());
         } else {
-            // In range
             config.smoothFactor = json["smoothFactor"];
             Log.notice("Settings update, [smoothFactor]:(%d) applied.\r\n", json["smoothFactor"].as<uint8_t>());
         }
-    } else {
-        // Log.warning("Settings update error, [smoothFactor]:(%s) not valid.\r\n", json["smoothFactor"].as<const char*>());
-        // failCount++;
     }
 
     // invertTFT
@@ -148,11 +228,7 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
             Log.notice("Settings update, [invertTFT]:(True) applied.\r\n");
         else
             Log.notice("Settings update, [invertTFT]:(False) applied.\r\n");
-    } else {
-        // Log.warning("Settings update error, [invertTFT]:(%s) not valid.\r\n", json["invertTFT"].as<const char*>());
-        // failCount++;
     }
-
 
     // Process everything we were passed
     if (failCount) {
@@ -160,8 +236,8 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     } else {
         if (config.save()) {
             if (hostnamechanged) {
-                // We reset hostname, process
                 hostnamechanged = false;
+                wifi_manager_set_var("mdns_name", config.mdnsID);
                 http_server.name_reset_requested = true;
                 Log.notice("Received new mDNSid, queued network reset.\r\n");
             }
@@ -173,65 +249,16 @@ bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstrea
     return failCount == 0;
 }
 
-
-bool updateJsonSettingBool(const JsonDocument& json, const char* key, bool& configVar) {
-    if (json[key].is<bool>()) {
-        configVar = json[key].as<bool>();
-        if(json[key].as<bool>())
-            Log.notice("Settings update, [%s]:(True) applied.\r\n", key);
-        else
-            Log.notice("Settings update, [%s]:(False) applied.\r\n", key);
-        return true;
-    } else {
-        // Not a valid bool
-        // Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
-    }
-    return false;
-}
-
-bool updateJsonSetting(const JsonDocument& json, const char* key, char* configVar, uint16_t maxLen) {
-    if (json[key].is<const char*>()) {
-        if(strlen(json[key].as<const char*>()) > maxLen) {
-            // Too long
-            Log.warning("Settings update error, [%s]:(%s) too long.\r\n", key, json[key].as<const char*>());
-        } else {
-            // Valid string
-            strlcpy(configVar, json[key].as<const char*>(), maxLen);
-            Log.notice("Settings update, [%s]:(%s) applied.\r\n", key, json[key].as<const char*>());
-            return true;
-        }
-    } else {
-        // Not a valid string
-        Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
-    }
-    
-    return false;
-}
-
-bool updateJsonSetting(const JsonDocument& json, const char* key, uint16_t& configVar) {
-    if (json[key].is<uint16_t>()) {
-        configVar = json[key].as<uint16_t>();
-        Log.notice("Settings update, [%s]:(%d) applied.\r\n", key, json[key].as<uint16_t>());
-        return true;
-    } else {
-        // Not a valid uint16_t
-        Log.warning("Settings update error, [%s]:(%s) not valid.\r\n", key, json[key].as<const char*>());
-    }
-    return false;
-}
-
-bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
-    // Calibration settings
     if(!updateJsonSettingBool(json, CalibrationKeys::applyCalibration, config.applyCalibration))
         failCount++;
 
     if(!updateJsonSettingBool(json, CalibrationKeys::tempCorrect, config.tempCorrect))
         failCount++;
 
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid upstream configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save calibration configuration data.\r\n");
@@ -241,18 +268,16 @@ bool processCalibrationSettings(const JsonDocument& json, bool triggerUpstreamUp
     return failCount == 0;
 }
 
-
-bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
     bool update_legacy = false;
     bool update_ft2 = false;
 
-
     if (json[FermentrackSettings::legacyFermentrackPushEvery].is<uint16_t>()) {
         Log.info("Received legacy fermentrack settings.\r\n");
         update_legacy = true;
-        // Legacy Fermentrack settings
+
         if(!updateJsonSetting(json, FermentrackSettings::legacyFermentrackURL, config.legacyFermentrackURL, 256))
             failCount++;
 
@@ -266,8 +291,6 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
     } else {
         Log.info("Received FT2 settings.\r\n");
         update_ft2 = true;
-        // The only settings that could trigger this relate to how to reach Fermentrack 2
-        // In every case, trigger a re-registration
         config.fermentrackDeviceID[0] = '\0';
         fermentrackRegistrationError = fermentrackRegErrorT::NOT_ATTEMPTED_REGISTRATION;
 
@@ -282,23 +305,18 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
         }
         if(!updateJsonSetting(json, FermentrackSettings::fermentrackUsername, config.fermentrackUsername, sizeof(config.fermentrackUsername)))
             failCount++;
-        // DeviceID and API Key are set when registering with Fermentrack 2 and cannot be edited by the user
     }
 
-
-
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid Fermentrack target configuration.\r\n");
     } else {
         if (!config.save()) {
             Log.error("Error: Unable to save Fermentrack target configuration data.\r\n");
             failCount++;
         } else {
-            // Now that we've saved, trigger the send
-            if(update_legacy)  // Trigger a send to Legacy Fermentrack/BPR in 3 seconds using the updated URL
+            if(update_legacy)
                 startSendNowTimer(sendNowLegacyFTTimer, "SendLegacyFT", sendNowLegacyFTCallback, 3);
-            if(update_ft2)  // Trigger a send to Fermentrack 2 in 5 seconds using the updated URL
+            if(update_ft2)
                 startSendNowTimer(sendNowFTTimer, "SendFT", sendNowFTCallback, 5);
         }
     }
@@ -306,32 +324,27 @@ bool processFermentrackSettings(const JsonDocument& json, bool triggerUpstreamUp
     return failCount == 0;
 }
 
-
-bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsURL, config.scriptsURL, 256))
         failCount++;
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsEmail, config.scriptsEmail, 256))
         failCount++;
-    if(strlen(config.scriptsURL) > 26 && strlen(config.scriptsEmail) > 5)  // Trigger a send to Google in 5 seconds using the updated URL
+    if(strlen(config.scriptsURL) > 26 && strlen(config.scriptsEmail) > 5)
         startSendNowTimer(sendNowGSheetsTimer, "SendGSheets", sendNowGSheetsCallback, 5);
 
-    // Loop through each of the keys associated with the sheet names, and update the relevant config entry
-    uint8_t i=0;
+    uint8_t i = 0;
     for(const char* sheetKey : tiltColorSuffixes) {
         char full_key[30];
-        // full_key = GoogleSheetsSettings::gsheetsPrefix + sheetKey
         snprintf(full_key, 30, "%s%s", GoogleSheetsSettings::gsheetsPrefix, sheetKey);
 
         if(!updateJsonSetting(json, full_key, config.gsheets_config[i].name, 25))
             failCount++;
-        i++;  // Also track index
+        i++;
     }
-    
-    // Save
-    if(failCount>0) {
+
+    if(failCount > 0) {
         Log.error("Error: Invalid Google Sheets configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Google Sheets configuration data.\r\n");
@@ -341,19 +354,15 @@ bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamU
     return failCount == 0;
 }
 
-
-bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, BrewersFriendSettings::brewersFriendKey, config.brewersFriendKey, 64))
         failCount++;
-    if(strlen(config.brewersFriendKey) > 1)  // Trigger a send to Brewers Friend
+    if(strlen(config.brewersFriendKey) > 1)
         startSendNowTimer(sendNowBrewersFriendTimer, "SendBF", sendNowBrewersFriendCallback, 5);
 
-    
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid Brewer's Friend configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Brewer's Friend configuration data.\r\n");
@@ -363,21 +372,17 @@ bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstream
     return failCount == 0;
 }
 
-
-bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, BrewfatherSettings::brewfatherKey, config.brewfatherKey, 64))
         failCount++;
-    if(strlen(config.brewfatherKey) > 1)  // Trigger a send to Brewfather
+    if(strlen(config.brewfatherKey) > 1)
         startSendNowTimer(sendNowBrewfatherTimer, "SendBrewfather", sendNowBrewfatherCallback, 5);
 
-    
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid Brewfather configuration.\r\n");
-    } else  if (!config.save()) {
+    } else if (!config.save()) {
         Log.error("Error: Unable to save Brewfather configuration data.\r\n");
         failCount++;
     }
@@ -385,19 +390,15 @@ bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpd
     return failCount == 0;
 }
 
-
-bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, UserTargetSettings::userTargetURL, config.userTargetURL, 128))
         failCount++;
-    if(strlen(config.userTargetURL) > 1)  // Trigger a send to the user target
+    if(strlen(config.userTargetURL) > 1)
         startSendNowTimer(sendNowUserTargetTimer, "SendUserTarget", sendNowUserTargetCallback, 5);
- 
-    
-    // Save
-    if(failCount>0) {
+
+    if(failCount > 0) {
         Log.error("Error: Invalid user target configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save user target configuration data.\r\n");
@@ -407,27 +408,22 @@ bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpd
     return failCount == 0;
 }
 
-
-bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
-    // Loop through each of the keys associated with the sheet names, and update the relevant config entry
-    uint8_t i=0;
+    uint8_t i = 0;
     for(const char* sheetKey : tiltColorSuffixes) {
         char full_key[35];
-        // full_key = GrainfatherSettings::grainfatherURLPrefix + sheetKey
         snprintf(full_key, 35, "%s%s", GrainfatherSettings::grainfatherURLPrefix, sheetKey);
 
         if(!updateJsonSetting(json, full_key, config.grainfatherURL[i].link, 64))
             failCount++;
-        i++;  // Also track index
+        i++;
     }
 
-    startSendNowTimer(sendNowGrainfatherTimer, "SendGrainfather", sendNowGrainfatherCallback, 5);  // Always trigger a resend to grainfather
+    startSendNowTimer(sendNowGrainfatherTimer, "SendGrainfather", sendNowGrainfatherCallback, 5);
 
-    
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid Grainfather configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Grainfather configuration data.\r\n");
@@ -437,24 +433,18 @@ bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUp
     return failCount == 0;
 }
 
-
-bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, BrewstatusSettings::brewstatusURL, config.brewstatusURL, 256))
         failCount++;
-    if(strlen(config.brewstatusURL) > 11)  // Trigger a send to BrewStatus in 5 seconds using the updated URL
+    if(strlen(config.brewstatusURL) > 11)
         startSendNowTimer(sendNowBrewStatusTimer, "SendBrewStatus", sendNowBrewStatusCallback, 5);
 
     if(!updateJsonSetting(json, BrewstatusSettings::brewstatusPushEvery, config.brewstatusPushEvery))
         failCount++;
 
-    // TODO - Add a check for "push every" to make sure it isn't less than a reasonable value
-
-
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid Brewstatus configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Brewstatus configuration data.\r\n");
@@ -464,23 +454,18 @@ bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpd
     return failCount == 0;
 }
 
-
-bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, TaplistioSettings::taplistioURL, config.taplistioURL, 256))
         failCount++;
-    if(strlen(config.taplistioURL) > 11)  // Trigger a send to TaplistIO in 5 seconds using the updated URL
+    if(strlen(config.taplistioURL) > 11)
         startSendNowTimer(sendNowTaplistioTimer, "SendTaplistio", sendNowTaplistioCallback, 5);
 
     if(!updateJsonSetting(json, TaplistioSettings::taplistioPushEvery, config.taplistioPushEvery))
         failCount++;
 
-    // TODO - Add a check for "push every" to make sure it isn't less than a reasonable value
-
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid Taplist.io configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Taplist.io configuration data.\r\n");
@@ -490,9 +475,8 @@ bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpda
     return failCount == 0;
 }
 
-bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
-
 
     if(!updateJsonSetting(json, MQTTSettings::mqttBrokerHost, config.mqttBrokerHost, sizeof(config.mqttBrokerHost)))
         failCount++;
@@ -500,7 +484,6 @@ bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     if(!updateJsonSetting(json, MQTTSettings::mqttBrokerPort, config.mqttBrokerPort))
         failCount++;
 
-    // TODO - Add a check for "push every" to make sure it isn't less than a reasonable value
     if(!updateJsonSetting(json, MQTTSettings::mqttPushEvery, config.mqttPushEvery))
         failCount++;
 
@@ -513,25 +496,20 @@ bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     if(!updateJsonSetting(json, MQTTSettings::mqttTopic, config.mqttTopic, sizeof(config.mqttTopic)))
         failCount++;
 
-    // Trigger a send to MQTT
     http_server.mqtt_init_rqd = true;
     startSendNowTimer(sendNowMqttTimer, "SendMQTT", sendNowMqttCallback, 5);
 
-
-
-    // Save
-    if(failCount>0) {
-        Log.error("Error: Invalid Taplist.io configuration.\r\n");
+    if(failCount > 0) {
+        Log.error("Error: Invalid MQTT configuration.\r\n");
     } else if (!config.save()) {
-        Log.error("Error: Unable to save Taplist.io configuration data.\r\n");
+        Log.error("Error: Unable to save MQTT configuration data.\r\n");
         failCount++;
     }
 
     return failCount == 0;
 }
 
-
-bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+static bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
     if(!updateJsonSetting(json, InfluxDBSettings::influxdbURL, config.influxdbURL, sizeof(config.influxdbURL)))
@@ -545,11 +523,10 @@ bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdat
     if(!updateJsonSetting(json, InfluxDBSettings::influxdbPushEvery, config.influxdbPushEvery))
         failCount++;
 
-    if(strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH)  // Trigger a send to InfluxDB in 5 seconds using the updated settings
+    if(strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH)
         startSendNowTimer(sendNowInfluxdbTimer, "SendInfluxDB", sendNowInfluxdbCallback, 5);
 
-    // Save
-    if(failCount>0) {
+    if(failCount > 0) {
         Log.error("Error: Invalid InfluxDB configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save InfluxDB configuration data.\r\n");
@@ -560,245 +537,266 @@ bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdat
 }
 
 
-//-----------------------------------------------------------------------------------------
+/**
+ * @brief Unified target settings dispatcher
+ *
+ * Detects which target's keys are present in the JSON and delegates
+ * to the appropriate process*Settings helper.
+ */
+static bool processTargetSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
+    // Fermentrack — check for either legacy or FT2 key
+    if (json[FermentrackSettings::legacyFermentrackPushEvery].is<uint16_t>() ||
+        json[FermentrackSettings::fermentrackHostname].is<const char*>())
+        return processFermentrackSettings(json, triggerUpstreamUpdate);
 
-#ifndef DISABLE_OTA_UPDATES
-void trigger_OTA(AsyncWebServerRequest *request) {
-    server.serveStatic("/updating.htm", FILESYSTEM, "/").setDefaultFile("updating.htm");
-    config.update_filesystem = true;
-    lcd.display_ota_update_screen();         // Trigger this here while everything else is waiting.
-    delay(1000);                             // Wait 1 second to let everything send
-    tilt_scanner.wait_until_scan_complete(); // Wait for scans to complete (we don't want any tasks running in the background)
-    execOTA();                               // Trigger the OTA update
-}
-#endif
+    if (json[GoogleSheetsSettings::scriptsURL].is<const char*>())
+        return processGoogleSheetsSettings(json, triggerUpstreamUpdate);
 
-void http_json(JsonDocument &doc) {
-    doc = tilt_scanner.tilt_to_json();
-}
+    if (json[BrewersFriendSettings::brewersFriendKey].is<const char*>())
+        return processBrewersFriendSettings(json, triggerUpstreamUpdate);
 
-void settings_json(JsonDocument &doc) {
-    doc = config.to_json_external();
-}
+    if (json[BrewfatherSettings::brewfatherKey].is<const char*>())
+        return processBrewfatherSettings(json, triggerUpstreamUpdate);
 
-// About.htm page Handlers
-//
+    if (json[UserTargetSettings::userTargetURL].is<const char*>())
+        return processUserTargetSettings(json, triggerUpstreamUpdate);
 
-void this_version(JsonDocument &doc) {
-    doc["version"] = version();
-    doc["branch"] = branch();
-    doc["build"] = build();
-    doc["hardware"] = hardware();
-}
+    if (json["grainfatherURL_red"].is<const char*>())
+        return processGrainfatherSettings(json, triggerUpstreamUpdate);
 
-void uptime(JsonDocument &doc) {
-    const int days = uptimeDays();
-    const int hours = uptimeHours();
-    const int minutes = uptimeMinutes();
-    const int seconds = uptimeSeconds();;
-    const int millis = uptimeMillis();
+    if (json[BrewstatusSettings::brewstatusURL].is<const char*>())
+        return processBrewstatusSettings(json, triggerUpstreamUpdate);
 
-    doc["days"] = days;
-    doc["hours"] = hours;
-    doc["minutes"] = minutes;;
-    doc["seconds"] = seconds;
-    doc["millis"] = millis;
+    if (json[TaplistioSettings::taplistioURL].is<const char*>())
+        return processTaplistioSettings(json, triggerUpstreamUpdate);
+
+    if (json[MQTTSettings::mqttBrokerHost].is<const char*>())
+        return processMqttSettings(json, triggerUpstreamUpdate);
+
+    if (json[InfluxDBSettings::influxdbURL].is<const char*>())
+        return processInfluxdbSettings(json, triggerUpstreamUpdate);
+
+    Log.warning("No recognized target keys in JSON payload.\r\n");
+    return false;
 }
 
-void heap(JsonDocument &doc) {
-    const uint32_t free = ESP.getFreeHeap();
-    const uint32_t max = ESP.getMaxAllocHeap();
-    const uint8_t frag = 100 - (max * 100) / free;
 
-    doc["free"] = free;
-    doc["max"] = max;
-    doc["frag"] = frag;
+//=============================================================================
+// HTTP Handler Wrappers (bridge existing functions to httpd_req_handler_t)
+//=============================================================================
+
+// Type for GET JSON handlers
+typedef void (*json_get_handler_t)(JsonDocument &);
+
+// Type for PUT/POST JSON handlers
+typedef bool (*json_put_handler_t)(const JsonDocument &, bool);
+
+/**
+ * @brief Generic wrapper for GET JSON endpoints
+ *
+ * Calls the provided handler function to populate a JsonDocument,
+ * then sends it as a JSON response.
+ */
+static esp_err_t json_get_wrapper(httpd_req_t *req, json_get_handler_t handler) {
+    JsonDocument doc;
+    handler(doc);
+    return idf_json_send_response(req, doc);
 }
 
-void reset_reason(JsonDocument &doc) {
-    const int reset = (int)esp_reset_reason();
+/**
+ * @brief Generic wrapper for PUT/POST JSON endpoints
+ *
+ * Parses the request body as JSON, calls the handler, and returns status.
+ */
+static esp_err_t json_put_wrapper(httpd_req_t *req, json_put_handler_t handler) {
+    JsonDocument doc;
 
-    doc["reason"] = resetReason[reset];
-    doc["description"] = resetDescription[reset];
-}
-
-void httpServer::setStaticPages() {
-
-    // Define the base static page handlers
-    asyncWebServer.serveStatic("/", FILESYSTEM, "/index.html").setCacheControl("max-age=600");
-    asyncWebServer.serveStatic("/index.html", FILESYSTEM, "/index.html").setCacheControl("max-age=600");
-
-    // Define Vue routes
-    const char* vueRoutes[] = {
-        "/config", 
-        "/config/tiltbridge",
-        "/target", 
-        "/target/fermentrack", 
-        "/target/legacy_fermentrack", 
-        "/target/gsheets", 
-        "/target/brewersfriend",
-        "/target/brewfather", 
-        "/target/grainfather", 
-        "/target/brewstatus", 
-        "/target/taplistio",
-        "/target/mqtt", 
-        "/target/generic",
-        "/help", 
-        "/about"
-    };
-
-
-    // Serve static pages for Vue routes and their trailing-slash versions
-    for (const char* route : vueRoutes) {
-        asyncWebServer.serveStatic(route, FILESYSTEM, "/index.html").setCacheControl("max-age=600");
-
-        // Serve the same route with a trailing slash
-        String routeWithSlash = String(route) + "/";
-        asyncWebServer.serveStatic(routeWithSlash.c_str(), FILESYSTEM, "/index.html").setCacheControl("max-age=600");
+    if (idf_json_parse_body(req, doc) != ESP_OK) {
+        return ESP_OK;  // Error response already sent
     }
 
-    // // Static page handlers
-    // web_server->serveStatic("/", FILESYSTEM, "/index.htm", "max-age=600");
-    // web_server->serveStatic("/index/", FILESYSTEM, "/index.htm", "max-age=600");
-    // web_server->serveStatic("/settings/", FILESYSTEM, "/settings.htm", "max-age=600");
-    // web_server->serveStatic("/calibration/", FILESYSTEM, "/calibration.htm", "max-age=600");
-    // web_server->serveStatic("/help/", FILESYSTEM, "/help.htm", "max-age=600");
-    // web_server->serveStatic("/about/", FILESYSTEM, "/about.htm", "max-age=600");
-    // web_server->serveStatic("/controllerrestart/", FILESYSTEM, "/controllerrestart.htm", "max-age=600");
-    // web_server->serveStatic("/wifireset/", FILESYSTEM, "/wifireset.htm", "max-age=600");
-    // web_server->serveStatic("/factoryreset/", FILESYSTEM, "/factoryreset.htm", "max-age=600");
-    // web_server->serveStatic("/gsheets/", FILESYSTEM, "/gsheets.htm", "max-age=600");
-    asyncWebServer.serveStatic("/404/", FILESYSTEM, "/404.htm").setCacheControl("max-age=600");
+    bool success = handler(doc, true);
+    return idf_json_send_status(req, success);
 }
 
-void httpServer::setPutPages() {
-    struct Endpoint {
-        const char* path;
-        bool (*handler)(const JsonDocument&, bool);
-    };
-
-    const Endpoint endpoints[] = {
-        {"/api/settings/controller/", processTiltBridgeSettingsJson},
-        {"/api/settings/calibration/", processCalibrationSettings},
-        {"/api/settings/fermentrack/", processFermentrackSettings},
-        {"/api/settings/googlesheets/", processGoogleSheetsSettings},
-        {"/api/settings/brewersfriend/", processBrewersFriendSettings},
-        {"/api/settings/brewfather/", processBrewfatherSettings},
-        {"/api/settings/grainfather/", processGrainfatherSettings},
-        {"/api/settings/usertarget/", processUserTargetSettings},
-        {"/api/settings/brewstatus/", processBrewstatusSettings},
-        {"/api/settings/taplistio/", processTaplistioSettings},
-        {"/api/settings/mqtt/", processMqttSettings},
-        {"/api/settings/influxdb/", processInfluxdbSettings},
-    };
-
-    for (const auto& endpoint : endpoints) {
-        asyncWebServer.addHandler(new PutAsyncCallbackJsonWebHandler(endpoint.path, endpoint.handler));
-    }
-}
-
-void httpServer::setJsonPages() {
-    struct Endpoint {
-        const char* path;
-        void (*handler)(JsonDocument&);
-    };
-    
-    const Endpoint endpoints[] = {
-        {"/api/json/", http_json},
-        {"/api/settings/json/", settings_json},
-        {"/api/version/", this_version},
-        {"/api/uptime/", uptime},
-        {"/api/heap/", heap},
-        {"/api/resetreason/", reset_reason},
-    };
-
-    for (const auto& endpoint : endpoints) {
-        asyncWebServer.addHandler(new GetAsyncCallbackJsonWebHandler(endpoint.path, endpoint.handler));
+// Macro to create httpd handler from GET JSON function
+#define MAKE_GET_HANDLER(name, func) \
+    static esp_err_t name(httpd_req_t *req) { \
+        return json_get_wrapper(req, func); \
     }
 
+// Macro to create httpd handler from PUT JSON function
+#define MAKE_PUT_HANDLER(name, func) \
+    static esp_err_t name(httpd_req_t *req) { \
+        return json_put_wrapper(req, func); \
+    }
+
+// Generate GET handlers
+MAKE_GET_HANDLER(handle_api_json, http_json)
+MAKE_GET_HANDLER(handle_api_settings_json, settings_json)
+MAKE_GET_HANDLER(handle_api_version, this_version)
+MAKE_GET_HANDLER(handle_api_uptime, uptime_json)
+MAKE_GET_HANDLER(handle_api_heap, heap_json)
+MAKE_GET_HANDLER(handle_api_resetreason, reset_reason_json)
+
+// Generate PUT handlers
+MAKE_PUT_HANDLER(handle_settings_controller, processTiltBridgeSettingsJson)
+MAKE_PUT_HANDLER(handle_settings_calibration, processCalibrationSettings)
+MAKE_PUT_HANDLER(handle_settings_targets, processTargetSettings)
+
+// Calibration POST handlers
+MAKE_PUT_HANDLER(handle_calibration_datapoint, processCalibrationDataPoint)
+MAKE_PUT_HANDLER(handle_calibration_coefficients, processCalibrationCoefficients)
+MAKE_PUT_HANDLER(handle_calibration_delete, processCalibrationDataDelete)
+
+// Action handler — dispatches based on "action" field in JSON body
+static esp_err_t handle_action(httpd_req_t *req) {
+    JsonDocument doc;
+
+    if (idf_json_parse_body(req, doc) != ESP_OK) {
+        return ESP_OK;  // Error response already sent
+    }
+
+    const char *action = doc["action"];
+    if (!action) {
+        return idf_json_send_error(req, 400, "Missing 'action' field");
+    }
+
+    if (strcmp(action, "resetWifi") == 0) {
+        http_server.wifi_reset_requested = true;
+    } else if (strcmp(action, "resetDevice") == 0) {
+        http_server.factoryreset_requested = true;
+    } else if (strcmp(action, "restartDevice") == 0) {
+        http_server.restart_requested = true;
+    } else {
+        return idf_json_send_error(req, 400, "Unknown action");
+    }
+
+    return idf_json_send_status(req, true);
 }
 
-// TODO - Reenable/rebuild setActionPages
-// void setActionPages() {
-// #ifndef DISABLE_OTA_UPDATES
-//     web_server->on("/ota/", HTTP_GET, [&]() {
-//         request->send(200, F("text/plain"), F("Ok."));
-//         trigger_OTA(request);
-//     });
-// #endif
 
-//     web_server->on("/resetwifi/", HTTP_GET, [&]() {
-//         Log.verbose("Processing /resetwifi/.\r\n");
-//         request->send(200, F("text/plain"), F("Ok."));
-//         http_server.wifi_reset_requested = true;
-//     });
+//=============================================================================
+// httpServer class implementation
+//=============================================================================
 
-//     web_server->on("/resetapp/", HTTP_GET, [&]() {
-//         Log.verbose("Processing /resetapp/.\r\n");
-//         request->send(200, F("text/plain"), F("Ok."));
-//         http_server.factoryreset_requested = true;
-//     });
+void httpServer::registerJsonGetHandlers() {
+    struct {
+        const char *uri;
+        esp_err_t (*handler)(httpd_req_t *);
+    } get_endpoints[] = {
+        {"/api/json/", handle_api_json},
+        {"/api/settings/json/", handle_api_settings_json},
+        {"/api/version/", handle_api_version},
+        {"/api/uptime/", handle_api_uptime},
+        {"/api/heap/", handle_api_heap},
+        {"/api/resetreason/", handle_api_resetreason},
+    };
 
-//     web_server->on("/oktoreset/", HTTP_GET, [&]() {
-//         Log.verbose("Processing /oktoreset/.\r\n");
-//         request->send(200, F("text/plain"), F("Ok."));
-//         http_server.restart_requested = true;
-//     });
+    for (const auto& endpoint : get_endpoints) {
+        httpd_uri_t uri_config = {
+            .uri = endpoint.uri,
+            .method = HTTP_GET,
+            .handler = endpoint.handler,
+            .user_ctx = NULL
+        };
+        idf_httpd_register_uri(&uri_config);
+    }
 
-//     web_server->on("/ping/", HTTP_ANY, [&]() {
-//         Log.verbose("Processing /ping/.\r\n");
-//         request->send(200, F("text/plain"), F("Ok."));
-//     });
-// }
+    ESP_LOGI(TAG, "Registered JSON GET handlers");
+}
+
+void httpServer::registerJsonPutHandlers() {
+    struct {
+        const char *uri;
+        esp_err_t (*handler)(httpd_req_t *);
+    } put_endpoints[] = {
+        {"/api/settings/controller/",  handle_settings_controller},
+        {"/api/settings/calibration/", handle_settings_calibration},
+        {"/api/settings/targets/",     handle_settings_targets},
+    };
+
+    for (const auto& endpoint : put_endpoints) {
+        httpd_uri_t uri_config = {
+            .uri = endpoint.uri,
+            .method = HTTP_PUT,
+            .handler = endpoint.handler,
+            .user_ctx = NULL
+        };
+        idf_httpd_register_uri(&uri_config);
+    }
+
+    ESP_LOGI(TAG, "Registered JSON PUT handlers");
+}
+
+void httpServer::registerCalibrationHandlers() {
+    // POST: Add calibration data point
+    httpd_uri_t datapoint_uri = {
+        .uri = "/api/calibration/datapoint/",
+        .method = HTTP_POST,
+        .handler = handle_calibration_datapoint,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&datapoint_uri);
+
+    // PUT: Update calibration coefficients
+    httpd_uri_t coefficients_uri = {
+        .uri = "/api/calibration/coefficients/",
+        .method = HTTP_PUT,
+        .handler = handle_calibration_coefficients,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&coefficients_uri);
+
+    // POST: Delete calibration data point
+    httpd_uri_t delete_uri = {
+        .uri = "/api/calibration/datapoint/delete/",
+        .method = HTTP_POST,
+        .handler = handle_calibration_delete,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&delete_uri);
+
+    ESP_LOGI(TAG, "Registered calibration handlers");
+}
+
+void httpServer::registerActionHandlers() {
+    httpd_uri_t uri_config = {
+        .uri = "/api/actions/",
+        .method = HTTP_POST,
+        .handler = handle_action,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&uri_config);
+
+    ESP_LOGI(TAG, "Registered action handlers");
+}
 
 void httpServer::init() {
-    setStaticPages();
-    setPutPages();
-    setJsonPages();
-    // setActionPages();
+    // Start the HTTP server with worker pool
+    // esp_err_t ret = idf_httpd_start();
+    // if (ret != ESP_OK) {
+    //     Log.error("Failed to start HTTP server: %s\r\n", esp_err_to_name(ret));
+    //     return;
+    // }
 
-    // Calibration endpoints
-    asyncWebServer.addHandler(new PostAsyncCallbackJsonWebHandler("/api/calibration/datapoint/", processCalibrationDataPoint));
-    asyncWebServer.addHandler(new PutAsyncCallbackJsonWebHandler("/api/calibration/coefficients/", processCalibrationCoefficients));
-    asyncWebServer.addHandler(new PostAsyncCallbackJsonWebHandler("/api/calibration/datapoint/delete/", processCalibrationDataDelete));
-    
-    /*
-    // GET handler for calibration data points with query parameter
-    asyncWebServer.on("/api/calibration/datapoints/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->hasParam("color")) {
-            request->send(400, "application/json", "{\"error\":\"Missing color parameter\"}");
-            return;
-        }
-        
-        String colorStr = request->getParam("color")->value();
-        uint8_t color = colorStr.toInt();
-        
-        if (color >= TILT_COLORS) {
-            request->send(400, "application/json", "{\"error\":\"Invalid color parameter\"}");
-            return;
-        }
-        
-        AsyncJsonResponse *response = new AsyncJsonResponse();
-        JsonDocument doc;
-        
-        if (getCalibrationPoints(color, doc)) {
-            response->getRoot().set(doc);
-            response->setLength();
-            request->send(response);
-        } else {
-            request->send(500, "application/json", "{\"error\":\"Failed to retrieve calibration points\"}");
-        }
-    });*/
+    // Register static file and SPA handlers first
+    idf_static_register_handlers();
+    idf_static_register_spa_routes();
 
-    // File not found handler
-    asyncWebServer.onNotFound([](AsyncWebServerRequest *request) {
-        if (!http_server.handleFileRead(request, request->url())) {
-            request->send(404, "text/plain", "Not Found");
-        }
-    });
+    // Register API handlers
+    registerJsonGetHandlers();
+    registerJsonPutHandlers();
+    registerCalibrationHandlers();
+    registerActionHandlers();
 
-    // DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    // Register catch-all for static files LAST (so specific routes take precedence)
+    idf_static_register_catchall();
 
-    asyncWebServer.begin();
     Log.notice("HTTP server started. Open: http://%s.local/ to view application.\r\n", config.mdnsID);
+}
+
+void httpServer::stop() {
+    idf_httpd_stop();
+    Log.notice("HTTP server stopped.\r\n");
 }

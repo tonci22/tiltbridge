@@ -1,32 +1,67 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#include <driver/gpio.h>
 #include <thorlog.h>
 
-#if defined(LCD_SSD1306) || defined(LCD_TFT_M5STICKC)
-#include <Wire.h>
+#if defined(LCD_SSD1306)
+#include <driver/i2c_master.h>
 #endif
 
 #include "jsonconfig.h"
+
+// ESP-IDF GPIO compatibility helpers (replacing Arduino's pinMode/digitalWrite)
+#ifndef OUTPUT
+#define OUTPUT GPIO_MODE_OUTPUT
+#endif
+#ifndef HIGH
+#define HIGH 1
+#endif
+#ifndef LOW
+#define LOW 0
+#endif
+
+static inline void pinMode(int pin, gpio_mode_t mode) {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << pin),
+        .mode = mode,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+}
+
+static inline void digitalWrite(int pin, int level) {
+    gpio_set_level((gpio_num_t)pin, level);
+}
+
+// Replace Arduino yield() with FreeRTOS equivalent
+static inline void yield() {
+    taskYIELD();
+}
 #include "tilt/tiltScanner.h"
 #include "bridge_lcd.h"
+
+#if HAVE_LCD
+#include "lovyan_config.h"
 
 #if defined(LCD_SSD1306) || defined(LCD_TFT_ESPI)
 #include "img/oled_logo.h" // Small logo
 #elif defined(LCD_TFT)
 #include "img/tft_logo.h" // Large logo
 #endif
+#endif // HAVE_LCD
 
 #if defined(AXP192)
-#include <I2C_AXP192.h>  // This mostly applies to m5 Stick so we can control the TFT backlight
-I2C_AXP192 axp192(I2C_AXP192_DEFAULT_ADDRESS, Wire1);
+#include "axp192.h"  // ESP-IDF compatible AXP192 driver for M5StickC Plus
+AXP192_Driver axp192_driver;
 #endif
 
 #ifdef LCD_TFT_M5STICKC
 bridge_lcd::M5Variant bridge_lcd::detect_m5_variant() {
-    Wire1.begin(21, 22);
-    Wire1.beginTransmission(0x34);  // AXP192 I2C address
-    uint8_t error = Wire1.endTransmission();
-    Wire1.end();
-
-    if (error == 0) {
+    // Use AXP192's detect method to check for device presence
+    if (axp192_driver.detect(21, 22)) {
         Log.notice("Detected M5StickC Plus (AXP192 found)" CR);
         return M5Variant::Plus;
     } else {
@@ -48,8 +83,7 @@ inline void bridge_lcd::init_power() {
 
     if (m5_variant == M5Variant::Plus) {
         // M5StickC Plus: Initialize AXP192 for power/backlight
-        Wire1.begin(21, 22);
-        I2C_AXP192_InitDef initDef = {
+        AXP192_InitDef initDef = {
             .EXTEN  = true,
             .BACKUP = true,
             .DCDC1  = 3300,
@@ -63,7 +97,7 @@ inline void bridge_lcd::init_power() {
             .GPIO3  = -1,
             .GPIO4  = -1,
         };
-        axp192.begin(initDef);
+        axp192_driver.begin(21, 22, initDef);
     } else {
         // M5StickC Plus2: Set HOLD pin (GPIO4) HIGH to maintain power
         // Without this, the device may shut down on battery - see M5Stack docs
@@ -89,76 +123,93 @@ void bridge_lcd::init() {
 
 #ifdef LCD_SSD1306
     // For the OLED displays, we need to initialize the I2C bus -- but first, we need to figure out what pins to use
+    int sda_pin = -1, scl_pin = -1;
+    int reset_pin = -1;
+
 #ifdef I2C_SDA_PIN
     // The user is explicitly supplying the SDA and SCL pins
 #ifndef I2C_SCL_PIN
 #error "If you define I2C_SDA_PIN, you must also define I2C_SCL_PIN"
 #endif
     // If the user explicitly supplies an SDA/SCL pin, we'll use that
+    sda_pin = I2C_SDA_PIN;
+    scl_pin = I2C_SCL_PIN;
 
 #ifdef I2C_RESET_PIN
+    reset_pin = I2C_RESET_PIN;
     pinMode(I2C_RESET_PIN, OUTPUT);
-    // Apparently for the Heltec boards you have to do this twice. Go figure. 
-    digitalWrite(I2C_RESET_PIN, LOW); // Set I2C_RESET_PIN low to reset OLED 
-    delay(200); 
-    digitalWrite(I2C_RESET_PIN, HIGH); // While OLED is running, must set I2C_RESET_PIN in high 
-    delay(200); 
-    digitalWrite(I2C_RESET_PIN, LOW); // Set I2C_RESET_PIN low to reset OLED 
-    delay(200); 
-    digitalWrite(I2C_RESET_PIN, HIGH); // While OLED is running, must set I2C_RESET_PIN in high 
+    // Apparently for the Heltec boards you have to do this twice. Go figure.
+    digitalWrite(I2C_RESET_PIN, LOW); // Set I2C_RESET_PIN low to reset OLED
+    vTaskDelay(pdMS_TO_TICKS(200));
+    digitalWrite(I2C_RESET_PIN, HIGH); // While OLED is running, must set I2C_RESET_PIN in high
+    vTaskDelay(pdMS_TO_TICKS(200));
+    digitalWrite(I2C_RESET_PIN, LOW); // Set I2C_RESET_PIN low to reset OLED
+    vTaskDelay(pdMS_TO_TICKS(200));
+    digitalWrite(I2C_RESET_PIN, HIGH); // While OLED is running, must set I2C_RESET_PIN in high
 #endif
 
-    oled_display = new SSD1306Wire(0x3c, I2C_SDA_PIN, I2C_SCL_PIN);
 #else
 
     // We're currently supporting three sets of hardware - The ESP32 "OLED"
     // board, TTGO Boards, and the sleeve (which I think nobody uses)
     if (i2c_device_at_address(0x3c, 5, 4)) {
         // This is the ESP32 "OLED" board
-        oled_display = new SSD1306Wire(0x3c, 5, 4);
+        sda_pin = 5;
+        scl_pin = 4;
     } else if (i2c_device_at_address(0x3c, 21, 22)) {
         // This is the "sleeve": address, SDA, SCK
-        oled_display = new SSD1306Wire(0x3c, 21, 22);
+        sda_pin = 21;
+        scl_pin = 22;
     } else {
         // For the "TTGO" style OLED shields, you have to power a pin to run the backlight.
         pinMode(16, OUTPUT);
         digitalWrite(16, LOW); // Set GPIO16 low to reset OLED
-        delay(50);
+        vTaskDelay(pdMS_TO_TICKS(50));
         digitalWrite(16, HIGH); // While OLED is running, must set GPIO16 in high
         if (i2c_device_at_address(0x3c, 4, 15)) {
-            oled_display = new SSD1306Wire(0x3c, 4, 15);
+            sda_pin = 4;
+            scl_pin = 15;
         } else {
             digitalWrite(16, LOW);                    // We weren't able to find the TTGO board, so reset the pin
 
-            pinMode(21, OUTPUT); 
-            digitalWrite(21, LOW); // Set GPIO21 low to reset OLED 
-            delay(50); 
-            digitalWrite(21, HIGH); // While OLED is running, must set GPIO21 in high 
+            pinMode(21, OUTPUT);
+            digitalWrite(21, LOW); // Set GPIO21 low to reset OLED
+            vTaskDelay(pdMS_TO_TICKS(50));
+            digitalWrite(21, HIGH); // While OLED is running, must set GPIO21 in high
             if (i2c_device_at_address(0x3c, 17, 18)) {
-                oled_display = new SSD1306Wire(0x3c, 17, 18);
+                sda_pin = 17;
+                scl_pin = 18;
             } else {
                 digitalWrite(21, LOW);                    // We weren't able to find the TTGO board, so reset the pin
-                oled_display = new SSD1306Wire(0x3c, 21, 22); // ... and just default to the "sleeve" configuration
+                // ... and just default to the "sleeve" configuration
+                sda_pin = 21;
+                scl_pin = 22;
             }
         }
     }
 #endif
 
-    oled_display->init();
+    // Create and configure the LovyanGFX SSD1306 display
+    auto ssd1306_tft = new LGFX_SSD1306();
+    ssd1306_tft->configure(sda_pin, scl_pin, 0x3C, reset_pin);
+    tft = ssd1306_tft;
+
+    tft->init();
     if(!config.invertTFT) {
-        // Due to historical reasons, the "non-inverted" orientation is technically the one that has had 
+        // Due to historical reasons, the "non-inverted" orientation is technically the one that has had
         // flipScreenVertically() called.
-        oled_display->flipScreenVertically();
+        tft->setRotation(2);
     } else {
         // config.invertTFT is set. Toggle the semaphore.
-        oled_display->resetOrientation();
+        tft->setRotation(0);
     }
-    oled_display->setFont(ArialMT_Plain_10);
 
 
 #elif defined(LCD_TFT_ESPI) || defined(LCD_TFT)
     // Initialize appropriate LovyanGFX configuration based on hardware
-#if defined(LCD_TFT)
+#if defined(LCD_TFT) && defined(CYD)
+    tft = new LGFX_CYD();
+#elif defined(LCD_TFT)
     tft = new LGFX_D32_Pro();
 #elif defined(LCD_TFT_M5STICKC)
     {
@@ -198,9 +249,9 @@ void bridge_lcd::reinit() {
 #elif defined (LCD_SSD1306)
     // We can only flip the screen, not determine the current orientation
     if(config.invertTFT) {
-        oled_display->resetOrientation();
-    } else if (!config.invertTFT) {
-        oled_display->flipScreenVertically();
+        tft->setRotation(0);
+    } else {
+        tft->setRotation(2);
     }
 #endif
 }
@@ -258,14 +309,14 @@ void bridge_lcd::print_line(const char *left_text, const char *middle_text, cons
     starting_pixel_row = (SSD_LINE_CLEARANCE + SSD1306_FONT_HEIGHT) * (line - 1) + SSD_LINE_CLEARANCE;
 
     // The coordinates define the left starting point of the text
-    oled_display->setTextAlignment(TEXT_ALIGN_LEFT);
-    oled_display->drawString(0, starting_pixel_row, left_text);
+    tft->setTextDatum(textdatum_t::top_left);
+    tft->drawString(left_text, 0, starting_pixel_row);
 
-    oled_display->setTextAlignment(TEXT_ALIGN_LEFT);
-    oled_display->drawString(48, starting_pixel_row, middle_text);
+    tft->setTextDatum(textdatum_t::top_left);
+    tft->drawString(middle_text, 48, starting_pixel_row);
 
-    oled_display->setTextAlignment(TEXT_ALIGN_RIGHT);
-    oled_display->drawString(128, starting_pixel_row, right_text);
+    tft->setTextDatum(textdatum_t::top_right);
+    tft->drawString(right_text, 128, starting_pixel_row);
 #elif defined(LCD_TFT)
     int16_t starting_pixel_row = 0;
     starting_pixel_row = (tft->fontHeight()) * (line - 1) + 2;
@@ -298,8 +349,7 @@ void bridge_lcd::print_line(const char *left_text, const char *middle_text, cons
 
 void bridge_lcd::clear() {
 #ifdef LCD_SSD1306
-    oled_display->clear();
-    oled_display->setFont(SSD1306_FONT);
+    tft->fillScreen(0x0000);  // Black color
 #elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
     tft->fillScreen(0x0000);  // Black color in 16-bit RGB565 format
 #endif
@@ -353,41 +403,52 @@ void bridge_lcd::print_tilt_to_line(tiltHydrometer *tilt, uint8_t line) {
 #endif
 }
 
-bool bridge_lcd::i2c_device_at_address(byte address, int sda_pin, int scl_pin) {
+bool bridge_lcd::i2c_device_at_address(uint8_t address, int sda_pin, int scl_pin) {
 #ifdef LCD_SSD1306
-    // This allows us to do LCD autodetection (and by extension, support
-    // multiple OLED ESP32 boards
-    byte error;
+    // LCD autodetection using the new ESP-IDF 5.x I2C master driver API
+    i2c_master_bus_config_t bus_config = {
+        .i2c_port = I2C_NUM_0,
+        .sda_io_num = (gpio_num_t)sda_pin,
+        .scl_io_num = (gpio_num_t)scl_pin,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags = {
+            .enable_internal_pullup = true,
+        },
+    };
 
-   if(!Wire.begin(sda_pin, scl_pin)) {
-        Log.error("Failed to initialize Wire on pin %d/%d\r\n", sda_pin, scl_pin);
-        return false;  // Failed to initialize twowire on selected sda/scl
-   }
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
-    Wire.end();
+    i2c_master_bus_handle_t bus_handle;
+    esp_err_t err = i2c_new_master_bus(&bus_config, &bus_handle);
+    if (err != ESP_OK) {
+        Log.error("Failed to create I2C bus on pin %d/%d\r\n", sda_pin, scl_pin);
+        return false;
+    }
 
-    if (error == 0) // No error means that a device responded
+    err = i2c_master_probe(bus_handle, address, pdMS_TO_TICKS(100));
+    i2c_del_master_bus(bus_handle);
+
+    if (err == ESP_OK)
         return true;
-#endif // Leave this here to avoid compiler warning
+#endif
     return false;
 }
 
 void bridge_lcd::display() {
 #ifdef LCD_SSD1306
-    oled_display->display();
+    // LovyanGFX auto-flushes, no explicit display() call needed
 #endif
 }
 
 
 void bridge_lcd::display_logo_internal() {
 #ifdef LCD_SSD1306
-    oled_display->drawXbm(
+    tft->drawXBitmap(
         (128 - oled_logo_width) / 2,
         (64 - oled_logo_height) / 2,
+        oled_logo_bits,
         oled_logo_width,
         oled_logo_height,
-        oled_logo_bits);
+        0xFFFF);  // White in monochrome
     display();
 #elif defined(LCD_TFT)
     tft->pushImage(
