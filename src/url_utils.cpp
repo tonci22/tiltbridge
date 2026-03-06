@@ -340,10 +340,10 @@ bool resolveHostToString(const char* hostname, char* resolvedIp, size_t bufferSi
 
         // Convert to string format (ESP-IDF stores in network byte order)
         snprintf(resolvedIp, bufferSize, "%d.%d.%d.%d",
-                 (addr.addr >> 0) & 0xFF,
-                 (addr.addr >> 8) & 0xFF,
-                 (addr.addr >> 16) & 0xFF,
-                 (addr.addr >> 24) & 0xFF);
+                 (int)((addr.addr >> 0) & 0xFF),
+                 (int)((addr.addr >> 8) & 0xFF),
+                 (int)((addr.addr >> 16) & 0xFF),
+                 (int)((addr.addr >> 24) & 0xFF));
         return true;
     } else {
         // Use regular DNS via getaddrinfo

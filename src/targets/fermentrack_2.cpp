@@ -56,7 +56,7 @@ bool ft2_get_url(char *url, size_t size, const char *path) {
     if(strlen(config.fermentrackHostname) <= 3) {
         Log.error("ft2_get_url: No fermentrack host configured, should skip send.\r\n");
         return false;
-    } else if(config.fermentrackPort <= 0 || config.fermentrackPort > 65535) {
+    } else if(config.fermentrackPort == 0) {
         Log.error("ft2_get_url: No upstream port configured, should skip send.\r\n");
         return false;
     }
@@ -245,8 +245,6 @@ bool send_status_to_fermentrack_2() {
     // Construct the JSON payload
     {
         JsonDocument doc;
-        char tilt_data[TILT_ALL_DATA_SIZE + 128];
-
         // Load the Tilt data from the scanner
         JsonDocument tilt_doc;
         tilt_doc = tilt_scanner.tilt_to_json();

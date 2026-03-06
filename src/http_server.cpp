@@ -211,7 +211,7 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
 
     // smoothFactor
     if(json["smoothFactor"].is<uint8_t>()) {
-        if(json["smoothFactor"].as<uint8_t>() < 0 || json["smoothFactor"].as<uint8_t>() > 99) {
+        if(json["smoothFactor"].as<int>() < 0 || json["smoothFactor"].as<int>() > 99) {
             Log.warning("Settings update error, [smoothFactor]:(%d) not valid.\r\n", json["smoothFactor"].as<uint8_t>());
         } else {
             config.smoothFactor = json["smoothFactor"];
@@ -298,7 +298,7 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
             failCount++;
         if(!updateJsonSetting(json, FermentrackSettings::fermentrackPort, config.fermentrackPort))
             failCount++;
-        if(config.fermentrackPort < 10 || config.fermentrackPort > 65535) {
+        if(config.fermentrackPort < 10) {
             Log.warning("Settings update error, [fermentrackPort]:(%d) not valid.\r\n", config.fermentrackPort);
             config.fermentrackPort = 80;
             failCount++;

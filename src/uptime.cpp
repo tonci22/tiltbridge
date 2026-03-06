@@ -45,7 +45,7 @@ void setValues()
     mills = uptimeMillis(true);
 }
 
-const int uptimeDays(bool refr)
+int uptimeDays(bool refr)
 {
     getNow(); // Make sure we are current
     if (refr)
@@ -56,7 +56,7 @@ const int uptimeDays(bool refr)
     return days;
 }
 
-const int uptimeHours(bool refr)
+int uptimeHours(bool refr)
 {
     getNow(); // Make sure we are current
     if (refr)
@@ -69,7 +69,7 @@ const int uptimeHours(bool refr)
     return hours;
 }
 
-const int uptimeMinutes(bool refr)
+int uptimeMinutes(bool refr)
 {
     getNow(); // Make sure we are current
     if (refr)
@@ -82,7 +82,7 @@ const int uptimeMinutes(bool refr)
     return minutes;
 }
 
-const int uptimeSeconds(bool refr)
+int uptimeSeconds(bool refr)
 {
     getNow(); // Make sure we are current
     if (refr)
@@ -95,7 +95,7 @@ const int uptimeSeconds(bool refr)
     return seconds;
 }
 
-const int uptimeMillis(bool refr)
+int uptimeMillis(bool refr)
 {
     getNow(); // Make sure we are current
     if (refr)
