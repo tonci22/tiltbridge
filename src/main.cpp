@@ -44,12 +44,12 @@ static void memCheckTimerCallback(TimerHandle_t xTimer) {
 }
 #endif
 
-// Timer callback for 24-hour reboot
-static void reboot24TimerCallback(TimerHandle_t xTimer) {
-    Log.notice("Rebooting on 24-hour timer." CR);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-}
+// // Timer callback for 24-hour reboot
+// static void reboot24TimerCallback(TimerHandle_t xTimer) {
+//     Log.notice("Rebooting on 24-hour timer." CR);
+//     vTaskDelay(pdMS_TO_TICKS(500));
+//     esp_restart();
+// }
 
 void printMem() {
     const uint32_t free = esp_get_free_heap_size();

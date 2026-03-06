@@ -16,7 +16,7 @@
 #include "targets/fermentrack_2.h"  // For fermentrackRegistrationError
 
 
-#define MAX_FILENAME_LENGTH  32
+#define MAX_FILENAME_LENGTH  48
 #define JSON_CONFIG_BUFFER_SIZE 8192
 
 
@@ -416,10 +416,12 @@ void Config::load_from_json(JsonDocument obj) {
     }
 
     if (!obj[FermentrackSettings::fermentrackPort].isNull()) {
-        fermentrackPort = int(obj[FermentrackSettings::fermentrackPort]);
+        int port = int(obj[FermentrackSettings::fermentrackPort]);
 
-        if (fermentrackPort < 0 || fermentrackPort > 65535) {
+        if (port < 0 || port > 65535) {
             fermentrackPort = 80;
+        } else {
+            fermentrackPort = static_cast<uint16_t>(port);
         }
     }
 

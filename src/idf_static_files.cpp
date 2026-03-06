@@ -76,7 +76,7 @@ static bool file_exists(const char *path) {
 
 esp_err_t idf_static_serve_file(httpd_req_t *req, const char *file_path) {
     char full_path[STATIC_MAX_PATH_LEN];
-    char gz_path[STATIC_MAX_PATH_LEN];
+    char gz_path[STATIC_MAX_PATH_LEN + 4]; // +4 for ".gz" suffix
     bool use_gzip = false;
 
     // Build full filesystem path
