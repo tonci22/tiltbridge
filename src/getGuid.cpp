@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cinttypes>
 #include <esp_mac.h>
 
 #include "getGuid.h"
@@ -21,8 +22,8 @@ void getGuid(char *str)
     int32_2 = (chipid & 0xFFFFFFFF00000000) >> 32;
 
     char first[9], secon[9];
-    sprintf(first, "%08X", int32_1);
-    sprintf(secon, "%08X", int32_2);
+    sprintf(first, "%08" PRIx32, int32_1);
+    sprintf(secon, "%08" PRIx32, int32_2);
 
     strcpy(str, first);
     strcat(str, secon);

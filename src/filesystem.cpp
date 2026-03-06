@@ -18,8 +18,11 @@ bool filesystem_init(bool format_if_failed) {
     esp_vfs_littlefs_conf_t conf = {
         .base_path = FILESYSTEM_PREFIX,
         .partition_label = FILESYSTEM_PARTITION,
+        .partition = NULL,
         .format_if_mount_failed = format_if_failed,
+        .read_only = false,
         .dont_mount = false,
+        .grow_on_mount = false,
     };
 
     esp_err_t ret = esp_vfs_littlefs_register(&conf);
