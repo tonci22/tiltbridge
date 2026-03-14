@@ -2,6 +2,7 @@
 #define TILTBRIDGE_LOVYAN_CONFIG_H
 
 #include <LovyanGFX.hpp>
+#include <esp_log.h>
 
 #if defined(LCD_SSD1306)
 // Configuration class for SSD1306 OLED displays (128x64)
@@ -51,18 +52,44 @@ public:
 };
 
 #elif defined(LCD_TFT) && defined(CYD)
-// Configuration class for ESP32 Cheap Yellow Display (ESP32-2432S028)
-// ILI9341 320x240 on HSPI, XPT2046 touch on VSPI
+// Universal configuration class for all CYD (Cheap Yellow Display) variants
+// Supports: ESP32-2432S024, ESP32-2432S028 (v1/v2/v3), ESP32-2432S032
+// Auto-detects display driver (ILI9341, ILI9342, ST7789) and backlight pin at runtime
 class LGFX_CYD : public lgfx::LGFX_Device
 {
-    lgfx::Panel_ILI9341 _panel_instance;
+    // All three panel types — only one is used at runtime
+    lgfx::Panel_ILI9341 _panel_ili9341;
+    lgfx::Panel_ILI9342 _panel_ili9342;
+    lgfx::Panel_ST7789  _panel_st7789;
     lgfx::Bus_SPI _bus_instance;
     lgfx::Light_PWM _light_instance;
     lgfx::Touch_XPT2046 _touch_instance;
 
-public:
-    LGFX_CYD(void)
+    // Read display register via SPI
+    static uint32_t _read_cmd(lgfx::IBus* bus, int32_t pin_cs, uint8_t cmd, uint8_t dummy_bits = 1)
     {
+        bus->beginTransaction();
+        gpio_set_level((gpio_num_t)pin_cs, 1);
+        bus->writeCommand(0, 8);  // NOP to sync
+        bus->wait();
+        gpio_set_level((gpio_num_t)pin_cs, 0);
+        bus->writeCommand(cmd, 8);
+        bus->beginRead(dummy_bits);
+        uint32_t res = 0;
+        for (int i = 0; i < 4; ++i) {
+            res |= (bus->readData(8) & 0xFF) << (i * 8);
+        }
+        bus->endTransaction();
+        gpio_set_level((gpio_num_t)pin_cs, 1);
+        return res;
+    }
+
+public:
+    LGFX_CYD(void) {}  // Empty — configure() does the work
+
+    void configure()
+    {
+        // Step 1: Configure SPI bus (identical across all CYD variants)
         {
             auto cfg = _bus_instance.config();
             cfg.spi_host = HSPI_HOST;
@@ -77,11 +104,101 @@ public:
             cfg.pin_miso = 12;
             cfg.pin_dc = 2;
             _bus_instance.config(cfg);
-            _panel_instance.setBus(&_bus_instance);
         }
 
+        // Configure CS pin for ID read
+        gpio_config_t cs_conf = {
+            .pin_bit_mask = (1ULL << 15),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&cs_conf);
+
+        // Step 2: Read display ID to detect panel type
+        // Use spi_3wire=false for the probe so MISO (GPIO12) is used for reading
         {
-            auto cfg = _panel_instance.config();
+            auto cfg = _bus_instance.config();
+            cfg.spi_3wire = false;
+            _bus_instance.config(cfg);
+        }
+        _bus_instance.init();
+        uint32_t id04_d1 = _read_cmd(&_bus_instance, 15, 0x04, 1);  // RDDID, 1 dummy bit
+        uint32_t id04_d0 = _read_cmd(&_bus_instance, 15, 0x04, 0);  // RDDID, 0 dummy bits
+        uint32_t id09    = _read_cmd(&_bus_instance, 15, 0x09, 1);  // RDDST (display status)
+        uint32_t idDA    = _read_cmd(&_bus_instance, 15, 0xDA, 0);  // Read ID1
+        uint32_t idDB    = _read_cmd(&_bus_instance, 15, 0xDB, 0);  // Read ID2
+        uint32_t idDC    = _read_cmd(&_bus_instance, 15, 0xDC, 0);  // Read ID3
+        _bus_instance.release();
+        // Restore spi_3wire for normal operation
+        {
+            auto cfg = _bus_instance.config();
+            cfg.spi_3wire = true;
+            _bus_instance.config(cfg);
+        }
+
+        ESP_LOGW("CYD", "ID04(d1)=0x%08X ID04(d0)=0x%08X ID09=0x%08X",
+                 (unsigned)id04_d1, (unsigned)id04_d0, (unsigned)id09);
+        ESP_LOGW("CYD", "IDDA=0x%02X IDDB=0x%02X IDDC=0x%02X",
+                 (unsigned)(idDA & 0xFF), (unsigned)(idDB & 0xFF), (unsigned)(idDC & 0xFF));
+
+        // Determine panel type from available IDs
+        // ST7789: RDDID typically returns 0x85, 0x85, 0x52 or similar
+        // ILI9341: RDDID returns 0x00, 0x93, 0x41
+        // ILI9342: RDDID returns 0x00, 0x93, 0xE3 (or first byte 0xE3)
+        uint8_t id_byte = id04_d1 & 0xFF;
+        // Also check with 0 dummy bits in case the display needs that
+        uint8_t id_byte_d0 = id04_d0 & 0xFF;
+        // And individual ID registers (0xDA/DB/DC work on ST7789 even when 0x04 doesn't)
+        uint8_t id1 = idDA & 0xFF;
+        uint8_t id2 = idDB & 0xFF;
+        uint8_t id3 = idDC & 0xFF;
+
+        // Step 3: Select the correct panel based on ID
+        lgfx::Panel_LCD* panel = nullptr;
+        bool need_invert = false;
+        int backlight_pin = 21;  // Default for original 2.8" CYD
+
+        // If display status (0x09) is non-zero but RDDID is zero, it helps disambiguate
+        bool status_nonzero = (id09 & 0xFFFFFF) != 0;
+        // ST7789 IDs vary by manufacturer: 0x85, 0x81, or shifted variants
+        bool is_st7789 = (id_byte == 0x85 || id_byte_d0 == 0x85 ||
+                          id_byte == 0x81 || id_byte_d0 == 0x81 ||
+                          id2 == 0x85 || id2 == 0x81 || id3 == 0x52);
+        bool is_ili9342 = (id_byte == 0xE3 || id_byte_d0 == 0xE3);
+        bool is_ili9341 = (id_byte == 0x93 || id_byte_d0 == 0x93 ||
+                           ((id_byte == 0x00) && status_nonzero));
+
+        if (is_st7789) {
+            panel = &_panel_st7789;
+            need_invert = true;
+            backlight_pin = 27;
+            ESP_LOGW("CYD", "Detected ST7789 display, backlight=GPIO%d", backlight_pin);
+        } else if (is_ili9342) {
+            panel = &_panel_ili9342;
+            need_invert = false;
+            backlight_pin = 21;
+            ESP_LOGW("CYD", "Detected ILI9342 display, backlight=GPIO%d", backlight_pin);
+        } else if (is_ili9341) {
+            // ILI9341 — original 2.8" v1
+            panel = &_panel_ili9341;
+            need_invert = false;
+            backlight_pin = 21;
+            ESP_LOGW("CYD", "Detected ILI9341 display, backlight=GPIO%d", backlight_pin);
+        } else {
+            // Unknown ID — default to ST7789 (most common on newer CYD boards)
+            panel = &_panel_st7789;
+            need_invert = true;
+            backlight_pin = 27;
+            ESP_LOGW("CYD", "Unknown display ID (0x%02X), defaulting to ST7789, backlight=GPIO%d", id_byte, backlight_pin);
+        }
+
+        panel->setBus(&_bus_instance);
+
+        // Step 4: Configure panel (shared settings)
+        {
+            auto cfg = panel->config();
             cfg.pin_cs = 15;
             cfg.pin_rst = -1;
             cfg.pin_busy = -1;
@@ -93,23 +210,25 @@ public:
             cfg.dummy_read_pixel = 8;
             cfg.dummy_read_bits = 1;
             cfg.readable = true;
-            cfg.invert = false;
+            cfg.invert = need_invert;
             cfg.rgb_order = false;
             cfg.dlen_16bit = false;
             cfg.bus_shared = false;
-            _panel_instance.config(cfg);
+            panel->config(cfg);
         }
 
+        // Step 5: Configure backlight
         {
             auto cfg = _light_instance.config();
-            cfg.pin_bl = 21;
+            cfg.pin_bl = backlight_pin;
             cfg.invert = false;
             cfg.freq = 44100;
             cfg.pwm_channel = 7;
             _light_instance.config(cfg);
-            _panel_instance.setLight(&_light_instance);
+            panel->setLight(&_light_instance);
         }
 
+        // Step 6: Configure touch (XPT2046, identical across all CYD R variants)
         {
             auto cfg = _touch_instance.config();
             cfg.x_min = 0;
@@ -126,10 +245,10 @@ public:
             cfg.pin_miso = 39;
             cfg.pin_cs = 33;
             _touch_instance.config(cfg);
-            _panel_instance.setTouch(&_touch_instance);
+            panel->setTouch(&_touch_instance);
         }
 
-        setPanel(&_panel_instance);
+        setPanel(panel);
     }
 };
 

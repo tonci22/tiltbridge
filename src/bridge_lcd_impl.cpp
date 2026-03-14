@@ -208,7 +208,11 @@ void bridge_lcd::init() {
 #elif defined(LCD_TFT_ESPI) || defined(LCD_TFT)
     // Initialize appropriate LovyanGFX configuration based on hardware
 #if defined(LCD_TFT) && defined(CYD)
-    tft = new LGFX_CYD();
+    {
+        auto cyd_tft = new LGFX_CYD();
+        cyd_tft->configure();
+        tft = cyd_tft;
+    }
 #elif defined(LCD_TFT)
     tft = new LGFX_D32_Pro();
 #elif defined(LCD_TFT_M5STICKC)
