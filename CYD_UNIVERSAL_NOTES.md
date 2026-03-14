@@ -1,121 +1,121 @@
-# CYD Universal Display Auto-Detection — Entwicklungsnotizen
+# CYD Universal Display Auto-Detection — Development Notes
 
-## Ziel
+## Goal
 
-Ein einzelnes Binary (`env:cyd`) soll alle CYD (Cheap Yellow Display) Varianten unterstützen:
+A single binary (`env:cyd`) should support all CYD (Cheap Yellow Display) variants:
 - ESP32-2432S024 (2.4")
 - ESP32-2432S028 v1/v2/v3 (2.8")
 - ESP32-2432S032 (3.2")
 
-Die Displays unterscheiden sich im verwendeten Display-Treiber (ILI9341, ILI9342, ST7789) und teilweise im Backlight-Pin (GPIO 21 vs GPIO 27). Der Touch-Controller (XPT2046) und die SPI-Pinbelegung sind bei allen Varianten identisch.
+The displays differ in their display driver (ILI9341, ILI9342, ST7789) and partly in the backlight pin (GPIO 21 vs GPIO 27). The touch controller (XPT2046) and SPI pin assignment are identical across all variants.
 
-## Bekannte CYD-Varianten
+## Known CYD Variants
 
-| Board | Display | Treiber | Backlight | Touch |
-|-------|---------|---------|-----------|-------|
+| Board | Display | Driver | Backlight | Touch |
+|-------|---------|--------|-----------|-------|
 | ESP32-2432S028 v1 | 2.8" | ILI9341 | GPIO 21 | XPT2046 (R) |
 | ESP32-2432S028 v2 | 2.8" | ILI9342 | GPIO 21 | XPT2046 (R) |
 | ESP32-2432S028 v3 | 2.8" | ST7789 | GPIO 27 | XPT2046 (R) |
 | ESP32-2432S032 | 3.2" | ST7789 | GPIO 27 | XPT2046 (R) |
-| ESP32-2432S024 | 2.4" | ILI9341 oder ST7789 | GPIO 27 | XPT2046 (R) |
+| ESP32-2432S024 | 2.4" | ILI9341 or ST7789 | GPIO 27 | XPT2046 (R) |
 
-Quelle: ESP32-Marauder CYD Projekt, diverse Community-Dokumentationen.
+Sources: ESP32-Marauder CYD project, various community documentation.
 
-## Geänderte Dateien (basierend auf `origin/next`)
+## Modified Files (based on `origin/next`)
 
 ### 1. `platformio.ini`
-- **Platform-Upgrade**: `espressif32` (unversioniert, löste zu 6.3.1 / ESP-IDF 5.0.2 auf) → `espressif32@6.13.0` (ESP-IDF 5.5.3)
-- Grund: Die Codebasis verwendet APIs die erst ab ESP-IDF 5.2+ verfügbar sind (`httpd_req_async_handler_begin`, `driver/i2c_master.h`, `littlefs` Partitionstyp)
-- Das offizielle Projekt verwendet ESP-IDF 5.5.1 für Releases
+- **Platform upgrade**: `espressif32` (unversioned, resolved to 6.3.1 / ESP-IDF 5.0.2) → `espressif32@6.13.0` (ESP-IDF 5.5.3)
+- Reason: The codebase uses APIs only available from ESP-IDF 5.2+ (`httpd_req_async_handler_begin`, `driver/i2c_master.h`, `littlefs` partition type)
+- The official project uses ESP-IDF 5.5.1 for releases
 
 ### 2. `src/lovyan_config.h`
-- Die bestehende `LGFX_CYD` Klasse wurde durch eine universelle Version ersetzt
-- Enthält alle drei Panel-Typen als Member (`Panel_ILI9341`, `Panel_ILI9342`, `Panel_ST7789`)
-- Neue `configure()` Methode mit Runtime-Detection statt Konstruktor-Initialisierung
-- `_read_cmd()` Hilfsfunktion zum Lesen von Display-Registern via SPI
+- The existing `LGFX_CYD` class was replaced with a universal version
+- Contains all three panel types as members (`Panel_ILI9341`, `Panel_ILI9342`, `Panel_ST7789`)
+- New `configure()` method with runtime detection instead of constructor initialization
+- `_read_cmd()` helper function for reading display registers via SPI
 
 ### 3. `src/bridge_lcd_impl.cpp`
-- CYD-Initialisierung geändert: `new LGFX_CYD()` → `new LGFX_CYD(); cyd_tft->configure();`
-- Gleicher Ansatz wie bei `LGFX_M5StickC` (die ebenfalls `configure()` nutzt)
+- CYD initialization changed: `new LGFX_CYD()` → `new LGFX_CYD(); cyd_tft->configure();`
+- Same approach as `LGFX_M5StickC` (which also uses `configure()`)
 
-## Ansätze zur Display-Erkennung
+## Approaches to Display Detection
 
-### Ansatz 1: Compile-time `#ifdef` (erster Versuch, funktioniert)
-- Separates `env:cyd32` mit eigenem Build-Flag `-D CYD32=1`
-- Separate `LGFX_CYD32` Klasse mit `Panel_ST7789` und `pin_bl = 27`
-- **Vorteil**: Einfach, zuverlässig
-- **Nachteil**: Braucht ein separates Binary pro CYD-Variante
-- **Status**: Funktioniert, wurde im `next` Branch gemerged
+### Approach 1: Compile-time `#ifdef` (first attempt, works)
+- Separate `env:cyd32` with its own build flag `-D CYD32=1`
+- Separate `LGFX_CYD32` class with `Panel_ST7789` and `pin_bl = 27`
+- **Advantage**: Simple, reliable
+- **Disadvantage**: Requires a separate binary per CYD variant
+- **Status**: Works, was merged into the `next` branch (see `cyd32-separate-target` branch in fork)
 
-### Ansatz 2: Runtime Display-ID via SPI Command 0x04 (aktueller Ansatz)
+### Approach 2: Runtime Display ID via SPI Command 0x04 (current approach)
 
-#### Versuch 2a: ID lesen mit `spi_3wire = true` (gescheitert)
-- Alle Register gaben `0x00000000` zurück
-- **Ursache**: Im 3-Wire SPI Modus wird MOSI bidirektional genutzt, aber der ESP32 SPI-Treiber unterstützt kein Half-Duplex Read auf der MOSI-Leitung. Der MISO-Pin (GPIO 12) wird im 3-Wire Modus ignoriert.
-- **Erkenntnis**: `spi_3wire = true` verhindert SPI-Reads komplett
+#### Attempt 2a: Reading ID with `spi_3wire = true` (failed)
+- All registers returned `0x00000000`
+- **Cause**: In 3-wire SPI mode, MOSI is used bidirectionally, but the ESP32 SPI driver does not support half-duplex reads on the MOSI line. The MISO pin (GPIO 12) is ignored in 3-wire mode.
+- **Lesson learned**: `spi_3wire = true` completely prevents SPI reads
 
-#### Versuch 2b: ID lesen mit `spi_3wire = false` für den Probe (funktioniert)
-- Temporär `spi_3wire = false` setzen, Bus initialisieren, IDs lesen, Bus freigeben, `spi_3wire = true` zurücksetzen
-- **Ergebnis auf ESP32-2432S032 (3.2" ST7789)**:
+#### Attempt 2b: Reading ID with `spi_3wire = false` for the probe (works)
+- Temporarily set `spi_3wire = false`, initialize bus, read IDs, release bus, restore `spi_3wire = true`
+- **Result on ESP32-2432S032 (3.2" ST7789)**:
   ```
   ID04(d1)=0xD9818181  ID04(d0)=0xFFD9C040  ID09=0x00610000
   IDDA=0x81  IDDB=0x81  IDDC=0xB3
   ```
-- Der ST7789 gibt `0x81` als ID zurück (nicht den Standardwert `0x85` aus der Dokumentation)
-- **Erkenntnis**: Display-IDs variieren je nach Hersteller/Charge
+- The ST7789 returns `0x81` as its ID (not the standard value `0x85` from the documentation)
+- **Lesson learned**: Display IDs vary by manufacturer/batch
 
-#### Versuch 2c: Fallback-Strategie bei unbekannter ID
-- Da IDs herstellerabhängig variieren, wurde eine mehrstufige Erkennung implementiert:
-  1. Mehrere SPI-Kommandos lesen (0x04, 0x09, 0xDA, 0xDB, 0xDC)
-  2. Mit verschiedenen Dummy-Bit-Werten (0 und 1)
-  3. Bekannte IDs matchen (ST7789: 0x85/0x81, ILI9342: 0xE3, ILI9341: 0x93)
-  4. Bei unbekannter ID: Default auf ST7789 mit GPIO 27 (häufigstes neueres Board)
+#### Attempt 2c: Fallback strategy for unknown IDs
+- Since IDs vary by manufacturer, a multi-stage detection was implemented:
+  1. Read multiple SPI commands (0x04, 0x09, 0xDA, 0xDB, 0xDC)
+  2. With different dummy bit values (0 and 1)
+  3. Match known IDs (ST7789: 0x85/0x81, ILI9342: 0xE3, ILI9341: 0x93)
+  4. For unknown IDs: default to ST7789 with GPIO 27 (most common on newer boards)
 
-### Verworfene Ansätze
+### Discarded Approaches
 
-- **LovyanGFX Auto-Detect**: LovyanGFX hat ein eingebautes Auto-Detection-System in `LGFX_AutoDetect_ESP32_all.hpp`, kennt aber die CYD-Boards nicht. Es verwendet dieselbe `_read_panel_id()` Methode, die wir nachgebaut haben.
-- **Backlight-Pin als Erkennungsmerkmal**: GPIO 21 vs 27 kann nicht zuverlässig getestet werden, da ein offener GPIO-Pin kein eindeutiges Signal liefert.
+- **LovyanGFX Auto-Detect**: LovyanGFX has a built-in auto-detection system in `LGFX_AutoDetect_ESP32_all.hpp`, but it does not know the CYD boards. It uses the same `_read_panel_id()` method that we replicated.
+- **Backlight pin as detection criterion**: GPIO 21 vs 27 cannot be reliably tested, as a floating GPIO pin does not produce a definitive signal.
 
-## Wichtiger Fehler: Display bleibt dunkel
+## Critical Bug: Display Stays Dark
 
-Beim ersten Versuch mit dem 3.2" CYD blieb das Display dunkel. Ursache: Der **Backlight-Pin** ist GPIO 27 (nicht GPIO 21 wie beim 2.8"). Gefunden durch Recherche im [ESP32-Marauder CYD Projekt](https://github.com/Fr4nkFletcher/ESP32-Marauder-Cheap-Yellow-Display).
+On the first attempt with the 3.2" CYD, the display remained dark. Cause: The **backlight pin** is GPIO 27 (not GPIO 21 as on the 2.8"). Found by researching the [ESP32-Marauder CYD project](https://github.com/Fr4nkFletcher/ESP32-Marauder-Cheap-Yellow-Display).
 
-## Aktueller Stand
+## Current Status
 
-- ✅ Build kompiliert erfolgreich (`env:cyd`)
-- ✅ Flash-Verbrauch: 50.2% (nur +2.5 KB gegenüber Single-Display-Version)
-- ✅ **ESP32-2432S032 (3.2" ST7789)**: Display funktioniert, erkannt via ID `0x81`
-- ✅ Touch wurde nicht explizit getestet, aber der Code ist identisch zur funktionierenden `env:cyd` Version
+- ✅ Build compiles successfully (`env:cyd`)
+- ✅ Flash usage: 50.2% (only +2.5 KB compared to single-display version)
+- ✅ **ESP32-2432S032 (3.2" ST7789)**: Display works, detected via ID `0x81`
+- ✅ Touch was not explicitly tested, but the code is identical to the working `env:cyd` version
 
-## Offene Tests
+## Pending Tests
 
-### Boards die noch getestet werden müssen:
-- [ ] **ESP32-2432S028 v1 (2.8" ILI9341)** — Wird die ID korrekt als ILI9341 erkannt? Backlight GPIO 21?
-- [ ] **ESP32-2432S028 v2 (2.8" ILI9342)** — Wird `0xE3` gelesen?
-- [ ] **ESP32-2432S028 v3 (2.8" ST7789)** — Wird `0x85` oder `0x81` gelesen? Backlight GPIO 27?
-- [ ] **ESP32-2432S024 (2.4")** — Welche IDs gibt dieses Board zurück?
+### Boards that still need testing:
+- [ ] **ESP32-2432S028 v1 (2.8" ILI9341)** — Is the ID correctly detected as ILI9341? Backlight GPIO 21?
+- [ ] **ESP32-2432S028 v2 (2.8" ILI9342)** — Is `0xE3` read?
+- [ ] **ESP32-2432S028 v3 (2.8" ST7789)** — Is `0x85` or `0x81` read? Backlight GPIO 27?
+- [ ] **ESP32-2432S024 (2.4")** — What IDs does this board return?
 
-### Testprozedur:
-1. Binary flashen: `pio run -e cyd -t upload --upload-port /dev/cu.usbserial-XX`
-2. Serial Monitor öffnen (115200 Baud)
-3. Reset-Taste drücken
-4. Nach `W (xxx) CYD:` Zeilen suchen — diese zeigen die gelesenen IDs und den erkannten Display-Typ
-5. Prüfen ob Display leuchtet und Inhalt korrekt angezeigt wird
+### Test Procedure:
+1. Flash binary: `pio run -e cyd -t upload --upload-port /dev/cu.usbserial-XX`
+2. Open serial monitor (115200 baud)
+3. Press the reset button
+4. Look for `W (xxx) CYD:` lines — these show the read IDs and the detected display type
+5. Check if the display lights up and content is displayed correctly
 
-### Was bei unbekannten IDs zu tun ist:
-- Die Serial-Log-Zeilen `ID04(d1)=...`, `IDDA=...` etc. notieren
-- Falls das Display nicht erkannt wird: Die neuen ID-Werte in die `is_st7789`, `is_ili9342` oder `is_ili9341` Bedingungen in `lovyan_config.h` eintragen
+### What to do with unknown IDs:
+- Note the serial log lines `ID04(d1)=...`, `IDDA=...` etc.
+- If the display is not recognized: add the new ID values to the `is_st7789`, `is_ili9342`, or `is_ili9341` conditions in `lovyan_config.h`
 
-## Debug-Logging
+## Debug Logging
 
-Aktuell sind `ESP_LOGW("CYD", ...)` Logs aktiv auf Level WARNING. Diese geben aus:
-- Alle gelesenen Register-Werte (ID04, ID09, IDDA, IDDB, IDDC)
-- Den erkannten Display-Typ und Backlight-Pin
+Currently `ESP_LOGW("CYD", ...)` logs are active at WARNING level. They output:
+- All read register values (ID04, ID09, IDDA, IDDB, IDDC)
+- The detected display type and backlight pin
 
-Die Logs sollten nach Abschluss aller Tests auf `ESP_LOGI` (Info) herabgestuft oder entfernt werden.
+The logs should be downgraded to `ESP_LOGI` (Info) or removed after all testing is complete.
 
-## Abhängigkeiten
+## Dependencies
 
 - **PlatformIO**: `espressif32@6.13.0` (ESP-IDF 5.5.3)
-- **LovyanGFX**: Git-Commit `2e0dc974a9b6521bf155afb53a9a92a623a60803`
-- **Python**: `intelhex` Modul muss ggf. installiert werden: `~/.platformio/penv/bin/pip install intelhex`
+- **LovyanGFX**: Git commit `2e0dc974a9b6521bf155afb53a9a92a623a60803`
+- **Python**: `intelhex` module may need to be installed: `~/.platformio/penv/bin/pip install intelhex`
