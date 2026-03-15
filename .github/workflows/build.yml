@@ -5,8 +5,7 @@ name: Build
 on:
   push:
     branches:
-      - master
-      - next
+      - cyd-universal
 
     # tags:
     #   - "v*"
