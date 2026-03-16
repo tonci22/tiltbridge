@@ -10,10 +10,11 @@ v2.0.0 - Unreleased - New UI & Fermentrack 2 Support
 - ESP32-S3 Support
 - New Internationalization Support - Initially supporting English, Spanish, Portuguese, German, and Dutch
 - Completely rebuilt calibration workflow
-- Migrate from asynchronous to synchronous HTTP server
-- Upgrade to latest upstream frameworks/libraries
-- Add supprot for InfluxDB 2.x as a data target
-- Refactor WiFi reconnection logic
+- Converted from Arduino framework to ESP-IDF Framework
+- Add support for InfluxDB 2.x as a data target
+- Rebuilt WiFi provisioning workflow & reconnection logic
+- Added support for a wider variety of TFT displays
+- Combined ESP32 versions into single "small TFT" and "large TFT" builds with runtime hardware detection
 
 
 
