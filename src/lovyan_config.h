@@ -1,7 +1,9 @@
 #ifndef TILTBRIDGE_LOVYAN_CONFIG_H
 #define TILTBRIDGE_LOVYAN_CONFIG_H
 
+#if defined(LCD_SSD1306) || defined(LCD_TFT) || defined(LCD_TFT_ESPI) || defined(ESP32S3)
 #include <LovyanGFX.hpp>
+#endif
 
 #if defined(LCD_SSD1306)
 // Configuration class for SSD1306 OLED displays (128x64)
@@ -54,17 +56,28 @@ public:
     void configure();
 };
 
-#elif defined(LCD_TFT_M5STICKC)
-// Configuration class for M5StickC Plus and Plus2
-class LGFX_M5StickC : public lgfx::LGFX_Device
+#elif defined(LCD_TFT_ESPI)
+// Universal TFT configuration class for 135x240 SPI displays (all ST7789)
+// Auto-detects hardware at runtime:
+//   1. M5StickC Plus (AXP192 on I2C) — VSPI, backlight via AXP192
+//   2. M5StickC Plus2 (no AXP192, RST pullup on GPIO 12) — HSPI, backlight GPIO 27
+//   3. TTGO T-Display (fallback) — VSPI, backlight GPIO 4
+class LGFX_SmallTFT_Universal : public lgfx::LGFX_Device
 {
     lgfx::Panel_ST7789 _panel_instance;
     lgfx::Bus_SPI _bus_instance;
     lgfx::Light_PWM _light_instance;
 
 public:
-    LGFX_M5StickC(void) {}
-    void configure(bool isPlus2);
+    enum class Variant { M5Plus, M5Plus2, TTGO };
+
+    LGFX_SmallTFT_Universal(void) {}
+    void configure(Variant variant);
+
+    // Detect which small TFT hardware is present (call before configure).
+    // GPIO-only probe first, then I2C for AXP192 only if needed.
+    // Returns the variant and sets out_has_axp192 for caller's power init.
+    static Variant detect(bool (*axp192_probe)(int, int), bool& out_has_axp192);
 };
 
 #elif defined(ESP32S3)
@@ -79,17 +92,6 @@ public:
     LGFX_S3_TDisplay(void);
 };
 
-#else
-// Configuration class for TFT_ESPI displays (ST7789)
-class LGFX_TFT_ESPI : public lgfx::LGFX_Device
-{
-    lgfx::Panel_ST7789 _panel_instance;
-    lgfx::Bus_SPI _bus_instance;
-    lgfx::Light_PWM _light_instance;
-
-public:
-    LGFX_TFT_ESPI(void);
-};
 #endif
 
 #endif // TILTBRIDGE_LOVYAN_CONFIG_H

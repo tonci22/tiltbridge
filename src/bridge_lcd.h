@@ -88,10 +88,8 @@ private:
     void print_tilt_to_line(tiltHydrometer *tilt, uint8_t line);
     bool i2c_device_at_address(uint8_t address, int sda_pin, int scl_pin);
 
-#ifdef LCD_TFT_M5STICKC
-    enum class M5Variant { Plus, Plus2 };
-    M5Variant detect_m5_variant();
-    M5Variant m5_variant;
+#ifdef LCD_TFT_ESPI
+    LGFX_SmallTFT_Universal::Variant _small_tft_variant;
 #endif
 
     uint8_t display_next();                             // Not in impl

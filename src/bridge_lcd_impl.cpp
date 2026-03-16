@@ -58,18 +58,6 @@ static inline void yield() {
 AXP192_Driver axp192_driver;
 #endif
 
-#ifdef LCD_TFT_M5STICKC
-bridge_lcd::M5Variant bridge_lcd::detect_m5_variant() {
-    // Use AXP192's detect method to check for device presence
-    if (axp192_driver.detect(21, 22)) {
-        Log.notice("Detected M5StickC Plus (AXP192 found)" CR);
-        return M5Variant::Plus;
-    } else {
-        Log.notice("Detected M5StickC Plus2 (no AXP192)" CR);
-        return M5Variant::Plus2;
-    }
-}
-#endif
 
 
 ////////////////////////////////////////////////////////////
@@ -78,11 +66,16 @@ bridge_lcd::M5Variant bridge_lcd::detect_m5_variant() {
 
 
 inline void bridge_lcd::init_power() {
-#ifdef LCD_TFT_M5STICKC
-    m5_variant = detect_m5_variant();
+#ifdef LCD_TFT_ESPI
+    // Detect which small TFT hardware is present and handle power init.
+    // Detection must happen here (before display init) because M5StickC Plus
+    // requires AXP192 initialization for power before the display can work.
+    bool has_axp192 = false;
+    _small_tft_variant = LGFX_SmallTFT_Universal::detect(
+        [](int sda, int scl) { return axp192_driver.detect(sda, scl); },
+        has_axp192);
 
-    if (m5_variant == M5Variant::Plus) {
-        // M5StickC Plus: Initialize AXP192 for power/backlight
+    if (has_axp192) {
         AXP192_InitDef initDef = {
             .EXTEN  = true,
             .BACKUP = true,
@@ -98,20 +91,8 @@ inline void bridge_lcd::init_power() {
             .GPIO4  = -1,
         };
         axp192_driver.begin(21, 22, initDef);
-    } else {
-        // M5StickC Plus2: Set HOLD pin (GPIO4) HIGH to maintain power
-        // Without this, the device may shut down on battery - see M5Stack docs
-        // n.b - I ended up commenting this out as there was a weird 'clicking" noise when turning 
-        //       off the device via the button when running on battery. I think the fix is to capture 
-        //       the button press (GPIO 35?) and then set GPIO4 to low, but am fine with just disabling
-        //       battery operation for now (which is what happens when these are commented out)
-        //pinMode(4, OUTPUT);
-        //digitalWrite(4, HIGH);
-
-        // Turn on backlight via GPIO27
-        pinMode(27, OUTPUT);
-        digitalWrite(27, HIGH);
     }
+    // Plus2 and TTGO backlights are handled by LovyanGFX Light_PWM
 #elif defined(PIN_POWER_ON)
     pinMode(PIN_POWER_ON, OUTPUT);
     digitalWrite(PIN_POWER_ON, HIGH);
@@ -213,19 +194,16 @@ void bridge_lcd::init() {
         uni_tft->configure();
         tft = uni_tft;
     }
-#elif defined(LCD_TFT_M5STICKC)
+#elif defined(LCD_TFT_ESPI)
     {
-        auto m5_tft = new LGFX_M5StickC();
-        m5_tft->configure(m5_variant == M5Variant::Plus2);
-        tft = m5_tft;
+        auto small_tft = new LGFX_SmallTFT_Universal();
+        small_tft->configure(_small_tft_variant);
+        tft = small_tft;
     }
 #elif defined(ESP32S3)
     tft = new LGFX_S3_TDisplay();
-    // tft = new LGFX();
-#else
-    tft = new LGFX_TFT_ESPI();
 #endif
-    
+
     tft->init();
     tft->setSwapBytes(true);
     reinit();
