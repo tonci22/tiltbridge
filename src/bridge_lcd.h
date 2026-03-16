@@ -8,8 +8,8 @@
 
 // There are three different LCD options, set depending on what is defined in platformio.ini:
 // LCD_SSD1306 - For the OLED displays
-// LCD_TFT - For larger TFT displays
-// LCD_TFT_ESPI - For smaller TFT displays
+// LCD_LARGE_TFT - For larger TFT displays
+// LCD_SMALL_TFT - For smaller TFT displays
 
 #ifdef LCD_SSD1306
 #include <LovyanGFX.hpp>
@@ -19,9 +19,9 @@
 #define TILTS_PER_PAGE          5 // The actual number is one fewer than this - the first row is used for headers
 #define HAVE_LCD                1
 
-#elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
+#elif defined(LCD_LARGE_TFT) || defined(LCD_SMALL_TFT)
 
-// For the LCD_TFT displays, we're connecting via SPI
+// For the LCD_LARGE_TFT displays, we're connecting via SPI
 // LovyanGFX handles SPI internally, no separate SPI include needed
 #include <LovyanGFX.hpp>
 #include "lovyan_config.h"
@@ -30,7 +30,7 @@
 
 #define HAVE_LCD                1
 
-#if defined(LCD_TFT)
+#if defined(LCD_LARGE_TFT)
 // Big TFTs
 #define TILTS_PER_PAGE          15 // The actual number is one fewer than this - the first row is used for headers
 #define TILT_FONT_SIZE          2
@@ -88,7 +88,7 @@ private:
     void print_tilt_to_line(tiltHydrometer *tilt, uint8_t line);
     bool i2c_device_at_address(uint8_t address, int sda_pin, int scl_pin);
 
-#ifdef LCD_TFT_ESPI
+#if defined(LCD_SMALL_TFT) && !defined(ESP32S3)
     LGFX_SmallTFT_Universal::Variant _small_tft_variant;
 #endif
 

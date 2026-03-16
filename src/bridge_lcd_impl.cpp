@@ -46,9 +46,9 @@ static inline void yield() {
 #if HAVE_LCD
 #include "lovyan_config.h"
 
-#if defined(LCD_SSD1306) || defined(LCD_TFT_ESPI)
+#if defined(LCD_SSD1306) || defined(LCD_SMALL_TFT)
 #include "img/oled_logo.h" // Small logo
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
 #include "img/tft_logo.h" // Large logo
 #endif
 #endif // HAVE_LCD
@@ -66,7 +66,7 @@ AXP192_Driver axp192_driver;
 
 
 inline void bridge_lcd::init_power() {
-#ifdef LCD_TFT_ESPI
+#if defined(LCD_SMALL_TFT) && defined(AXP192)
     // Detect which small TFT hardware is present and handle power init.
     // Detection must happen here (before display init) because M5StickC Plus
     // requires AXP192 initialization for power before the display can work.
@@ -186,22 +186,22 @@ void bridge_lcd::init() {
     }
 
 
-#elif defined(LCD_TFT_ESPI) || defined(LCD_TFT)
+#elif defined(LCD_SMALL_TFT) || defined(LCD_LARGE_TFT)
     // Initialize appropriate LovyanGFX configuration based on hardware
-#if defined(LCD_TFT)
+#if defined(ESP32S3)
+    tft = new LGFX_S3_TDisplay();
+#elif defined(LCD_LARGE_TFT)
     {
         auto uni_tft = new LGFX_TFT_Universal();
         uni_tft->configure();
         tft = uni_tft;
     }
-#elif defined(LCD_TFT_ESPI)
+#elif defined(LCD_SMALL_TFT)
     {
         auto small_tft = new LGFX_SmallTFT_Universal();
         small_tft->configure(_small_tft_variant);
         tft = small_tft;
     }
-#elif defined(ESP32S3)
-    tft = new LGFX_S3_TDisplay();
 #endif
 
     tft->init();
@@ -215,11 +215,11 @@ void bridge_lcd::init() {
     digitalWrite(TFT_BACKLIGHT, HIGH);
 #endif // TFT_BACKLIGHT
 
-#endif // LCD_TFT_ESPI
+#endif // LCD_SMALL_TFT
 }
 
 void bridge_lcd::reinit() {
-#if defined(LCD_TFT) || defined(LCD_TFT_ESPI)
+#if defined(LCD_LARGE_TFT) || defined(LCD_SMALL_TFT)
     clear();
     if (config.invertTFT) {
         tft->setRotation(1);
@@ -263,7 +263,7 @@ void bridge_lcd::checkTouch()
 
 void bridge_lcd::print_line(const char *left_text, uint8_t line)
 {
-#if defined(LCD_TFT_ESPI)
+#if defined(LCD_SMALL_TFT)
     print_line("", left_text, "", line);
 #else
     print_line(left_text, "", "", line);
@@ -271,7 +271,7 @@ void bridge_lcd::print_line(const char *left_text, uint8_t line)
 }
 
 void bridge_lcd::print_line(const char *left_text, const char *right_text, uint8_t line) {
-#if defined(LCD_TFT_ESPI)
+#if defined(LCD_SMALL_TFT)
     print_line("", left_text, right_text, line);
 #else
     print_line(left_text, "", right_text, line);
@@ -297,7 +297,7 @@ void bridge_lcd::print_line(const char *left_text, const char *middle_text, cons
 
     tft->setTextDatum(textdatum_t::top_right);
     tft->drawString(right_text, 128, starting_pixel_row);
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
     int16_t starting_pixel_row = 0;
     starting_pixel_row = (tft->fontHeight()) * (line - 1) + 2;
 
@@ -313,7 +313,7 @@ void bridge_lcd::print_line(const char *left_text, const char *middle_text, cons
         tft->drawString(right_text, 300 - tft->textWidth(right_text), starting_pixel_row);
     else
         tft->drawString(right_text, 319 - tft->textWidth(right_text), starting_pixel_row);
-#elif defined(LCD_TFT_ESPI)
+#elif defined(LCD_SMALL_TFT)
     // ignore left text as we color the text by the tilt
     int16_t starting_pixel_row = 0;
 
@@ -330,7 +330,7 @@ void bridge_lcd::print_line(const char *left_text, const char *middle_text, cons
 void bridge_lcd::clear() {
 #ifdef LCD_SSD1306
     tft->fillScreen(0x0000);  // Black color
-#elif defined(LCD_TFT) || defined(LCD_TFT_ESPI)
+#elif defined(LCD_LARGE_TFT) || defined(LCD_SMALL_TFT)
     tft->fillScreen(0x0000);  // Black color in 16-bit RGB565 format
 #endif
     yield();
@@ -347,14 +347,14 @@ void bridge_lcd::print_tilt_to_line(tiltHydrometer *tilt, uint8_t line) {
     tilt->converted_temp(temp_str, 6, false);
     snprintf(temp, sizeof(temp), "%s %s", temp_str, tilt->is_celsius() ? "C" : "F");
 
-#if defined(LCD_TFT_ESPI)
+#if defined(LCD_SMALL_TFT)
     tft->setTextColor(tilt_text_colors[tilt->m_color]);
 #endif
 
     // Print line with gutter for the color block for TFT screens
     print_line(tilt_color_names[tilt->m_color], temp, gravity, line, true);
 
-#ifdef LCD_TFT
+#ifdef LCD_LARGE_TFT
     uint16_t fHeight = tft->fontHeight();
     if (tilt_text_colors[tilt->m_color] == 0xFFFF) { // White outline, black square
         tft->fillRect( // White square
@@ -378,7 +378,7 @@ void bridge_lcd::print_tilt_to_line(tiltHydrometer *tilt, uint8_t line) {
             fHeight - 8,
             tilt_text_colors[tilt->m_color]);
     }
-#elif defined(LCD_TFT_ESPI)
+#elif defined(LCD_SMALL_TFT)
     tft->setTextColor(0xFFFF);  // White in RGB565
 #endif
 }
@@ -430,13 +430,13 @@ void bridge_lcd::display_logo_internal() {
         oled_logo_height,
         0xFFFF);  // White in monochrome
     display();
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
     tft->pushImage(
         (320 - 288) / 2, 0,
         gimp_image.width,
         gimp_image.height,
         gimp_image.pixel_data);
-#elif defined(LCD_TFT_ESPI)
+#elif defined(LCD_SMALL_TFT)
     tft->drawXBitmap(
         (tft->width() - oled_logo_width) / 2,
         (tft->height() - oled_logo_height) / 2,

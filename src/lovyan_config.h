@@ -1,7 +1,7 @@
 #ifndef TILTBRIDGE_LOVYAN_CONFIG_H
 #define TILTBRIDGE_LOVYAN_CONFIG_H
 
-#if defined(LCD_SSD1306) || defined(LCD_TFT) || defined(LCD_TFT_ESPI) || defined(ESP32S3)
+#if defined(LCD_SSD1306) || defined(LCD_LARGE_TFT) || defined(LCD_SMALL_TFT) || defined(ESP32S3)
 #include <LovyanGFX.hpp>
 #endif
 
@@ -17,7 +17,7 @@ public:
     void configure(int sda_pin, int scl_pin, uint8_t i2c_addr = 0x3C, int reset_pin = -1);
 };
 
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
 // Universal TFT configuration class for 240x320 SPI displays
 // Auto-detects hardware by probing known pin configurations at runtime:
 //   1. CYD variants (HSPI): ESP32-2432S024, S028 v1/v2/v3, S032
@@ -56,7 +56,20 @@ public:
     void configure();
 };
 
-#elif defined(LCD_TFT_ESPI)
+#elif defined(ESP32S3)
+// Configuration class for ESP32-S3 TDisplay (parallel bus)
+// Must be checked before LCD_SMALL_TFT since S3 TDisplay defines both.
+class LGFX_S3_TDisplay : public lgfx::LGFX_Device
+{
+    lgfx::Panel_ST7789 _panel_instance;
+    lgfx::Bus_Parallel8 _bus_instance;
+    lgfx::Light_PWM _light_instance;
+
+public:
+    LGFX_S3_TDisplay(void);
+};
+
+#elif defined(LCD_SMALL_TFT)
 // Universal TFT configuration class for 135x240 SPI displays (all ST7789)
 // Auto-detects hardware at runtime:
 //   1. M5StickC Plus (AXP192 on I2C) — VSPI, backlight via AXP192
@@ -78,18 +91,6 @@ public:
     // GPIO-only probe first, then I2C for AXP192 only if needed.
     // Returns the variant and sets out_has_axp192 for caller's power init.
     static Variant detect(bool (*axp192_probe)(int, int), bool& out_has_axp192);
-};
-
-#elif defined(ESP32S3)
-// Configuration class for ESP32-S3 TDisplay
-class LGFX_S3_TDisplay : public lgfx::LGFX_Device
-{
-    lgfx::Panel_ST7789 _panel_instance;
-    lgfx::Bus_Parallel8 _bus_instance;
-    lgfx::Light_PWM _light_instance;
-
-public:
-    LGFX_S3_TDisplay(void);
 };
 
 #endif

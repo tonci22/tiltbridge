@@ -13,9 +13,9 @@ static inline unsigned long millis() {
 
 bridge_lcd lcd;
 
-#if defined(LCD_SSD1306) || defined(LCD_TFT_ESPI)
+#if defined(LCD_SSD1306) || defined(LCD_SMALL_TFT)
 #include "img/oled_logo.h" // Small logo
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
 #include "img/tft_logo.h" // Large logo
 #endif
 
@@ -58,7 +58,7 @@ void bridge_lcd::display_wifi_connect_screen(const char *ap_name, const char *ap
     print_line("Name:", ap_name, 3);
     print_line("Pass: ", ap_pass, 4);
 
-#ifdef LCD_TFT
+#ifdef LCD_LARGE_TFT
 // TODO - See if the next line can be removed without issue
     // tft->setFreeFont(FF_NORMAL);
     print_line("NOTE - If this appears upside-down,", 8);
@@ -96,13 +96,13 @@ void bridge_lcd::display_wifi_reset_screen() {
     clear();
     onResetScreen = true;
 
-#if defined(LCD_SSD1306) || defined(LCD_TFT_ESPI)
+#if defined(LCD_SSD1306) || defined(LCD_SMALL_TFT)
     print_line("Press the button again to", 1);
     print_line("disable autoconnection", 2);
     print_line("and start the WiFi ", 3);
     print_line("configuration AP.", 4);
     display();
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
     print_line("Tap the screen again to", 1);
     print_line("delete any saved WiFi", 2);
     print_line("credentials and restart", 3);
@@ -216,7 +216,7 @@ void bridge_lcd::display_tilt_screen(uint8_t screen_number) {
     uint8_t header_row = 1;
     uint8_t first_tilt_row_offset = 2;
 
-#ifdef LCD_TFT
+#ifdef LCD_LARGE_TFT
     // Display IP address or indicate if not connected
     if (is_wifi_connected()) {
         char ip[16];

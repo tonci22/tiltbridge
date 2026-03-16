@@ -15,7 +15,7 @@ bool firstWiFiPress = false;         // Button switch
 bool doWiFiReset = false;            // Global semaphore (handle in loop())
 bool doBoardReset = false;           // Global semaphore (handle in loop())
 
-#ifndef LCD_TFT
+#ifndef LCD_LARGE_TFT
 #ifndef NO_BUTTONS
 static void IRAM_ATTR wifiButtonPressed(void* arg) {
     // When the wifi button is pressed, just log the time & get back to work
@@ -33,7 +33,7 @@ static void IRAM_ATTR boardButtonPressed(void* arg) {
 #endif
 
 void initWiFiResetButton() {
-#ifndef LCD_TFT
+#ifndef LCD_LARGE_TFT
 #ifndef NO_BUTTONS
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << WIFI_RESET_BUTTON_GPIO),
@@ -50,7 +50,7 @@ void initWiFiResetButton() {
 }
 
 void initBoardResetButton() {
-#ifndef LCD_TFT
+#ifndef LCD_LARGE_TFT
 #ifndef NO_BUTTONS
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BOARD_RESET_BUTTON_GPIO),

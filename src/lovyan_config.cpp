@@ -43,7 +43,7 @@ void LGFX_SSD1306::configure(int sda_pin, int scl_pin, uint8_t i2c_addr, int res
     setPanel(&_panel_instance);
 }
 
-#elif defined(LCD_TFT)
+#elif defined(LCD_LARGE_TFT)
 
 // --- Bit-bang SPI helpers (avoid ESP-IDF SPI driver state corruption) ---
 
@@ -327,7 +327,62 @@ void LGFX_TFT_Universal::configure()
     setPanel(panel);
 }
 
-#elif defined(LCD_TFT_ESPI)
+#elif defined(ESP32S3)
+
+LGFX_S3_TDisplay::LGFX_S3_TDisplay(void)
+{
+    {
+        auto cfg = _bus_instance.config();
+        cfg.freq_write = 20000000;
+        cfg.pin_wr = 8;
+        cfg.pin_rd = 9;
+        cfg.pin_rs = 7;
+        cfg.pin_d0 = 39;
+        cfg.pin_d1 = 40;
+        cfg.pin_d2 = 41;
+        cfg.pin_d3 = 42;
+        cfg.pin_d4 = 45;
+        cfg.pin_d5 = 46;
+        cfg.pin_d6 = 47;
+        cfg.pin_d7 = 48;
+        _bus_instance.config(cfg);
+        _panel_instance.setBus(&_bus_instance);
+    }
+
+    {
+        auto cfg = _panel_instance.config();
+        cfg.pin_cs = 6;
+        cfg.pin_rst = 5;
+        cfg.pin_busy = -1;
+        cfg.panel_width = 170;
+        cfg.panel_height = 320;
+        cfg.offset_x = 35;
+        cfg.offset_y = 0;
+        cfg.offset_rotation = 0;
+        cfg.dummy_read_pixel = 8;
+        cfg.dummy_read_bits = 1;
+        cfg.readable = true;
+        cfg.invert = true;
+        cfg.rgb_order = false;
+        cfg.dlen_16bit = false;
+        cfg.bus_shared = true;
+        _panel_instance.config(cfg);
+    }
+
+    {
+        auto cfg = _light_instance.config();
+        cfg.pin_bl = 38;
+        cfg.invert = false;
+        cfg.freq = 44100;
+        cfg.pwm_channel = 7;
+        _light_instance.config(cfg);
+        _panel_instance.setLight(&_light_instance);
+    }
+
+    setPanel(&_panel_instance);
+}
+
+#elif defined(LCD_SMALL_TFT)
 
 // --- Small TFT hardware detection ---
 
@@ -457,61 +512,6 @@ void LGFX_SmallTFT_Universal::configure(Variant variant)
             cfg.freq = 44100;
         }
 
-        _light_instance.config(cfg);
-        _panel_instance.setLight(&_light_instance);
-    }
-
-    setPanel(&_panel_instance);
-}
-
-#elif defined(ESP32S3)
-
-LGFX_S3_TDisplay::LGFX_S3_TDisplay(void)
-{
-    {
-        auto cfg = _bus_instance.config();
-        cfg.freq_write = 20000000;
-        cfg.pin_wr = 8;
-        cfg.pin_rd = 9;
-        cfg.pin_rs = 7;
-        cfg.pin_d0 = 39;
-        cfg.pin_d1 = 40;
-        cfg.pin_d2 = 41;
-        cfg.pin_d3 = 42;
-        cfg.pin_d4 = 45;
-        cfg.pin_d5 = 46;
-        cfg.pin_d6 = 47;
-        cfg.pin_d7 = 48;
-        _bus_instance.config(cfg);
-        _panel_instance.setBus(&_bus_instance);
-    }
-
-    {
-        auto cfg = _panel_instance.config();
-        cfg.pin_cs = 6;
-        cfg.pin_rst = 5;
-        cfg.pin_busy = -1;
-        cfg.panel_width = 170;
-        cfg.panel_height = 320;
-        cfg.offset_x = 35;
-        cfg.offset_y = 0;
-        cfg.offset_rotation = 0;
-        cfg.dummy_read_pixel = 8;
-        cfg.dummy_read_bits = 1;
-        cfg.readable = true;
-        cfg.invert = true;
-        cfg.rgb_order = false;
-        cfg.dlen_16bit = false;
-        cfg.bus_shared = true;
-        _panel_instance.config(cfg);
-    }
-
-    {
-        auto cfg = _light_instance.config();
-        cfg.pin_bl = 38;
-        cfg.invert = false;
-        cfg.freq = 44100;
-        cfg.pwm_channel = 7;
         _light_instance.config(cfg);
         _panel_instance.setLight(&_light_instance);
     }
