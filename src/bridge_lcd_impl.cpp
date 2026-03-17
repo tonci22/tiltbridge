@@ -58,6 +58,11 @@ static inline void yield() {
 AXP192_Driver axp192_driver;
 #endif
 
+#if defined(ESP32S3) && defined(LCD_SMALL_TFT)
+#include "m5pm1.h"   // ESP-IDF compatible M5PM1 driver for M5StickC S3
+M5PM1_Driver m5pm1_driver;
+#endif
+
 
 
 ////////////////////////////////////////////////////////////
@@ -93,6 +98,22 @@ inline void bridge_lcd::init_power() {
         axp192_driver.begin(21, 22, initDef);
     }
     // Plus2 and TTGO backlights are handled by LovyanGFX Light_PWM
+#elif defined(ESP32S3) && defined(LCD_SMALL_TFT)
+    // ESP32-S3 small TFT: detect M5StickC S3 vs S3 T-Display
+    bool has_m5pm1 = false;
+    _s3_small_tft_variant = LGFX_S3_SmallTFT_Universal::detect(
+        [](int sda, int scl) { return m5pm1_driver.detect(sda, scl); },
+        has_m5pm1);
+
+    if (has_m5pm1) {
+        // M5StickC S3: init M5PM1 and enable LCD power rail
+        m5pm1_driver.begin(47, 48);
+        m5pm1_driver.enableLcdPower(true);
+    } else {
+        // S3 T-Display: power-on via GPIO 15
+        pinMode(15, OUTPUT);
+        digitalWrite(15, HIGH);
+    }
 #elif defined(PIN_POWER_ON)
     pinMode(PIN_POWER_ON, OUTPUT);
     digitalWrite(PIN_POWER_ON, HIGH);
@@ -189,7 +210,11 @@ void bridge_lcd::init() {
 #elif defined(LCD_SMALL_TFT) || defined(LCD_LARGE_TFT)
     // Initialize appropriate LovyanGFX configuration based on hardware
 #if defined(ESP32S3)
-    tft = new LGFX_S3_TDisplay();
+    {
+        auto s3_tft = new LGFX_S3_SmallTFT_Universal();
+        s3_tft->configure(_s3_small_tft_variant);
+        tft = s3_tft;
+    }
 #elif defined(LCD_LARGE_TFT)
     {
         auto uni_tft = new LGFX_TFT_Universal();

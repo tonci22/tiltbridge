@@ -56,7 +56,7 @@ The **ESP32** firmware has been reorganized into four build types, each of which
 The **ESP32-S3** firmware is currently _entirely_ unofficial, though official support may come at a future point. There are currently two build types:
 
 * **ESP32-S3 OLED** - Supports ESP32-S3 devices with an OLED display (e.g. Heltec-style boards) - **See note below**
-* **ESP32-S3 TDisplay** - Supports the Lilygo T-Display S3
+* **ESP32-S3 Small TFT** - Supports the Lilygo T-Display S3 and M5 Stick S3
 
 **OLED Note** - Support for the ESP32-S3 /w OLED is dependent on continued support for the ESP32 /w SSD1306 OLED display. If support for the ESP32 /w OLED display is dropped, support for the ESP32-S3 /w OLED display will be dropped as well.
 

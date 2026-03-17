@@ -88,7 +88,9 @@ private:
     void print_tilt_to_line(tiltHydrometer *tilt, uint8_t line);
     bool i2c_device_at_address(uint8_t address, int sda_pin, int scl_pin);
 
-#if defined(LCD_SMALL_TFT) && !defined(ESP32S3)
+#if defined(ESP32S3) && defined(LCD_SMALL_TFT)
+    LGFX_S3_SmallTFT_Universal::Variant _s3_small_tft_variant;
+#elif defined(LCD_SMALL_TFT)
     LGFX_SmallTFT_Universal::Variant _small_tft_variant;
 #endif
 

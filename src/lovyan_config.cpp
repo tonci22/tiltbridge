@@ -329,46 +329,112 @@ void LGFX_TFT_Universal::configure()
 
 #elif defined(ESP32S3)
 
-LGFX_S3_TDisplay::LGFX_S3_TDisplay(void)
+// --- S3 Small TFT hardware detection ---
+
+LGFX_S3_SmallTFT_Universal::Variant LGFX_S3_SmallTFT_Universal::detect(
+    bool (*m5pm1_probe)(int, int), bool& out_has_m5pm1)
 {
-    {
-        auto cfg = _bus_instance.config();
-        cfg.freq_write = 20000000;
-        cfg.pin_wr = 8;
-        cfg.pin_rd = 9;
-        cfg.pin_rs = 7;
-        cfg.pin_d0 = 39;
-        cfg.pin_d1 = 40;
-        cfg.pin_d2 = 41;
-        cfg.pin_d3 = 42;
-        cfg.pin_d4 = 45;
-        cfg.pin_d5 = 46;
-        cfg.pin_d6 = 47;
-        cfg.pin_d7 = 48;
-        _bus_instance.config(cfg);
-        _panel_instance.setBus(&_bus_instance);
+    out_has_m5pm1 = false;
+
+    // Probe for M5PM1 PMIC on SDA=47, SCL=48 (M5StickC S3 I2C bus).
+    // On S3 T-Display these GPIOs are used for parallel display bus,
+    // but probing before display init is safe.
+    if (m5pm1_probe && m5pm1_probe(47, 48)) {
+        ESP_LOGI("TFT", "M5StickC S3 detected (M5PM1 PMIC)");
+        out_has_m5pm1 = true;
+        return Variant::M5StickS3;
     }
 
-    {
-        auto cfg = _panel_instance.config();
-        cfg.pin_cs = 6;
-        cfg.pin_rst = 5;
-        cfg.pin_busy = -1;
-        cfg.panel_width = 170;
-        cfg.panel_height = 320;
-        cfg.offset_x = 35;
-        cfg.offset_y = 0;
-        cfg.offset_rotation = 0;
-        cfg.dummy_read_pixel = 8;
-        cfg.dummy_read_bits = 1;
-        cfg.readable = true;
-        cfg.invert = true;
-        cfg.rgb_order = false;
-        cfg.dlen_16bit = false;
-        cfg.bus_shared = true;
-        _panel_instance.config(cfg);
+    ESP_LOGI("TFT", "No M5PM1 detected — S3 T-Display");
+    return Variant::S3TDisplay;
+}
+
+// --- S3 Small TFT configuration ---
+
+void LGFX_S3_SmallTFT_Universal::configure(Variant variant)
+{
+    switch (variant) {
+    case Variant::S3TDisplay:
+        // Parallel 8-bit bus — LilyGO T-Display S3
+        {
+            auto cfg = _bus_parallel.config();
+            cfg.freq_write = 20000000;
+            cfg.pin_wr = 8;
+            cfg.pin_rd = 9;
+            cfg.pin_rs = 7;
+            cfg.pin_d0 = 39;
+            cfg.pin_d1 = 40;
+            cfg.pin_d2 = 41;
+            cfg.pin_d3 = 42;
+            cfg.pin_d4 = 45;
+            cfg.pin_d5 = 46;
+            cfg.pin_d6 = 47;
+            cfg.pin_d7 = 48;
+            _bus_parallel.config(cfg);
+            _panel_instance.setBus(&_bus_parallel);
+        }
+        {
+            auto cfg = _panel_instance.config();
+            cfg.pin_cs = 6;
+            cfg.pin_rst = 5;
+            cfg.pin_busy = -1;
+            cfg.panel_width = 170;
+            cfg.panel_height = 320;
+            cfg.offset_x = 35;
+            cfg.offset_y = 0;
+            cfg.offset_rotation = 0;
+            cfg.dummy_read_pixel = 8;
+            cfg.dummy_read_bits = 1;
+            cfg.readable = true;
+            cfg.invert = true;
+            cfg.rgb_order = false;
+            cfg.dlen_16bit = false;
+            cfg.bus_shared = true;
+            _panel_instance.config(cfg);
+        }
+        break;
+
+    case Variant::M5StickS3:
+        // SPI bus — M5StickC S3
+        {
+            auto cfg = _bus_spi.config();
+            cfg.spi_mode = 0;
+            cfg.spi_3wire = true;
+            cfg.use_lock = true;
+            cfg.dma_channel = SPI_DMA_CH_AUTO;
+            cfg.spi_host = SPI2_HOST;
+            cfg.freq_write = 40000000;
+            cfg.freq_read = 16000000;
+            cfg.pin_sclk = 40;
+            cfg.pin_mosi = 39;
+            cfg.pin_miso = -1;
+            cfg.pin_dc = 45;
+            _bus_spi.config(cfg);
+            _panel_instance.setBus(&_bus_spi);
+        }
+        {
+            auto cfg = _panel_instance.config();
+            cfg.pin_cs = 41;
+            cfg.pin_rst = 21;
+            cfg.pin_busy = -1;
+            cfg.panel_width = 135;
+            cfg.panel_height = 240;
+            cfg.offset_x = 52;
+            cfg.offset_y = 40;
+            cfg.offset_rotation = 0;
+            cfg.dummy_read_pixel = 8;
+            cfg.dummy_read_bits = 1;
+            cfg.readable = true;
+            cfg.invert = true;
+            cfg.rgb_order = false;
+            cfg.dlen_16bit = false;
+            cfg.bus_shared = true;
+            _panel_instance.config(cfg);
+        }
+        break;
     }
 
+    // Backlight — both variants use GPIO 38 with PWM
     {
         auto cfg = _light_instance.config();
         cfg.pin_bl = 38;

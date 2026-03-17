@@ -57,16 +57,28 @@ public:
 };
 
 #elif defined(ESP32S3)
-// Configuration class for ESP32-S3 TDisplay (parallel bus)
-// Must be checked before LCD_SMALL_TFT since S3 TDisplay defines both.
-class LGFX_S3_TDisplay : public lgfx::LGFX_Device
+// Universal configuration class for ESP32-S3 small TFT displays (all ST7789)
+// Auto-detects hardware at runtime:
+//   1. M5StickC S3 (M5PM1 on I2C) — SPI bus, 135x240, backlight GPIO 38
+//   2. S3 T-Display (fallback) — parallel 8-bit bus, 170x320, backlight GPIO 38
+// Must be checked before LCD_SMALL_TFT since S3 builds define both.
+class LGFX_S3_SmallTFT_Universal : public lgfx::LGFX_Device
 {
     lgfx::Panel_ST7789 _panel_instance;
-    lgfx::Bus_Parallel8 _bus_instance;
+    lgfx::Bus_SPI _bus_spi;
+    lgfx::Bus_Parallel8 _bus_parallel;
     lgfx::Light_PWM _light_instance;
 
 public:
-    LGFX_S3_TDisplay(void);
+    enum class Variant { S3TDisplay, M5StickS3 };
+
+    LGFX_S3_SmallTFT_Universal(void) {}
+    void configure(Variant variant);
+
+    // Detect which S3 small TFT hardware is present (call before configure).
+    // Probes I2C for M5PM1 to distinguish M5StickC S3 from S3 T-Display.
+    // Returns the variant and sets out_has_m5pm1 for caller's power init.
+    static Variant detect(bool (*m5pm1_probe)(int, int), bool& out_has_m5pm1);
 };
 
 #elif defined(LCD_SMALL_TFT)
