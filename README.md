@@ -41,21 +41,25 @@ Once you've acquired your hardware, simply flash the TiltBridge firmware with [B
 
 ### Officially Supported Hardware
 
-There are currently three officially supported hardware sets:
+The **ESP32** firmware has been reorganized into four build types, each of which supports different sets of hardware:
 
-* TFT or "Large Screen" Build - D32 Pro + D32 LCD Screen
-* "Easy" Build - M5 Stick C Plus
-* "Cheap" Build - Headless (any ESP32)
+* **Large TFT** - Supports the D32 Pro + D32 LCD Screen and "Cheap Yellow Display" (CYD) ESP32
+* **Small TFT** - Supports the M5 Stick C Plus, M5 Stick C Plus 2, and "TTGO" ESP32 /w ESPI Display
+* **SSD1306 OLED** - _Unofficial_ - Supports builds that use OLED displays in a number of configurations (e.g. Heltec-style boards)
+* **Headless** - Supports ESP32 boards either without a display, or which is not supported by one of the above
+
+**Note** - "Unofficial" builds listed above (currently just the SSD1306 OLED) are _not_ officially tested before release, and may not be supported by future versions of the TiltBridge firmware
 
 
-### Unofficially Supported Hardware
+#### ESP32-S3 Builds
 
-There are also a number of _unofficially_ supported hardware sets. These sets are not tested prior to release and are not guaranteed to work with future releases. Some are older hardware that are no longer recomended, some have been contributed by members of the community. 
+The **ESP32-S3** firmware is currently _entirely_ unofficial, though official support may come at a future point. There are currently two build types:
 
-* LCD1306 "OLED" Boards
-* ESP32 /w ESPI Display
-* ESP32-S3 T-Display
-* "Cheap Yellow Display" (CYD) ESP32
+* **ESP32-S3 OLED** - Supports ESP32-S3 devices with an OLED display (e.g. Heltec-style boards) - **See note below**
+* **ESP32-S3 Small TFT** - Supports the Lilygo T-Display S3 and M5 Stick S3
+
+**OLED Note** - Support for the ESP32-S3 /w OLED is dependent on continued support for the ESP32 /w SSD1306 OLED display. If support for the ESP32 /w OLED display is dropped, support for the ESP32-S3 /w OLED display will be dropped as well.
+
 
 
 #### Requirements

@@ -1,7 +1,7 @@
 #ifndef _WATCHBUTTONS_H
 #define _WATCHBUTTONS_H
 
-// We use these for LCD_TFT_ESPI or LCD_SSD1306
+// We use these for LCD_SMALL_TFT or LCD_SSD1306
 #ifndef BOARD_RESET_BUTTON_GPIO
 #define BOARD_RESET_BUTTON_GPIO     35  // (Soft) Reset button
 #endif
