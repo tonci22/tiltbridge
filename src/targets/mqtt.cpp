@@ -205,7 +205,7 @@ void dataSendHandler::enrich_announcement(const char* topic, const char* tilt_co
 
 
     payload["json_attr_t"] = topic;
-    payload["json_attr_tpl"] = "{ \"Uptime\": \"{{ value_json.timeStamp }}\" }\n";
+    payload["json_attr_tpl"] = "{ \"Uptime\": \"{{ value_json.uptime_seconds }}\" }\n";
 
 
 }
@@ -215,7 +215,7 @@ void dataSendHandler::prepare_temperature_payload(tiltHydrometer *th, const char
     //Home Assistant Config Topic for Temperature
     char m_topic[90];
     char tilt_sensor_name[35];
-    char uniq_id[30];
+    char uniq_id[50];
     char unit[10] = "\u00b0"; // Unicode for degree symbol
     JsonDocument payload;
 
@@ -236,7 +236,7 @@ void dataSendHandler::prepare_temperature_payload(tiltHydrometer *th, const char
     payload["val_tpl"] = "{{value_json.Temp}}";
 
     // Unique ID
-    snprintf(uniq_id, sizeof(uniq_id), "tiltbridge_tilt%sT", tilt_color_names[th->m_color]);
+    snprintf(uniq_id, sizeof(uniq_id), "%s_tilt_%s_temp", config.mdnsID, tilt_color_names[th->m_color]);
     payload["uniq_id"] = uniq_id;
 
     enrich_announcement(tilt_topic, tilt_color_names[th->m_color], payload);
@@ -249,7 +249,7 @@ void dataSendHandler::prepare_gravity_payload(tiltHydrometer *th, const char* ti
     //Home Assistant Config Topic for Sp Gravity
     char m_topic[90];
     char tilt_sensor_name[35];
-    char uniq_id[30];
+    char uniq_id[50];
     JsonDocument payload;
 
     // Construct the MQTT topic string for specific gravity
@@ -267,7 +267,7 @@ void dataSendHandler::prepare_gravity_payload(tiltHydrometer *th, const char* ti
     payload["val_tpl"] = "{{value_json.SG}}";
 
     // Unique ID
-    snprintf(uniq_id, sizeof(uniq_id), "tiltbridge_tilt%sG", tilt_color_names[th->m_color]);
+    snprintf(uniq_id, sizeof(uniq_id), "%s_tilt_%s_gravity", config.mdnsID, tilt_color_names[th->m_color]);
     payload["uniq_id"] = uniq_id;
 
     enrich_announcement(tilt_topic, tilt_color_names[th->m_color], payload);
@@ -279,7 +279,7 @@ void dataSendHandler::prepare_battery_payload(tiltHydrometer *th, const char* ti
     //Home Assistant Config Topic for Weeks On Battery
     char m_topic[90];
     char tilt_sensor_name[35];
-    char uniq_id[30];
+    char uniq_id[50];
     JsonDocument payload;
 
     // Construct the MQTT topic string for weeks on battery
@@ -297,7 +297,7 @@ void dataSendHandler::prepare_battery_payload(tiltHydrometer *th, const char* ti
     payload["val_tpl"] = "{{value_json.WoB}}";
 
     // Unique ID
-    snprintf(uniq_id, sizeof(uniq_id), "tiltbridge_tilt%sWoB", tilt_color_names[th->m_color]);
+    snprintf(uniq_id, sizeof(uniq_id), "%s_tilt_%s_battery", config.mdnsID, tilt_color_names[th->m_color]);
     payload["uniq_id"] = uniq_id;
 
     enrich_announcement(tilt_topic, tilt_color_names[th->m_color], payload);
@@ -318,7 +318,7 @@ void dataSendHandler::prepare_general_payload(tiltHydrometer *th, const char* ti
 
     // Populate payload with sensor data
     payload["Color"] = tilt_color_names[th->m_color];
-    payload["timeStamp"] = (int)std::time(0);
+    payload["uptime_seconds"] = (int)std::time(0);
     payload["fermunits"] = "SG";
     th->cal_smooth_gravity_str(gravity, sizeof(gravity));
     payload["SG"] = gravity;
