@@ -298,6 +298,7 @@ JsonDocument tiltHydrometer::to_json(bool legacy_keys=false) {
     j["fwVersion"] = version_code;
     j["rssi"] = rssi;
     j["mac"] = m_address.toString();
+    j["lastReceived"] = (millis() - m_lastUpdate) / 1000;
 
     // These are loaded from config, but are included in the JSON for simplicity in generating the dashboard without
     // an additional API call
