@@ -59,6 +59,7 @@ public:
     bool update_filesystem = false;
     int8_t TZoffset = -5;
     char tempUnit[2] = "F";
+    char gravityUnit[3] = "SG";  // "SG" = Specific Gravity, "P" = Plato, "B" = Brix
     uint8_t smoothFactor = 60;
     bool applyCalibration = true;
     bool tempCorrect = false;

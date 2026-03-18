@@ -226,6 +226,34 @@ void tiltHydrometer::latest_gravity_str(char* output, size_t output_size) {
 }
 
 
+double tiltHydrometer::sg_to_plato(double sg) {
+    // ASBC polynomial: Plato = -616.868 + 1111.14*sg - 630.272*sg^2 + 135.997*sg^3
+    return -616.868 + 1111.14 * sg - 630.272 * sg * sg + 135.997 * sg * sg * sg;
+}
+
+double tiltHydrometer::sg_to_brix(double sg) {
+    // ICUMSA/NBS linear approximation, then apply Wort Correction Factor (WCF)
+    // to account for maltose/complex sugars refracting differently than pure sucrose
+    constexpr double WCF = 1.04;
+    double brix_uncorrected = 261.1 * (sg - 1.0) + 1.0;
+    return brix_uncorrected / WCF;
+}
+
+void tiltHydrometer::cal_smooth_gravity_display_str(char* output, size_t output_size) {
+    if (output == nullptr || output_size < 7) return;
+
+    const uint16_t grav_scalar = (tilt_pro) ? 10000 : 1000;
+    double sg = static_cast<double>(cal_smooth_gravity) / grav_scalar;
+
+    if (strcmp(config.gravityUnit, "P") == 0) {
+        snprintf(output, output_size, "%.1f P", sg_to_plato(sg));
+    } else if (strcmp(config.gravityUnit, "B") == 0) {
+        snprintf(output, output_size, "%.1f Bx", sg_to_brix(sg));
+    } else {
+        snprintf(output, output_size, "%.4f", sg);
+    }
+}
+
 void tiltHydrometer::grav_to_str(uint16_t grav, char* output, size_t output_size) {
     if (output == nullptr || output_size < 7) {
         // Handle error: output is null or not large enough

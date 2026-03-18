@@ -47,6 +47,7 @@ public:
     void uncal_smooth_gravity_str(char* output, size_t output_size);
     void cal_smooth_gravity_str(char* output, size_t output_size);
     void latest_gravity_str(char* output, size_t output_size);
+    void cal_smooth_gravity_display_str(char* output, size_t output_size);
 
     JsonDocument to_json(bool legacy_keys);
     void converted_temp(char* output, size_t output_size, bool fahrenheit_only);
@@ -54,6 +55,8 @@ public:
     bool is_celsius() const;
 
     static uint8_t uuid_to_color_no(const char* uuid);
+    static double sg_to_plato(double sg);
+    static double sg_to_brix(double sg);
 
     uint16_t raw_temp;              // The raw temperature value last read from the Tilt
     uint16_t temp;                  // The calibrated temperature value last read from the Tilt

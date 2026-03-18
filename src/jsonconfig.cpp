@@ -257,6 +257,7 @@ JsonDocument Config::to_json() {
     obj["update_filesystem"] = update_filesystem;
     obj["TZoffset"] = TZoffset;
     obj["tempUnit"] = tempUnit;
+    obj[GeneralSettings::gravityUnit] = gravityUnit;
     obj["smoothFactor"] = smoothFactor;
     obj["applyCalibration"] = applyCalibration;
     obj["tempCorrect"] = tempCorrect;
@@ -343,6 +344,13 @@ void Config::load_from_json(JsonDocument obj) {
     if (!obj["tempUnit"].isNull()) {
         const char *tu = obj["tempUnit"];
         strlcpy(tempUnit, tu, 2);
+    }
+
+    if (!obj[GeneralSettings::gravityUnit].isNull()) {
+        const char *gu = obj[GeneralSettings::gravityUnit];
+        if (strcmp(gu, "SG") == 0 || strcmp(gu, "P") == 0 || strcmp(gu, "B") == 0) {
+            strlcpy(gravityUnit, gu, sizeof(gravityUnit));
+        }
     }
 
     if (!obj["smoothFactor"].isNull()) {

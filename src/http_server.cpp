@@ -81,7 +81,8 @@ static void startSendNowTimer(TimerHandle_t& timer, const char* name, TimerCallb
 //=============================================================================
 
 static void http_json(JsonDocument &doc) {
-    doc = tilt_scanner.tilt_to_json();
+    doc["tilts"] = tilt_scanner.tilt_to_json();
+    doc[GeneralSettings::gravityUnit] = config.gravityUnit;
 }
 
 static void settings_json(JsonDocument &doc) {
@@ -206,6 +207,17 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
         } else {
             strlcpy(config.tempUnit, json["tempUnit"].as<const char*>(), 2);
             Log.notice("Settings update, [tempUnit]:(%s) applied.\r\n", json["tempUnit"].as<const char*>());
+        }
+    }
+
+    // gravityUnit
+    if(json[GeneralSettings::gravityUnit].is<const char*>()) {
+        const char* gu = json[GeneralSettings::gravityUnit].as<const char*>();
+        if(strcmp(gu, "SG") != 0 && strcmp(gu, "P") != 0 && strcmp(gu, "B") != 0) {
+            Log.warning("Settings update error, [gravityUnit]:(%s) not valid.\r\n", gu);
+        } else {
+            strlcpy(config.gravityUnit, gu, sizeof(config.gravityUnit));
+            Log.notice("Settings update, [gravityUnit]:(%s) applied.\r\n", gu);
         }
     }
 

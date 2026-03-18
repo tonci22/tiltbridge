@@ -367,8 +367,8 @@ void bridge_lcd::clear() {
 ////////////////////////////////////////////////////////////
 
 void bridge_lcd::print_tilt_to_line(tiltHydrometer *tilt, uint8_t line) {
-    char gravity[11], temp[9], temp_str[6];
-    tilt->cal_smooth_gravity_str(gravity, 11);
+    char gravity[14], temp[9], temp_str[6];
+    tilt->cal_smooth_gravity_display_str(gravity, sizeof(gravity));
     tilt->converted_temp(temp_str, 6, false);
     snprintf(temp, sizeof(temp), "%s %s", temp_str, tilt->is_celsius() ? "C" : "F");
 

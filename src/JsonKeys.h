@@ -16,6 +16,10 @@ constexpr auto applyCalibration = "applyCalibration";
 constexpr auto tempCorrect = "tempCorrect";
 }; // namespace CalibrationKeys
 
+namespace GeneralSettings {
+constexpr auto gravityUnit = "gravityUnit";
+}; // namespace GeneralSettings
+
 
 namespace FermentrackSettings {
 // Legacy Fermentrack Keys
