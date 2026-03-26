@@ -403,7 +403,7 @@ static bool processBrewersFriendSettings(const JsonDocument& json, bool triggerU
 
     if(!updateJsonSetting(json, BrewersFriendSettings::brewersFriendKey, config.brewersFriendKey, 64))
         failCount++;
-    if(strlen(config.brewersFriendKey) > 1)
+    if(strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH)
         startSendNowTimer(sendNowBrewersFriendTimer, "SendBF", sendNowBrewersFriendCallback, 5);
 
     if(failCount > 0) {
@@ -421,7 +421,7 @@ static bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpst
 
     if(!updateJsonSetting(json, BrewfatherSettings::brewfatherKey, config.brewfatherKey, 64))
         failCount++;
-    if(strlen(config.brewfatherKey) > 1)
+    if(strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH)
         startSendNowTimer(sendNowBrewfatherTimer, "SendBrewfather", sendNowBrewfatherCallback, 5);
 
     if(failCount > 0) {
@@ -439,7 +439,7 @@ static bool processUserTargetSettings(const JsonDocument& json, bool triggerUpst
 
     if(!updateJsonSetting(json, UserTargetSettings::userTargetURL, config.userTargetURL, 128))
         failCount++;
-    if(strlen(config.userTargetURL) > 1)
+    if(strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
         startSendNowTimer(sendNowUserTargetTimer, "SendUserTarget", sendNowUserTargetCallback, 5);
 
     if(failCount > 0) {
