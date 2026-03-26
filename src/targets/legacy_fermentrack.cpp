@@ -45,7 +45,7 @@ bool dataSendHandler::send_to_legacy_fermentrack()
                 result = false; // There was an error with the previous send
                 Log.verbose("Error sending to Legacy Fermentrack.\r\n");
             }
-            data_sender.setTargetStatus(TARGET_LEGACY_FERMENTRACK, httpCode);
+            data_sender.setTargetStatus(TARGET_LEGACY_FERMENTRACK, dataSendHandler::httpCodeToSendError(httpCode));
         }
         data_sender.startTimer(data_sender.legacyFermentrackTimer, config.legacyFermentrackPushEvery); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();

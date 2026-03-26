@@ -119,14 +119,26 @@ bool dataSendHandler::send_to_fermentrack()
         if (strlen(config.fermentrackHostname) > 3) {
             if (fermentrackRegistrationError == fermentrackRegErrorT::REGISTRATION_ENDPOINT_ERR ||
                 fermentrackStatusError == fermentrackStatusErrorT::STATUS_ENDPOINT_ERR) {
-                setTargetStatus(TARGET_FERMENTRACK, -1);
+                setTargetStatus(TARGET_FERMENTRACK, SEND_ERR_CONNECTION_FAILED);
             } else if (fermentrackStatusError != fermentrackStatusErrorT::NO_ERROR) {
-                setTargetStatus(TARGET_FERMENTRACK, -(int16_t)fermentrackStatusError);
+                static const SendError statusErrorMap[] = {
+                    SEND_OK, SEND_ERR_FT2_MALFORMED_REG, SEND_ERR_FT2_INVALID_USER_OR_KEY,
+                    SEND_ERR_FT2_REG_INVALID, SEND_ERR_RATE_LIMITED, SEND_ERR_CONNECTION_FAILED
+                };
+                uint8_t idx = (uint8_t)fermentrackStatusError;
+                setTargetStatus(TARGET_FERMENTRACK, idx < 6 ? statusErrorMap[idx] : SEND_ERR_OTHER);
             } else if (fermentrackRegistrationError != fermentrackRegErrorT::NO_ERROR &&
                        fermentrackRegistrationError != fermentrackRegErrorT::NOT_ATTEMPTED_REGISTRATION) {
-                setTargetStatus(TARGET_FERMENTRACK, -(int16_t)fermentrackRegistrationError);
+                static const SendError regErrorMap[] = {
+                    SEND_OK, SEND_ERR_FT2_MALFORMED_REG, SEND_ERR_FT2_INVALID_USER_OR_KEY,
+                    SEND_ERR_FT2_INVALID_USER_OR_KEY, SEND_ERR_FT2_NO_BREWHOUSE,
+                    SEND_ERR_FT2_MALFORMED_REG, SEND_ERR_FT2_MALFORMED_REG,
+                    SEND_ERR_FT2_INVALID_USER_OR_KEY, SEND_OK, SEND_ERR_CONNECTION_FAILED
+                };
+                uint8_t idx = (uint8_t)fermentrackRegistrationError;
+                setTargetStatus(TARGET_FERMENTRACK, idx < 10 ? regErrorMap[idx] : SEND_ERR_OTHER);
             } else if (ft2_is_registered()) {
-                setTargetStatus(TARGET_FERMENTRACK, 200);
+                setTargetStatus(TARGET_FERMENTRACK, SEND_OK);
             }
         }
 

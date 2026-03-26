@@ -144,8 +144,8 @@ static const char* sendTargetNames[] = {
 static void errors_json(JsonDocument &doc) {
     for (uint8_t i = 0; i < TARGET_COUNT; i++) {
         JsonObject target = doc[sendTargetNames[i]].to<JsonObject>();
-        target["http_code"] = data_sender.targetStatus[i].lastHttpCode;
-        target["last_attempt"] = data_sender.targetStatus[i].lastAttemptTime;
+        target["error_code"] = (uint8_t)data_sender.targetStatus[i].lastError;
+        target["last_attempt_at"] = data_sender.targetStatus[i].lastAttemptTime;
     }
 }
 

@@ -25,10 +25,28 @@ enum SendTargetID : uint8_t {
     TARGET_COUNT
 };
 
+// Error codes for send target status (interpreted by UI)
+enum SendError : uint8_t {
+    SEND_OK = 0,                        // Last send succeeded
+    SEND_ERR_CONNECTION_FAILED = 1,     // TCP/DNS/TLS connection failure
+    SEND_ERR_AUTH_FAILED = 2,           // HTTP 401/403, invalid credentials
+    SEND_ERR_NOT_FOUND = 3,            // HTTP 404
+    SEND_ERR_SERVER_ERROR = 4,         // HTTP 5xx
+    SEND_ERR_BAD_REQUEST = 5,          // HTTP 400, malformed request or missing config
+    SEND_ERR_RATE_LIMITED = 6,         // HTTP 429
+    SEND_ERR_OTHER = 7,                // Other/unknown error
+    SEND_ERR_MQTT_DISCONNECTED = 8,    // Not connected to MQTT broker
+    // Fermentrack 2 specific errors
+    SEND_ERR_FT2_INVALID_USER_OR_KEY = 9,   // User not found / invalid or missing API key / missing username
+    SEND_ERR_FT2_MALFORMED_REG = 10,        // Missing GUID / hardware type / firmware version / device ID
+    SEND_ERR_FT2_REG_INVALID = 11,          // Registration invalid (device ID/API key rejected)
+    SEND_ERR_FT2_NO_BREWHOUSE = 12,         // User has no brewhouse
+};
+
 // Tracks the most recent send result for each target
 struct SendTargetStatus {
-    int16_t lastHttpCode = 0;       // 0 = no attempt, HTTP status code, or negative for non-HTTP errors
-    uint32_t lastAttemptTime = 0;   // uptime seconds when last attempted
+    SendError lastError = SEND_OK;      // Most recent error code
+    uint32_t lastAttemptTime = 0;       // uptime seconds when last attempted
 };
 
 #define GSCRIPTS_DELAY (10 * 60)       // 10 minute delay between pushes to Google Sheets directly
@@ -79,7 +97,8 @@ public:
 
     // Error tracking
     SendTargetStatus targetStatus[TARGET_COUNT];
-    void setTargetStatus(SendTargetID target, int16_t httpCode);
+    void setTargetStatus(SendTargetID target, SendError error);
+    static SendError httpCodeToSendError(int16_t httpCode);
 
     // Send Timers (FreeRTOS software timers)
     TimerHandle_t legacyFermentrackTimer;

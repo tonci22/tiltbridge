@@ -23,10 +23,25 @@ dataSendHandler data_sender; // Global data sender
 
 dataSendHandler::dataSendHandler() {}
 
-void dataSendHandler::setTargetStatus(SendTargetID target, int16_t httpCode) {
+void dataSendHandler::setTargetStatus(SendTargetID target, SendError error) {
     if (target < TARGET_COUNT) {
-        targetStatus[target].lastHttpCode = httpCode;
+        targetStatus[target].lastError = error;
         targetStatus[target].lastAttemptTime = (uint32_t)uptimeSeconds(true);
+    }
+}
+
+SendError dataSendHandler::httpCodeToSendError(int16_t httpCode) {
+    if (httpCode >= 200 && httpCode <= 204) return SEND_OK;
+    if (httpCode == -1) return SEND_ERR_CONNECTION_FAILED;
+    switch (httpCode) {
+        case 400: return SEND_ERR_BAD_REQUEST;
+        case 401:
+        case 403: return SEND_ERR_AUTH_FAILED;
+        case 404: return SEND_ERR_NOT_FOUND;
+        case 429: return SEND_ERR_RATE_LIMITED;
+        default:
+            if (httpCode >= 500) return SEND_ERR_SERVER_ERROR;
+            return SEND_ERR_OTHER;
     }
 }
 
@@ -283,7 +298,8 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         if (http_request(url, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
             result = false; // There was an error with the previous send
     }
-    setTargetStatus(targetId, httpCode);
+    if (httpCode != 0)
+        setTargetStatus(targetId, httpCodeToSendError(httpCode));
     return result;
 }
 
@@ -323,7 +339,8 @@ bool dataSendHandler::send_to_grainfather()
             if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
                 result = false; // There was an error with the previous send
         }
-        setTargetStatus(TARGET_GRAINFATHER, httpCode);
+        if (httpCode != 0)
+            setTargetStatus(TARGET_GRAINFATHER, httpCodeToSendError(httpCode));
         startTimer(grainfatherTimer, GRAINFATHER_DELAY); // Set up subsequent send to Grainfather
         send_lock = false;
     }
@@ -382,7 +399,8 @@ bool dataSendHandler::send_to_taplistio()
         result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string, &httpCode) == sendResult::success);
     }
 
-    setTargetStatus(TARGET_TAPLISTIO, httpCode);
+    if (httpCode != 0)
+        setTargetStatus(TARGET_TAPLISTIO, httpCodeToSendError(httpCode));
     startTimer(taplistioTimer, config.taplistioPushEvery);
     send_lock = false;
     return result;
@@ -432,7 +450,8 @@ bool dataSendHandler::send_to_brewstatus()
                     Log.verbose("Error sending to Brew Status.\r\n");
                 }
             }
-            setTargetStatus(TARGET_BREW_STATUS, httpCode);
+            if (httpCode != 0)
+                setTargetStatus(TARGET_BREW_STATUS, httpCodeToSendError(httpCode));
         }
         startTimer(brewStatusTimer, config.brewstatusPushEvery); // Set up subsequent send to Brew Status
         send_lock = false;
@@ -522,7 +541,8 @@ bool dataSendHandler::send_to_google()
             }
 
             Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
-            setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode);
+            if (httpCode != 0)
+                setTargetStatus(TARGET_GOOGLE_SHEETS, httpCodeToSendError(httpCode));
         }
         startTimer(gSheetsTimer, GSCRIPTS_DELAY); // Set up subsequent send to Google Sheets
 
@@ -603,7 +623,7 @@ bool dataSendHandler::send_to_influxdb()
                     Log.error("Error sending to InfluxDB\r\n");
                     result = false;
                 }
-                setTargetStatus(TARGET_INFLUXDB, httpCode);
+                setTargetStatus(TARGET_INFLUXDB, httpCodeToSendError(httpCode));
             } else {
                 Log.verbose("No Tilt data to send to InfluxDB.\r\n");
             }
