@@ -10,6 +10,7 @@
 #include <NimBLEDevice.h>
 
 #include "tiltScanner.h"
+#include "jsonconfig.h"
 
 
 // Create the scanner
@@ -144,9 +145,16 @@ uint8_t tiltScanner::load_tilt_from_advert_hex(const NimBLEAdvertisedDevice* adv
     uint16_t gravity = std::strtoul(grav_arr, nullptr, 16);
     uint8_t tx_pwr = std::strtoul(tx_pwr_arr, nullptr, 16);
 
-    tiltHydrometer *th = get_or_create_tilt(advertisedDevice->getAddress(), m_color);
+    // When combineTilts is enabled, use the TiltBridge's own MAC address instead of
+    // the advertised device's MAC. This causes all Tilts of the same color (including
+    // those re-broadcast by BLE repeaters with different MACs) to be merged into one.
+    NimBLEAddress lookup_address = config.combineTilts
+        ? NimBLEDevice::getAddress()
+        : advertisedDevice->getAddress();
+
+    tiltHydrometer *th = get_or_create_tilt(lookup_address, m_color);
     th->set_values(temp, gravity, tx_pwr, current_rssi);
-    th->m_address = advertisedDevice->getAddress();
+    th->m_address = lookup_address;
 
     return m_color;
 }

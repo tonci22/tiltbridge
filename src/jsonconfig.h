@@ -56,6 +56,7 @@ public:
     char mdnsID[32] = "tiltbridge";
     char guid[17] = "";
     bool invertTFT = false;
+    bool combineTilts = false;
     bool update_filesystem = false;
     int8_t TZoffset = -5;
     char tempUnit[2] = "F";

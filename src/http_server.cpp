@@ -264,6 +264,16 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
             Log.notice("Settings update, [invertTFT]:(False) applied.\r\n");
     }
 
+    // combineTilts
+    if(json["combineTilts"].is<bool>()) {
+        if(config.combineTilts != json["combineTilts"].as<bool>()) {
+            config.combineTilts = json["combineTilts"];
+            tilt_scanner.m_tilt_devices.clear();
+            Log.notice("Settings update, [combineTilts]:(%s) applied. Tilt list cleared.\r\n",
+                       config.combineTilts ? "True" : "False");
+        }
+    }
+
     // Process everything we were passed
     if (failCount) {
         Log.error("Error: Invalid controller configuration.\r\n");

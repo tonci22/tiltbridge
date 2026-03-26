@@ -254,6 +254,7 @@ JsonDocument Config::to_json() {
     obj["mdnsID"] = mdnsID;
     obj["guid"] = guid;
     obj["invertTFT"] = invertTFT;
+    obj["combineTilts"] = combineTilts;
     obj["update_filesystem"] = update_filesystem;
     obj["TZoffset"] = TZoffset;
     obj["tempUnit"] = tempUnit;
@@ -331,6 +332,10 @@ void Config::load_from_json(JsonDocument obj) {
 
     if (!obj["invertTFT"].isNull()) {
         invertTFT = obj["invertTFT"];
+    }
+
+    if (!obj["combineTilts"].isNull()) {
+        combineTilts = obj["combineTilts"];
     }
 
     if (!obj["update_filesystem"].isNull()) {
