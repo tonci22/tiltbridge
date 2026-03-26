@@ -216,14 +216,14 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
     config.event_handler = http_event_handler;
     config.user_data = &responseCtx;
 
-    // HTTPS configuration - skip certificate validation if requested
-    // This matches the Arduino WiFiClientSecure.setInsecure() behavior
-    if (options.skipCertValidation) {
-        config.skip_cert_common_name_check = true;
-        // Don't attach the certificate bundle for insecure mode
-        config.crt_bundle_attach = nullptr;
-    } else {
-        // Use the built-in CA certificate bundle for validation
+    // HTTPS configuration
+    // When skipCertValidation is true, we deliberately leave crt_bundle_attach unset.
+    // The Kconfig options CONFIG_ESP_TLS_INSECURE + CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY
+    // cause esp-tls to use MBEDTLS_SSL_VERIFY_NONE when no CA cert/bundle is provided,
+    // which skips cert verification while still sending SNI (required by most CDN-hosted
+    // services like Brewer's Friend). We must NOT set skip_cert_common_name_check here
+    // because that also disables SNI via mbedtls_ssl_set_hostname(NULL).
+    if (!options.skipCertValidation) {
         config.crt_bundle_attach = esp_crt_bundle_attach;
     }
 
