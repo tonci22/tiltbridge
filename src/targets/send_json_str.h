@@ -114,10 +114,11 @@ sendResult http_request(
     const char* payload,
     char* response,
     size_t response_size,
-    const HttpRequestOptions& options = HttpRequestOptions{}
+    const HttpRequestOptions& options = HttpRequestOptions{},
+    int16_t* httpCodeOut = nullptr
 );
 
 // Convenience overload for simple requests without response buffer
-sendResult http_request(const char* url, httpMethod method, const char* payload);
+sendResult http_request(const char* url, httpMethod method, const char* payload, int16_t* httpCodeOut = nullptr);
 
 #endif // SEND_JSON_STR_H

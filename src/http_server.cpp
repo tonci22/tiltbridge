@@ -127,6 +127,28 @@ static void reset_reason_json(JsonDocument &doc) {
     doc["description"] = resetDescription[reset];
 }
 
+static const char* sendTargetNames[] = {
+    "legacy_fermentrack",
+    "fermentrack",
+    "brewers_friend",
+    "brewfather",
+    "user_target",
+    "grainfather",
+    "brew_status",
+    "taplistio",
+    "google_sheets",
+    "mqtt",
+    "influxdb"
+};
+
+static void errors_json(JsonDocument &doc) {
+    for (uint8_t i = 0; i < TARGET_COUNT; i++) {
+        JsonObject target = doc[sendTargetNames[i]].to<JsonObject>();
+        target["http_code"] = data_sender.targetStatus[i].lastHttpCode;
+        target["last_attempt"] = data_sender.targetStatus[i].lastAttemptTime;
+    }
+}
+
 
 //=============================================================================
 // Settings Update Handlers (PUT/POST handlers)
@@ -650,6 +672,7 @@ MAKE_GET_HANDLER(handle_api_version, this_version)
 MAKE_GET_HANDLER(handle_api_uptime, uptime_json)
 MAKE_GET_HANDLER(handle_api_heap, heap_json)
 MAKE_GET_HANDLER(handle_api_resetreason, reset_reason_json)
+MAKE_GET_HANDLER(handle_api_errors, errors_json)
 
 // Generate PUT handlers
 MAKE_PUT_HANDLER(handle_settings_controller, processTiltBridgeSettingsJson)
@@ -703,6 +726,7 @@ void httpServer::registerJsonGetHandlers() {
         {"/api/uptime/", handle_api_uptime},
         {"/api/heap/", handle_api_heap},
         {"/api/resetreason/", handle_api_resetreason},
+        {"/api/errors/", handle_api_errors},
     };
 
     for (const auto& endpoint : get_endpoints) {

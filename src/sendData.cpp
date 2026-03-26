@@ -16,11 +16,19 @@
 #include "wifi_setup.h"
 
 #include "sendData.h"
+#include "uptime.h"
 
 
 dataSendHandler data_sender; // Global data sender
 
 dataSendHandler::dataSendHandler() {}
+
+void dataSendHandler::setTargetStatus(SendTargetID target, int16_t httpCode) {
+    if (target < TARGET_COUNT) {
+        targetStatus[target].lastHttpCode = httpCode;
+        targetStatus[target].lastAttemptTime = (uint32_t)uptimeSeconds(true);
+    }
+}
 
 // Timer callback functions for FreeRTOS software timers
 // These are static/free functions that set the semaphore flags
@@ -209,6 +217,11 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     bool result = true;
     JsonDocument j;
     char url[128];
+    int16_t httpCode = 0;
+
+    SendTargetID targetId = (which_bf == BF_MEANS_BREWFATHER) ? TARGET_BREWFATHER :
+                            (which_bf == BF_MEANS_BREWERS_FRIEND) ? TARGET_BREWERS_FRIEND :
+                            TARGET_USER_TARGET;
 
     // As this function is being used for both Brewer's Friend and Brewfather,
     // let's determine which we want and set up the URL/API key accordingly.
@@ -267,9 +280,10 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         char payload_string[BF_SIZE];
         serializeJson(j, payload_string);
 
-        if (http_request(url, httpMethod::HTTP_POST, payload_string) != sendResult::success)
+        if (http_request(url, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
             result = false; // There was an error with the previous send
     }
+    setTargetStatus(targetId, httpCode);
     return result;
 }
 
@@ -282,6 +296,7 @@ bool dataSendHandler::send_to_grainfather()
         // Brew Status
         send_grainfather = false;
         send_lock = true;
+        int16_t httpCode = 0;
 
         // Loop through each of the tilt colors cached by tilt_scanner, sending
         // data for each of the active tilts
@@ -305,9 +320,10 @@ bool dataSendHandler::send_to_grainfather()
             char payload_string[GF_SIZE];
             serializeJson(j, payload_string);
 
-            if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string) != sendResult::success)
+            if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
                 result = false; // There was an error with the previous send
         }
+        setTargetStatus(TARGET_GRAINFATHER, httpCode);
         startTimer(grainfatherTimer, GRAINFATHER_DELAY); // Set up subsequent send to Grainfather
         send_lock = false;
     }
@@ -343,6 +359,7 @@ bool dataSendHandler::send_to_taplistio()
 
 
     tilt_scanner.drop_expired_tilts();
+    int16_t httpCode = 0;
 
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
         JsonDocument j;
@@ -357,14 +374,15 @@ bool dataSendHandler::send_to_taplistio()
         j["SG"] = gravity;
         j["temperature_unit"] = "F";
         j["gravity_unit"] = "G";
-        
+
         serializeJson(j, payload_string);
 
         Log.verbose("taplist.io: Sending %s Tilt to %s\r\n", tilt_color_names[th.m_color], config.taplistioURL);
 
-        result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string) == sendResult::success);
+        result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string, &httpCode) == sendResult::success);
     }
 
+    setTargetStatus(TARGET_TAPLISTIO, httpCode);
     startTimer(taplistioTimer, config.taplistioPushEvery);
     send_lock = false;
     return result;
@@ -396,6 +414,7 @@ bool dataSendHandler::send_to_brewstatus()
 
             // Loop through each of the tilt colors cached by tilt_scanner, sending data for each of the active tilts
             tilt_scanner.drop_expired_tilts();
+            int16_t httpCode = 0;
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 char gravity[10];
                 char temp[6];
@@ -403,16 +422,17 @@ bool dataSendHandler::send_to_brewstatus()
                 th.converted_temp(temp, sizeof(temp), true); // Always in Fahrenheit since we don't send units
                 snprintf(payload, payload_size, "SG=%s&Temp=%s&Color=%s&Timepoint=%.11f&Beer=Undefined&Comment=",
                         gravity, temp, tilt_color_names[th.m_color], ((double)std::time(0) + (config.TZoffset * 3600.0)) / 86400.0 + 25569.0);
-                
+
                 HttpRequestOptions options;
                 options.contentType = content_x_www_form_urlencoded;
-                if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0, options) == sendResult::success) {
+                if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0, options, &httpCode) == sendResult::success) {
                     Log.notice("Completed send to Brew Status.\r\n");
                 } else {
                     result = false;
                     Log.verbose("Error sending to Brew Status.\r\n");
                 }
             }
+            setTargetStatus(TARGET_BREW_STATUS, httpCode);
         }
         startTimer(brewStatusTimer, config.brewstatusPushEvery); // Set up subsequent send to Brew Status
         send_lock = false;
@@ -441,6 +461,7 @@ bool dataSendHandler::send_to_google()
             printMem();
 
             tilt_scanner.drop_expired_tilts();
+            int16_t httpCode = 0;
 
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 // Check if there is a google sheet name associated with the specific Tilt
@@ -475,7 +496,7 @@ bool dataSendHandler::send_to_google()
                     options.timeoutMs = 10000;  // 10 second timeout - Google Scripts can be slow
 
                     sendResult sendRes = http_request(config.scriptsURL, httpMethod::HTTP_POST,
-                                                      payload_string, response, sizeof(response), options);
+                                                      payload_string, response, sizeof(response), options, &httpCode);
 
                     if (sendRes == sendResult::success) {
                         // POST success - parse response for doclongurl
@@ -501,7 +522,7 @@ bool dataSendHandler::send_to_google()
             }
 
             Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
-
+            setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode);
         }
         startTimer(gSheetsTimer, GSCRIPTS_DELAY); // Set up subsequent send to Google Sheets
 
@@ -573,7 +594,8 @@ bool dataSendHandler::send_to_influxdb()
                 options.timeoutMs = 6000;
 
                 // Send the data
-                sendResult sendRes = http_request(writeURL, httpMethod::HTTP_POST, lineData, nullptr, 0, options);
+                int16_t httpCode = 0;
+                sendResult sendRes = http_request(writeURL, httpMethod::HTTP_POST, lineData, nullptr, 0, options, &httpCode);
 
                 if (sendRes == sendResult::success) {
                     Log.notice("Completed send to InfluxDB.\r\n");
@@ -581,6 +603,7 @@ bool dataSendHandler::send_to_influxdb()
                     Log.error("Error sending to InfluxDB\r\n");
                     result = false;
                 }
+                setTargetStatus(TARGET_INFLUXDB, httpCode);
             } else {
                 Log.verbose("No Tilt data to send to InfluxDB.\r\n");
             }

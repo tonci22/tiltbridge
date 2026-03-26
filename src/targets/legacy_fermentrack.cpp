@@ -35,7 +35,8 @@ bool dataSendHandler::send_to_legacy_fermentrack()
 
             serializeJson(doc, tilt_data);
 
-            if (http_request(config.legacyFermentrackURL, httpMethod::HTTP_POST, tilt_data) == sendResult::success)
+            int16_t httpCode = 0;
+            if (http_request(config.legacyFermentrackURL, httpMethod::HTTP_POST, tilt_data, &httpCode) == sendResult::success)
             {
                 Log.notice("Completed send to Legacy Fermentrack.\r\n");
             }
@@ -44,6 +45,7 @@ bool dataSendHandler::send_to_legacy_fermentrack()
                 result = false; // There was an error with the previous send
                 Log.verbose("Error sending to Legacy Fermentrack.\r\n");
             }
+            data_sender.setTargetStatus(TARGET_LEGACY_FERMENTRACK, httpCode);
         }
         data_sender.startTimer(data_sender.legacyFermentrackTimer, config.legacyFermentrackPushEvery); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();

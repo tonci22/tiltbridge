@@ -158,7 +158,7 @@ static bool buildResolvedUrl(const char* originalUrl, char* resolvedUrl, size_t 
 // =============================================================================
 // Unified HTTP Request Implementation
 // =============================================================================
-sendResult http_request(const char* url, httpMethod method, const char* payload, char* response, size_t response_size, const HttpRequestOptions& options)
+sendResult http_request(const char* url, httpMethod method, const char* payload, char* response, size_t response_size, const HttpRequestOptions& options, int16_t* httpCodeOut)
 {
     char userAgent[128];
     int httpResponseCode;
@@ -263,6 +263,11 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
     if (err == ESP_OK) {
         httpResponseCode = esp_http_client_get_status_code(client);
 
+        // Output the HTTP status code if requested
+        if (httpCodeOut != nullptr) {
+            *httpCodeOut = (int16_t)httpResponseCode;
+        }
+
         // Response body was captured by the event handler into httpResponseBuf
         // Copy response to caller's buffer if provided
         if (response != nullptr && response_size > 0) {
@@ -290,6 +295,9 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
         }
     } else {
         Log.error("http_request: HTTP request failed: %s\r\n", esp_err_to_name(err));
+        if (httpCodeOut != nullptr) {
+            *httpCodeOut = -1;
+        }
         result = sendResult::failure;
     }
 
@@ -299,6 +307,6 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
 }
 
 // Convenience overload for simple requests without response buffer
-sendResult http_request(const char* url, httpMethod method, const char* payload) {
-    return http_request(url, method, payload, nullptr, 0, HttpRequestOptions{});
+sendResult http_request(const char* url, httpMethod method, const char* payload, int16_t* httpCodeOut) {
+    return http_request(url, method, payload, nullptr, 0, HttpRequestOptions{}, httpCodeOut);
 }

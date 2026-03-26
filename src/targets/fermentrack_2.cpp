@@ -115,6 +115,20 @@ bool dataSendHandler::send_to_fermentrack()
         send_status_to_fermentrack_2();
         process_messages_on_fermentrack_2();
 
+        // Track error status for the errors API
+        if (strlen(config.fermentrackHostname) > 3) {
+            if (fermentrackRegistrationError == fermentrackRegErrorT::REGISTRATION_ENDPOINT_ERR ||
+                fermentrackStatusError == fermentrackStatusErrorT::STATUS_ENDPOINT_ERR) {
+                setTargetStatus(TARGET_FERMENTRACK, -1);
+            } else if (fermentrackStatusError != fermentrackStatusErrorT::NO_ERROR) {
+                setTargetStatus(TARGET_FERMENTRACK, -(int16_t)fermentrackStatusError);
+            } else if (fermentrackRegistrationError != fermentrackRegErrorT::NO_ERROR &&
+                       fermentrackRegistrationError != fermentrackRegErrorT::NOT_ATTEMPTED_REGISTRATION) {
+                setTargetStatus(TARGET_FERMENTRACK, -(int16_t)fermentrackRegistrationError);
+            } else if (ft2_is_registered()) {
+                setTargetStatus(TARGET_FERMENTRACK, 200);
+            }
+        }
 
         // Set up for the next send
         data_sender.startTimer(data_sender.fermentrackTimer, FERMENTRACK_DELAY); // Set up subsequent send to Fermentrack

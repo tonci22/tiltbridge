@@ -171,6 +171,9 @@ bool dataSendHandler::send_to_mqtt() {
             prepare_general_payload(&th, tilt_topic);
         }
 
+        // Track MQTT status: -1 = disconnected, 200 = connected/published
+        setTargetStatus(TARGET_MQTT, mqtt_connected ? 200 : -1);
+
         data_sender.startTimer(data_sender.mqttTimer, config.mqttPushEvery);
         send_lock = false;
     }

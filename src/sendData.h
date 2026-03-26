@@ -9,6 +9,28 @@
 #include "tilt/tiltHydrometer.h"
 #include "targets/send_json_str.h"
 
+// Send target identifiers for error tracking
+enum SendTargetID : uint8_t {
+    TARGET_LEGACY_FERMENTRACK = 0,
+    TARGET_FERMENTRACK,
+    TARGET_BREWERS_FRIEND,
+    TARGET_BREWFATHER,
+    TARGET_USER_TARGET,
+    TARGET_GRAINFATHER,
+    TARGET_BREW_STATUS,
+    TARGET_TAPLISTIO,
+    TARGET_GOOGLE_SHEETS,
+    TARGET_MQTT,
+    TARGET_INFLUXDB,
+    TARGET_COUNT
+};
+
+// Tracks the most recent send result for each target
+struct SendTargetStatus {
+    int16_t lastHttpCode = 0;       // 0 = no attempt, HTTP status code, or negative for non-HTTP errors
+    uint32_t lastAttemptTime = 0;   // uptime seconds when last attempted
+};
+
 #define GSCRIPTS_DELAY (10 * 60)       // 10 minute delay between pushes to Google Sheets directly
 #define BREWERS_FRIEND_DELAY (15 * 60) // 15 minute delay between pushes to Brewer's Friend
 #define BREWFATHER_DELAY (15 * 60)     // 15 minute delay between pushes to Brewfather
@@ -55,6 +77,9 @@ public:
     bool send_to_bf_and_bf();
     bool send_to_influxdb();
 
+    // Error tracking
+    SendTargetStatus targetStatus[TARGET_COUNT];
+    void setTargetStatus(SendTargetID target, int16_t httpCode);
 
     // Send Timers (FreeRTOS software timers)
     TimerHandle_t legacyFermentrackTimer;
