@@ -260,7 +260,10 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
     // Perform the request
     esp_err_t err = esp_http_client_perform(client);
 
-    if (err == ESP_OK) {
+    // esp_http_client returns ESP_ERR_NOT_SUPPORTED when it receives a 401
+    // and can't auto-handle authentication. The HTTP response is still valid
+    // in that case, so treat it the same as ESP_OK.
+    if (err == ESP_OK || err == ESP_ERR_NOT_SUPPORTED) {
         httpResponseCode = esp_http_client_get_status_code(client);
 
         // Output the HTTP status code if requested
