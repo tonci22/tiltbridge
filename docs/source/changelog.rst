@@ -15,7 +15,11 @@ v2.0.0 - Unreleased - New UI & Fermentrack 2 Support
 - Rebuilt WiFi provisioning workflow & reconnection logic
 - Added support for a wider variety of TFT displays
 - Combined ESP32 versions into single "small TFT" and "large TFT" builds with runtime hardware detection
-
+- Add support for changing the displayed gravity units to Plato
+- Add last received timestamp to Web UI
+- Change MQTT Payload (renames `timeStamp` to `uptime_seconds`, and updates HAST autodiscovery messages)
+- Add (and display) error tracking for send target HTTP requests
+- Add optional support for combining Tilt devices by color
 
 
 v1.2.4 - Aug 28, 2024 - Disable Parse Cloud
