@@ -278,6 +278,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     // Loop through each of the tilt colors cached by tilt_scanner, sending
     // data for each of the active tilts
     tilt_scanner.drop_expired_tilts();
+    bool attempted = false;
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
         char gravity[10];
         char temp[6];
@@ -295,11 +296,16 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         char payload_string[BF_SIZE];
         serializeJson(j, payload_string);
 
+        attempted = true;
         if (http_request(url, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
             result = false; // There was an error with the previous send
     }
-    if (httpCode != 0)
-        setTargetStatus(targetId, httpCodeToSendError(httpCode));
+    // If we tried to send, always update status so a recovered connection clears
+    // any stale error. httpCode can remain 0 when http_request bails early
+    // (WiFi down, mDNS resolution failure, client init failure) — treat that
+    // as a connection failure rather than leaving the previous status cached.
+    if (attempted)
+        setTargetStatus(targetId, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
     return result;
 }
 
@@ -317,6 +323,7 @@ bool dataSendHandler::send_to_grainfather()
         // Loop through each of the tilt colors cached by tilt_scanner, sending
         // data for each of the active tilts
         tilt_scanner.drop_expired_tilts();
+        bool attempted = false;
         for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
             // If there's no Grainfather URL for this color, just continue
             if (strlen(config.grainfatherURL[th.m_color].link) == 0)
@@ -336,11 +343,12 @@ bool dataSendHandler::send_to_grainfather()
             char payload_string[GF_SIZE];
             serializeJson(j, payload_string);
 
+            attempted = true;
             if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
                 result = false; // There was an error with the previous send
         }
-        if (httpCode != 0)
-            setTargetStatus(TARGET_GRAINFATHER, httpCodeToSendError(httpCode));
+        if (attempted)
+            setTargetStatus(TARGET_GRAINFATHER, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         startTimer(grainfatherTimer, GRAINFATHER_DELAY); // Set up subsequent send to Grainfather
         send_lock = false;
     }
@@ -377,6 +385,7 @@ bool dataSendHandler::send_to_taplistio()
 
     tilt_scanner.drop_expired_tilts();
     int16_t httpCode = 0;
+    bool attempted = false;
 
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
         JsonDocument j;
@@ -396,11 +405,12 @@ bool dataSendHandler::send_to_taplistio()
 
         Log.verbose("taplist.io: Sending %s Tilt to %s\r\n", tilt_color_names[th.m_color], config.taplistioURL);
 
+        attempted = true;
         result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string, &httpCode) == sendResult::success);
     }
 
-    if (httpCode != 0)
-        setTargetStatus(TARGET_TAPLISTIO, httpCodeToSendError(httpCode));
+    if (attempted)
+        setTargetStatus(TARGET_TAPLISTIO, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
     startTimer(taplistioTimer, config.taplistioPushEvery);
     send_lock = false;
     return result;
@@ -433,6 +443,7 @@ bool dataSendHandler::send_to_brewstatus()
             // Loop through each of the tilt colors cached by tilt_scanner, sending data for each of the active tilts
             tilt_scanner.drop_expired_tilts();
             int16_t httpCode = 0;
+            bool attempted = false;
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 char gravity[10];
                 char temp[6];
@@ -443,6 +454,7 @@ bool dataSendHandler::send_to_brewstatus()
 
                 HttpRequestOptions options;
                 options.contentType = content_x_www_form_urlencoded;
+                attempted = true;
                 if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0, options, &httpCode) == sendResult::success) {
                     Log.notice("Completed send to Brew Status.\r\n");
                 } else {
@@ -450,8 +462,8 @@ bool dataSendHandler::send_to_brewstatus()
                     Log.verbose("Error sending to Brew Status.\r\n");
                 }
             }
-            if (httpCode != 0)
-                setTargetStatus(TARGET_BREW_STATUS, httpCodeToSendError(httpCode));
+            if (attempted)
+                setTargetStatus(TARGET_BREW_STATUS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         }
         startTimer(brewStatusTimer, config.brewstatusPushEvery); // Set up subsequent send to Brew Status
         send_lock = false;
@@ -481,6 +493,7 @@ bool dataSendHandler::send_to_google()
 
             tilt_scanner.drop_expired_tilts();
             int16_t httpCode = 0;
+            bool attempted = false;
 
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 // Check if there is a google sheet name associated with the specific Tilt
@@ -514,6 +527,7 @@ bool dataSendHandler::send_to_google()
                     options.skipCertValidation = true;
                     options.timeoutMs = 10000;  // 10 second timeout - Google Scripts can be slow
 
+                    attempted = true;
                     sendResult sendRes = http_request(config.scriptsURL, httpMethod::HTTP_POST,
                                                       payload_string, response, sizeof(response), options, &httpCode);
 
@@ -541,8 +555,8 @@ bool dataSendHandler::send_to_google()
             }
 
             Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
-            if (httpCode != 0)
-                setTargetStatus(TARGET_GOOGLE_SHEETS, httpCodeToSendError(httpCode));
+            if (attempted)
+                setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         }
         startTimer(gSheetsTimer, GSCRIPTS_DELAY); // Set up subsequent send to Google Sheets
 
@@ -623,7 +637,7 @@ bool dataSendHandler::send_to_influxdb()
                     Log.error("Error sending to InfluxDB\r\n");
                     result = false;
                 }
-                setTargetStatus(TARGET_INFLUXDB, httpCodeToSendError(httpCode));
+                setTargetStatus(TARGET_INFLUXDB, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
             } else {
                 Log.verbose("No Tilt data to send to InfluxDB.\r\n");
             }

@@ -304,7 +304,9 @@ bool send_status_to_fermentrack_2() {
         bool success = doc["success"].as<bool>();
 
         if(success) {
-            // We successfully sent the device status
+            // We successfully sent the device status — clear any prior error
+            // so a recovered connection isn't reported as a connection failure.
+            fermentrackStatusError = fermentrackStatusErrorT::NO_ERROR;
             Log.verbose("Fermentrack 2 status successfully sent. Device ID: %s\r\n", config.fermentrackDeviceID);
 
             // Check if there are messages to retrieve
