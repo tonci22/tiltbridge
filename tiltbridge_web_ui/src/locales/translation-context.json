@@ -1,0 +1,20 @@
+{
+  "instructions": "This is the on-device user interface for TiltBridge, which is firmware for an ESP32 allowing it to read the Bluetooth signals broadcast by a Tilt Hydrometer (a digital sensor which reads the fermentation progress of liquids like beer or wine), interpret them, and retransmit them to various endpoints/services on the Web. Use terminology appropriate for beer brewing and wine making. ",
+  "glossary": {
+    "Tilt Hydrometer": "A digital hydrometer, used for measuring fermentation progress. The name of the device is the 'Tilt Hydrometer'.",
+    "Tilt": "A single Tilt Hydrometer. 'Tilt' in this application never refers to the concept of slope.",
+    "Tilts": "Multiple Tilt Hydrometers",
+    "TiltBridge": "A device that reads the bluetooth signal emitted by a Tilt Hydrometer and relays it to a web service (such as Fermentrack) via WiFi",
+    "Gravity": "specific gravity - the measure of sugar content in fermenting liquid. Measurement of gravity over time represents the fermentation progress of a liquid.",
+    "Google Sheets": "Google's spreadsheet application. The name of the service is 'Google Sheets'",
+    "Brewer's Friend": "A web service that allows recording fermentation progress. The name of the service is 'Brewer's Friend'",
+    "Brewfather": "A web service that allows recording fermentation progress. The name of the service is 'Brewfather'",
+    "Brewstatus": "A web service that allows recording fermentation progress. The name of the service is 'Brewstatus'",
+    "Grainfather": "A web service that allows recording fermentation progress. The name of the service is 'Grainfather'",
+    "TaplistIO": "A web service that allows recording fermentation progress. The name of the service is 'TaplistIO'",
+    "Fermentrack": "Legacy Fermentrack is a locally-hosted web service that allows recording fermentation progress. The name of the service is 'Fermentrack', but may be referred to as 'legacy Fermentrack' to differentiate it from Fermentrack 2",
+    "Fermentrack 2": "The new, modern version of Fermentrack. The name of the service is 'Fermentrack', but it is almost always referred to as 'Fermentrack 2' to differentiate it from legacy Fermentrack.",
+    "Fermentrack.net": "A cloud-hosted instance of Fermentrack 2, allowing a user to use Fermentrack 2 without installing it him/herself. Fermentrack.net is provided as a standalone service, and is a specific instance of Fermentrack 2",
+    "HomeBrewTalk": "A forum dedicated to discussions of homebrewing"
+  }
+}

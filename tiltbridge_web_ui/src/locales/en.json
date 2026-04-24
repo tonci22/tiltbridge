@@ -1,0 +1,408 @@
+{
+  "sitewide": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "update": "Update",
+    "edit": "Edit",
+    "save": "Save",
+    "warning": "Warning",
+    "unused": "Unused",
+    "unknown": "Unknown",
+    "close_sidebar": "Close Sidebar",
+    "open_sidebar": "Open Sidebar",
+    "validation_error": "Validation Error",
+    "celsius": "Celsius",
+    "fahrenheit": "Fahrenheit",
+    "specific_gravity": "Specific Gravity",
+    "plato": "Plato",
+    "brix": "Brix",
+    "translation_message": "This application is translated by users like you! If you see items that are not translated (or have suggestions for improvements!) please suggest improvements on GitHub.",
+    "tab_container_sr_text": "Select a group of settings to edit",
+    "sidebar_options": {
+      "tilts": "Tilts",
+      "configure": "Configure",
+      "cloud_target": "Cloud Targets"
+    },
+    "tilt_colors": {
+      "red": "Red",
+      "green": "Green",
+      "black": "Black",
+      "purple": "Purple",
+      "orange": "Orange",
+      "blue": "Blue",
+      "yellow": "Yellow",
+      "pink": "Pink"
+    }
+  },
+  "navigation": {
+    "general_settings": "General Settings"
+  },
+  "about":{
+    "uptime":{
+      "version_and_uptime":"Version & Uptime Information",
+      "firmware_version":"Firmware Version",
+      "uptime_header":"Uptime",
+      "uptime_print":"Days: {days}, Hours: {hours}, Minutes: {minutes}, Seconds: {seconds}",
+      "reset_header":"Reset Information",
+      "reset_print":"Reason: {reason}, Description: {description}",
+      "heap_header":"Heap Information",
+      "heap_print":"Free Heap: {free_heap}, Max: {max_heap}, Frags: {frags}"
+    },
+    "version": {
+      "loading_version": "Loading build/version information...",
+      "error_loading_version": "Error loading build/version information"
+    },
+    "reset_actions": {
+      "header": "Device Reset Actions",
+      "description": "These actions will reset parts of your TiltBridge configuration. Use with caution.",
+      "reset_wifi": {
+        "title": "Reset WiFi Settings",
+        "description": "Clear WiFi credentials and return to setup mode. The device will restart and create its own WiFi access point.",
+        "button": "Reset WiFi"
+      },
+      "reset_device": {
+        "title": "Reset Device",
+        "description": "Perform a complete factory reset. All settings (including WiFi settings) and calibration data will be lost.",
+        "button": "Reset Device"
+      },
+      "confirm_modal": {
+        "wifi": {
+          "title": "Confirm WiFi Reset",
+          "message": "Are you sure you want to reset the WiFi settings? The device will restart and you will need to reconnect to its setup network to reconfigure WiFi."
+        },
+        "device": {
+          "title": "Confirm Device Reset",
+          "message": "Are you sure you want to perform a factory reset? This will erase ALL settings, calibration data, and configuration. This action cannot be undone."
+        },
+        "confirm_button": "Yes, Reset"
+      },
+      "reset_modal": {
+        "wifi": {
+          "title": "Resetting WiFi...",
+          "message": "The device is resetting WiFi settings and will restart. You will need to connect to the TiltBridge setup network to reconfigure WiFi access.",
+          "success_title": "WiFi Reset Sent",
+          "success_message": "The WiFi reset command was accepted. The device will restart shortly. You will need to connect to the TiltBridge setup network to reconfigure WiFi access.",
+          "failed_title": "WiFi Reset Failed",
+          "failed_message": "The WiFi reset command could not be sent. Please check your connection to the device and try again."
+        },
+        "device": {
+          "title": "Resetting Device...",
+          "message": "The device is performing a factory reset and will restart. All settings and data have been erased. You will need to reconfigure the device (including WiFi access) from scratch.",
+          "success_title": "Device Reset Sent",
+          "success_message": "The factory reset command was accepted. The device will restart shortly. You will need to reconfigure the device (including WiFi access) from scratch.",
+          "failed_title": "Device Reset Failed",
+          "failed_message": "The factory reset command could not be sent. Please check your connection to the device and try again."
+        }
+      }
+    }
+  },
+  "device_config": {
+    "configure_tiltbridge_header": "Configure TiltBridge",
+    "general_settings_header": "TiltBridge General Settings",
+    "config_failed_error": "Configuration failed to load from TiltBridge. Try refreshing the page, or check your TiltBridge's connection to the network.",
+    "mDNS_id_name": "mDNS ID",
+    "mDNS_id_desc": "Host name (the xxxx in http://xxxx.local/). Must be 1-31 characters.",
+    "tz_offset_name": "Time Zone Offset",
+    "tz_offset_desc": "Time Zone Offset from GMT (in hours). Used for Google Sheets.",
+    "temp_unit_name": "Default Temperature Units",
+    "temp_unit_desc": "Default temperature units to display",
+    "gravity_unit_name": "Gravity Units",
+    "gravity_unit_desc": "Units for displaying gravity readings",
+    "smooth_factor_name": "Specific Gravity Averaging",
+    "smooth_factor_desc": "Valid range is 0 to 99. Setting affects time constant of exponentially weighted moving average filter applied to specific gravity reading. In response to a step change, the filtered value should reach steady state after ~ 5 time constants. A setting of 0 gives no smoothing (filtering off) while higher values mean more smoothing.  A setting of 60 gives time constant of just over 5 seconds while 99 results in ~ 5 minutes.",
+    "hardware_options_header": "Hardware Options",
+    "invert_tft_name": "Invert TFT Display",
+    "invert_tft_desc": " - Use if the screen is upside-down",
+    "combine_tilts_name": "Combine Tilts of the same color",
+    "combine_tilts_desc": "Combines all readings received from Tilts of the same color, and overwrites their unique identifiers with the MAC address of this TiltBridge. Use this if you use Tilt \"repeaters\" to prevent duplication of the same Tilt.",
+    "errors": {
+      "mdns_invalid_chars": "mDNS ID can only consist of the letters a-z, a hyphen, or numbers, and must not start or end with a hyphen",
+      "mdns_invalid_length": "mDNS ID must be between 1 and 31 characters",
+      "invalid_smoothing_factor": "Specific gravity smoothing factor must be between 0 and 99",
+      "invalid_tz_offset": "Timezone offset must be between -12 and 14"
+    },
+    "update_modal": {
+      "success_header": "Update Successful",
+      "success_message": "TiltBridge updated successfully",
+      "fail_header": "Update Failed",
+      "fail_message": "Unable to connect to the TiltBridge or the update was rejected. Please recheck the information provided and reattempt."
+    }
+  },
+  "cloud_config": {
+    "fermentrack": {
+      "legacy_fermentrack_menu_item": "Legacy Fermentrack / BrewPi-Remix",
+      "header_legacy": "Configure Legacy Fermentrack Settings",
+      "legacy_desc": "These settings are for Fermentrack 1.x. If you are using Fermentrack 2, please select 'Fermentrack 2 / Fermentrack.net' as the cloud target",
+      "header": "Configure Fermentrack Settings",
+      "target_type": "Target System",
+      "target_type_desc": "Select the type of system you want to send to",
+      "url": "Target URL",
+      "url_desc": "URL of the target system",
+      "push_frequency": "Push Frequency",
+      "push_frequency_desc": "Frequency to send data (in seconds)",
+      "push_frequency_out_of_range": "Push frequency must be a number between 30 and 43200",
+      "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
+      "url_invalid": "URLs must start with either http:// or https://",
+      "fermentrack_settings_set_sr": "Select a Fermentrack 2 target type",
+      "hostname": "Hostname",
+      "port": "Port",
+      "username": "Fermentrack Username",
+      "ft_net_username": "Fermentrack.net Username",
+      "api_key": "API Key",
+      "device_id": "Device ID",
+      "not_yet_registered": "(Not yet registered)",
+      "hardware_guid": "Hardware GUID",
+      "reset_device_id": "Reset Device ID",
+      "reset_device_id_msg": "Delete device ID and re-register with upstream. Warning - cannot be undone!",
+      "reset_registration": "Reset Registration",
+      "hostname_too_long_error": "Hostname is invalid. Must be less than 127 characters.",
+      "port_out_of_range_error": "Port number must be between 10 and 65535 (but is typically 80)",
+
+      "presets": {
+        "no_fermentrack": "None",
+        "no_fermentrack_desc": "Do not use TiltBridge with Fermentrack 2",
+        "fermentrack_net": "Fermentrack.net",
+        "fermentrack_net_desc": "Use Fermentrack.net to control this TiltBridge",
+        "fermentrack_local": "Fermentrack 2 (Local/Custom)",
+        "fermentrack_local_desc": "Use a local Fermentrack 2 instance to control this TiltBridge"
+      },
+      "errors": {
+        "error_port_out_of_range": "Port must be a number between 1 and 65535",
+        "missing_data_error": "There was data missing in the registration message which is typically set internally by the TiltBridge. This most likely means that either the TiltBridge firmware or the version of Fermentrack is out of date. Please update the TiltBridge firmware and/or Fermentrack and try again.",
+        "invalid_username_error": "Username is invalid on the targeted Fermentrack install. Please check the username and try again.",
+        "bad_api_key_error": "API Key does not match a valid brewhouse on the targeted Fermentrack install. Please enter a valid username and try again.",
+        "missing_brewhouse_error": "The specified Fermentrack user does not have a brewhouse. Please complete setup of this user in Fermentrack and try again.",
+        "no_username_error": "No username or API key specified.",
+        "waiting_to_register_error": "Device is waiting to register with Fermentrack. Please wait up to 3 minutes and refresh this page.",
+        "unable_to_reach_fermentrack_error": "TiltBridge is unable to reach Fermentrack. Please check that Fermentrack is accessible at the specified hostname/port.",
+        "successful_registration_msg": "TiltBridge is successfully registered with Fermentrack",
+        "unknown error": "An unknown error was sent by Fermentrack. This most likely means that either the TiltBridge firmware or the version of Fermentrack is out of date. Please update the TiltBridge firmware and/or Fermentrack and try again."
+      }
+    },
+    "google_sheets": {
+      "header": "Configure Google Sheets",
+      "url": "Google Script URL",
+      "url_desc": "URL of the target Google Script",
+      "email": "Google Script Email Address",
+      "email_desc": "Email address used to create the targeted script",
+      "color_sheet_tilt_name": "{color} Tilt Sheet Name",
+      "color_sheet_tilt_name_desc": "The spreadsheet name to place data for the {color} tilt on"
+    },
+    "brewers_friend": {
+      "header": "Configure Brewers Friend",
+      "about_header": "About Brewers Friend",
+      "about_text": "These settings control how TiltBridge talks to Brewer's Friend. With a premium account, Brewer's Friend supports logging from gravity sensors such as the Tilt Hydrometer. To find your API key, log into your Brewer's Friend account and go to Profile > Account. Your API key will be a string of letters and numbers (not a URL).",
+      "api_key": "API Key",
+      "api_key_desc": "API key from your Brewers Friend account settings",
+      "error_missing_api_key": "API key cannot be empty",
+      "error_api_key_too_short": "API key must be greater than 12 characters"
+    },
+    "brewfather": {
+      "header": "Configure Brewfather",
+      "about_header": "About Brewfather",
+      "about_text": "These settings control how TiltBridge talks to Brewfather. With a premium account, Brewfather supports logging from gravity sensors such as the Tilt Hydrometer. To find your API key, log into your Brewfather account and go to Settings > Custom Stream. Your Stream key will be a string of letters and numbers (not a URL).",
+      "api_key": "Stream Key",
+      "api_key_desc": "Stream key from your Brewfather account settings",
+      "error_missing_api_key": "Stream key cannot be empty",
+      "error_invalid_stream_key": "Stream key is a series of letters and numbers - not a URL. Please check the key and try again.",
+      "error_api_key_too_short": "Stream key must be greater than 5 characters"
+    },
+    "grainfather": {
+      "header": "Configure Grainfather",
+      "about_header": "About Grainfather",
+      "about_text": "These settings control how TiltBridge talks to Grainfather. Grainfather supports logging from gravity sensors such as the Tilt Hydrometer with an account. To find your API url, log into your Grainfather account and go to Equipment > Fermentation Devices. Add a \"Tilt\" fermentation device for each color Tilt you want to log. After adding the Tilt, the URL required below can be found under setup instructions (accessible by clicking the circled \"i\" next to the Tilt in Grainfather).",
+      "grainfather_url_desc": "Enter the Grainfather URL for your {color} Tilt Hydrometer"
+    },
+    "brewstatus": {
+      "header": "Configure Brewstatus",
+      "about_header": "About Brewstatus",
+      "about_text": "These settings control how TiltBridge talks to BrewStatus. To disable pushing to BrewStatus, delete the BrewStatus URL.",
+      "brewstatus_url": "Brewstatus URL",
+      "brewstatus_url_desc": "Brewstatus URL to push tilt data to for your account",
+      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
+      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+    },
+    "taplist_io": {
+      "header": "Configure Taplist.IO",
+      "about_header": "About Taplist.IO",
+      "about_text": "These settings control how TiltBridge talks to Taplist.io. To disable pushing to Taplist.io, delete the Taplist.io URL.",
+      "taplistio_url": "Taplist.IO URL",
+      "taplistio_url_desc": "Taplist.IO URL to push tilt data to for your account",
+      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
+      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+    },
+    "mqtt": {
+      "header": "Configure MQTT",
+      "about_header": "About MQTT",
+      "about_text_1": "These settings control how TiltBridge publishes data to an MQTT Broker. To disable pushing to the MQTT broker, delete the MQTT Broker IP.",
+      "about_text_hast": "MQTT implementation supports Home Assistant Auto Discovery of temperature and specific gravity sensors.",
+      "about_text_payload_header": "General message payload is JSON and is formatted as follows",
+      "about_text_topic": "Topic",
+      "about_text_payload": "Payload",
+      "broker_address": "MQTT Broker Address",
+      "broker_address_desc": "Enter the MQTT broker server address (Hostname or IP)",
+      "broker_port": "MQTT Broker Port",
+      "broker_port_desc": "MQTT broker server port number (usually 1883)",
+      "broker_username": "MQTT Broker Username",
+      "broker_username_desc": "Username for MQTT broker authentication (Optional)",
+      "broker_password": "MQTT Broker Password",
+      "broker_password_desc": "Password for MQTT broker authentication (Optional)",
+      "mqtt_topic": "MQTT Topic",
+      "mqtt_topic_desc": "The MQTT topic to publish data to",
+      "mqtt_push_every": "Push Frequency (seconds)",
+      "mqtt_push_every_desc": "How often to push data (in seconds)"
+    },
+    "generic_target": {
+      "generic_target_menu_item": "Generic Target",
+      "header": "Configure Generic JSON Target",
+      "about_header": "About Generic JSON Targets",
+      "about_text": "This target allows you to send a generic JSON payload containing your Tilt data to a service that TiltBridge otherwise does not support",
+      "generic_target_url": "Generic Target URL",
+      "generic_target_url_desc": "The URL to which to push a payload containing JSON data covering your Tilts",
+      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
+      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+    },
+    "influxdb": {
+      "header": "Configure InfluxDB",
+      "about_header": "About InfluxDB Integration",
+      "about_text": "These settings control how TiltBridge sends data to InfluxDB v2. You'll need an InfluxDB v2 instance and an API token with write permissions to the specified bucket. To create a token, log into your InfluxDB instance and go to Data > API Tokens.",
+      "url": "InfluxDB URL",
+      "url_desc": "Full URL to your InfluxDB v2 server (e.g., https://us-west-2-1.aws.cloud2.influxdata.com)",
+      "token": "API Token",
+      "token_desc": "InfluxDB v2 API token with write permissions to the specified bucket",
+      "organization": "Organization",
+      "organization_desc": "InfluxDB organization name or ID",
+      "bucket": "Bucket",
+      "bucket_desc": "InfluxDB bucket name where Tilt data will be stored",
+      "push_frequency": "Push Frequency (seconds)",
+      "push_frequency_desc": "How often to send data to InfluxDB (recommended: 900 seconds / 15 minutes)",
+      "error_missing_url": "InfluxDB URL is required",
+      "error_missing_token": "API Token is required",
+      "error_missing_org": "Organization is required",
+      "error_missing_bucket": "Bucket is required",
+      "error_invalid_url": "Please enter a valid URL starting with http:// or https://",
+      "error_invalid_push_frequency": "Push frequency must be between 60 and 86400 seconds (1 minute to 24 hours)"
+    }
+  },
+  "tilt_list": {
+    "header": "Available Tilt Hydrometers",
+    "detected_tilts": "Detected Tilts",
+    "color_column": "Color",
+    "rssi_column": "RSSI",
+    "battery_age_column": "Battery Age",
+    "gravity_column": "Gravity",
+    "temperature_column": "Temperature",
+    "battery_age_week_count":"{weeks} weeks",
+    "no_tilts_detected": "No Tilts have been detected",
+    "last_received_column": "Last Received",
+    "last_received_ago": "{seconds}s ago"
+  },
+  "help_page": {
+    "header": "TiltBridge Support",
+    "contact_text": "For questions, concerns, and bug reports, please reach out to {lf_on_reddit} on Reddit, {thorrak_on_hbt} on the HomeBrewTalk forums, open an issue on {github}, or reach out via one of the links in this {blog_post}.",
+    "blog_post": "blog post",
+    "tiltbridge_docs_intro": "TiltBridge documentation and support can be found at the following links:",
+    "tiltbridge_link": "Visit the {tb_homepage_link}",
+    "tiltbridge_homepage": "TiltBridge Homepage",
+    "documentation_link": "Read the {tb_docs_link}",
+    "documentation": "Documentation",
+    "github_link": "Visit the project on {github_link}",
+    "report_issue_link": "Report an {issue_link}",
+    "issue_bug_feature_request": "issue, bug, or feature request",
+    "homebrewtalk_link": "Get support or chat with other users on the {hbt_link}",
+    "homebrewtalk_thread": "HomeBrewTalk thread"
+  },
+  "send_errors": {
+    "banner_title": "One or more send targets are reporting errors",
+    "config_error_title": "Send Error",
+    "targets": {
+      "legacy_fermentrack": "Legacy Fermentrack",
+      "fermentrack": "Fermentrack",
+      "brewers_friend": "Brewer's Friend",
+      "brewfather": "Brewfather",
+      "user_target": "Generic Target",
+      "grainfather": "Grainfather",
+      "brew_status": "Brewstatus",
+      "taplistio": "Taplist.IO",
+      "google_sheets": "Google Sheets",
+      "mqtt": "MQTT",
+      "influxdb": "InfluxDB"
+    },
+    "error_short": {
+      "code_1": "Connection failed",
+      "code_2": "Authentication failed",
+      "code_3": "Target not found (404)",
+      "code_4": "Server error (5xx)",
+      "code_5": "Bad request / missing config",
+      "code_6": "Rate limited",
+      "code_7": "Other error",
+      "code_8": "MQTT broker disconnected",
+      "code_9": "Fermentrack: Invalid user or API key",
+      "code_10": "Fermentrack: Malformed registration",
+      "code_11": "Fermentrack: Registration invalid",
+      "code_12": "Fermentrack: No brewhouse",
+      "unknown": "Unknown error (code {code})"
+    },
+    "error_detail": {
+      "code_1": "TiltBridge was unable to connect to this target. This could be caused by a DNS resolution failure, the server being unreachable, a connection timeout, or the connection being refused. Check that the target address is correct and that the server is accessible from the TiltBridge's network.",
+      "code_2": "The target rejected the request due to invalid or missing credentials. Check that your API key, username, or password are correct and have not expired.",
+      "code_3": "The target URL was not found. Check that the URL is correct and the service is still available at that address.",
+      "code_4": "The target server encountered an internal error. This is usually a temporary issue on the target's side. If it persists, check the target service's status page.",
+      "code_5": "The target rejected the request or required configuration is missing. Check that all configuration fields are filled in correctly.",
+      "code_6": "The target is rate limiting requests from TiltBridge. Try increasing the push frequency interval in the settings.",
+      "code_7": "An unexpected error occurred while communicating with this target. Check the target service's documentation or status page for details.",
+      "code_8": "TiltBridge was disconnected from the MQTT broker. Check that the broker address and port are correct, the broker is running, and any authentication credentials are valid.",
+      "code_9": "The configured username or API key was rejected by Fermentrack. Check that the username and API key are correct and match a valid account on the target Fermentrack install.",
+      "code_10": "The registration request sent to Fermentrack was malformed. This usually means the TiltBridge firmware or the Fermentrack version is out of date. Try updating both and re-registering.",
+      "code_11": "The device registration with Fermentrack is no longer valid. Try resetting the device ID on the Fermentrack configuration page to re-register.",
+      "code_12": "The configured Fermentrack user does not have a brewhouse. Complete the brewhouse setup in Fermentrack before connecting TiltBridge.",
+      "unknown": "An unexpected error occurred (code {code}). Check the settings for this target and ensure both TiltBridge and the target are up to date."
+    }
+  },
+  "calibration": {
+    "header": "Calibrating {color} Tilt",
+    "chart_section_title": "Calibration Chart",
+    "current_values_title": "Current Values",
+    "raw_tilt_gravity": "Raw Tilt Gravity",
+    "current_calibration_function": "Current Calibration Function",
+    "current_calibrated_gravity": "Current Calibrated Gravity",
+    "polynomial_degree": "Polynomial Degree",
+    "new_calibration_function": "New Calibration Function",
+    "new_calibrated_gravity": "New Calibrated Gravity",
+    "save_equation": "Save Equation",
+    "clear_equation": "Clear Equation",
+    "calibration_points_title": "Calibration Points",
+    "add_calibration_point": "Add Calibration Point",
+    "table_raw_gravity": "Raw Tilt Gravity",
+    "table_actual_gravity": "Actual Gravity",
+    "table_current_calibrated": "Current Calibrated",
+    "table_new_calibrated": "New Calibrated",
+    "table_actions": "Actions",
+    "delete": "Delete",
+    "no_calibration_points": "No calibration points added yet",
+    "degree_constant_offset": "Constant Offset",
+    "degree_1st_polynomial": "1st Degree Polynomial",
+    "degree_2nd_polynomial": "2nd Degree Polynomial",
+    "degree_3rd_polynomial": "3rd Degree Polynomial",
+    "function_no_points": "No calibration points",
+    "function_calculation_error": "Calculation error",
+    "function_no_calibration": "No calibration applied",
+    "chart_raw_gravity_axis": "Raw Gravity",
+    "chart_actual_gravity_axis": "Actual Gravity",
+    "chart_calibration_points": "Calibration Points",
+    "chart_current_calibration": "Current Calibration",
+    "chart_new_calibration": "New Calibration",
+    "chart_placeholder_message": "Chart will be displayed as calibration points are added",
+    "manual_coefficient_modal": {
+      "title": "Manual Coefficient Entry",
+      "description": "Enter calibration coefficients directly. The formula will be applied as: x0 + x1×(raw gravity) + x2×(raw gravity)²",
+      "x0_label": "x₀ (Constant)",
+      "x1_label": "x₁ (Linear)",
+      "x2_label": "x₂ (Quadratic)",
+      "preview_title": "Preview",
+      "raw_gravity": "Raw Gravity",
+      "formula": "Formula",
+      "calibrated_gravity": "Calibrated Gravity"
+    }
+  }
+}

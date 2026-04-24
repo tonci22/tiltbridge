@@ -1,0 +1,343 @@
+{
+  "sitewide": {
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "update": "Atualizar",
+    "edit": "Editar",
+    "save": "Salvar",
+    "warning": "Aviso",
+    "unused": "Não utilizado",
+    "unknown": "Desconhecido",
+    "close_sidebar": "Fechar Barra Lateral",
+    "open_sidebar": "Abrir Barra Lateral",
+    "validation_error": "Erro de Validação",
+    "celsius": "Celsius",
+    "fahrenheit": "Fahrenheit",
+    "translation_message": "Este aplicativo é traduzido por usuários como você! Se você ver itens que não estão traduzidos (ou tiver sugestões para melhorias!) por favor, sugira melhorias no GitHub.",
+    "tab_container_sr_text": "Selecione um grupo de configurações para editar",
+    "sidebar_options": {
+      "tilts": "Tilts",
+      "configure": "Configurar",
+      "cloud_target": "Alvos na Nuvem"
+    },
+    "tilt_colors": {
+      "red": "Vermelho",
+      "green": "Verde",
+      "black": "Preto",
+      "purple": "Roxo",
+      "orange": "Laranja",
+      "blue": "Azul",
+      "yellow": "Amarelo",
+      "pink": "Rosa"
+    }
+  },
+  "navigation": {
+    "general_settings": "Configurações Gerais"
+  },
+  "about": {
+    "uptime": {
+      "version_and_uptime": "Informações de Versão e Tempo de Atividade",
+      "firmware_version": "Versão do Firmware",
+      "uptime_header": "Tempo de Atividade",
+      "uptime_print": "Dias: {days}, Horas: {hours}, Minutos: {minutes}, Segundos: {seconds}",
+      "reset_header": "Informações de Reinicialização",
+      "reset_print": "Razão: {reason}, Descrição: {description}",
+      "heap_header": "Informações de Memória",
+      "heap_print": "Memória Livre: {free_heap}, Máx: {max_heap}, Fragmentos: {frags}"
+    },
+    "version": {
+      "loading_version": "Carregando informações de versão/construção...",
+      "error_loading_version": "Erro ao carregar informações de versão/construção"
+    },
+    "reset_actions": {
+      "header": "Ações de Reinicialização do Dispositivo",
+      "description": "Essas ações irão redefinir partes da configuração do seu TiltBridge. Use com cautela.",
+      "reset_wifi": {
+        "title": "Redefinir configurações de Wi-Fi",
+        "description": "Limpar as credenciais de Wi-Fi e voltar ao modo de configuração. O dispositivo será reiniciado e criará seu próprio ponto de acesso Wi-Fi.",
+        "button": "Redefinir Wi-Fi"
+      },
+      "reset_device": {
+        "title": "Redefinir Dispositivo",
+        "description": "Realizar uma restauração de fábrica completa. Todas as configurações (incluindo as de Wi-Fi) e os dados de calibração serão perdidos.",
+        "button": "Redefinir Dispositivo"
+      },
+      "confirm_modal": {
+        "wifi": {
+          "title": "Confirmar Redefinição do Wi-Fi",
+          "message": "Tem certeza de que deseja redefinir as configurações de Wi‑Fi? O dispositivo será reiniciado e você precisará reconectar-se à rede de configuração dele para reconfigurar o Wi‑Fi."
+        },
+        "device": {
+          "title": "Confirmar Redefinição do Dispositivo",
+          "message": "Tem certeza de que deseja realizar uma restauração de fábrica? Isso apagará TODAS as configurações, os dados de calibração e a configuração. Esta ação não pode ser desfeita."
+        },
+        "confirm_button": "Sim, Redefinir"
+      },
+      "reset_modal": {
+        "wifi": {
+          "title": "Redefinindo Wi‑Fi...",
+          "message": "O dispositivo está redefinindo as configurações de Wi‑Fi e será reiniciado. Você precisará conectar-se à rede de configuração do TiltBridge para reconfigurar o acesso Wi‑Fi."
+        },
+        "device": {
+          "title": "Redefinindo o Dispositivo...",
+          "message": "O dispositivo está realizando uma restauração de fábrica e será reiniciado. Todas as configurações e dados foram apagados. Você precisará reconfigurar o dispositivo (incluindo o acesso Wi‑Fi) do zero."
+        }
+      }
+    }
+  },
+  "device_config": {
+    "configure_tiltbridge_header": "Configurar TiltBridge",
+    "general_settings_header": "Configurações Gerais do TiltBridge",
+    "config_failed_error": "Falha ao carregar a configuração do TiltBridge. Tente atualizar a página ou verifique a conexão do seu TiltBridge com a rede.",
+    "mDNS_id_name": "ID mDNS",
+    "mDNS_id_desc": "Nome do host (o xxxx em http://xxxx.local/). Deve ter de 1 a 31 caracteres.",
+    "tz_offset_name": "Deslocamento do Fuso Horário",
+    "tz_offset_desc": "Deslocamento do fuso horário em relação ao GMT (em horas). Usado para o Google Sheets.",
+    "temp_unit_name": "Unidades de Temperatura Padrão",
+    "temp_unit_desc": "Unidades de temperatura padrão a serem exibidas",
+    "smooth_factor_name": "Média de Gravidade Específica",
+    "smooth_factor_desc": "O intervalo válido é de 0 a 99. A configuração afeta a constante de tempo do filtro de média móvel ponderada exponencialmente aplicado à leitura da gravidade específica. Em resposta a uma mudança abrupta, o valor filtrado deve atingir o estado estacionário após ~ 5 constantes de tempo. Uma configuração de 0 não oferece suavização (filtro desligado), enquanto valores mais altos significam mais suavização. Uma configuração de 60 dá uma constante de tempo de pouco mais de 5 segundos, enquanto 99 resulta em ~ 5 minutos.",
+    "hardware_options_header": "Opções de Hardware",
+    "invert_tft_name": "Inverter a exibição do TFT",
+    "invert_tft_desc": " - Use se a tela estiver de cabeça para baixo",
+    "errors": {
+      "mdns_invalid_chars": "O ID mDNS só pode conter as letras a-z, hífens ou números, e não deve começar nem terminar com um hífen",
+      "mdns_invalid_length": "O ID mDNS deve ter entre 1 e 31 caracteres",
+      "invalid_smoothing_factor": "O fator de suavização da gravidade específica deve estar entre 0 e 99",
+      "invalid_tz_offset": "O deslocamento de fuso horário deve estar entre -12 e 14"
+    },
+    "update_modal": {
+      "success_header": "Atualização Bem-Sucedida",
+      "success_message": "TiltBridge atualizado com sucesso",
+      "fail_header": "Atualização Falhou",
+      "fail_message": "Não foi possível conectar ao TiltBridge ou a atualização foi rejeitada. Por favor, verifique as informações fornecidas e tente novamente."
+    }
+  },
+  "cloud_config": {
+    "fermentrack": {
+      "legacy_fermentrack_menu_item": "Legacy Fermentrack / BrewPi-Remix",
+      "header_legacy": "Configurar Fermentrack legado",
+      "legacy_desc": "Essas configurações são para Fermentrack 1.x. Se você estiver usando o Fermentrack 2, selecione 'Fermentrack 2 / Fermentrack.net' como o alvo na nuvem",
+      "header": "Configurar Fermentrack",
+      "target_type": "Sistema de Destino",
+      "target_type_desc": "Selecione o tipo de sistema para o qual deseja enviar os dados",
+      "url": "URL de destino",
+      "url_desc": "URL do sistema de destino",
+      "push_frequency": "Frequência de Envio",
+      "push_frequency_desc": "Frequência para enviar dados (em segundos)",
+      "push_frequency_out_of_range": "A frequência de envio deve ser um número entre 30 e 43200",
+      "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
+      "url_invalid": "As URLs devem iniciar com http:// ou https://",
+      "fermentrack_settings_set_sr": "Selecione um tipo de alvo do Fermentrack 2",
+      "hostname": "Nome do Host",
+      "port": "Porta",
+      "username": "Nome de Usuário do Fermentrack",
+      "ft_net_username": "Nome de Usuário do Fermentrack.net",
+      "api_key": "Chave API",
+      "device_id": "ID do Dispositivo",
+      "not_yet_registered": "(Ainda não registrado)",
+      "hardware_guid": "GUID de Hardware",
+      "reset_device_id": "Redefinir ID do Dispositivo",
+      "reset_device_id_msg": "Excluir o ID do dispositivo e re-registrar com upstream. Atenção - não pode ser desfeito!",
+      "reset_registration": "Redefinir Registro",
+      "hostname_too_long_error": "O nome do host é inválido. Deve ter menos de 127 caracteres.",
+      "port_out_of_range_error": "O número da porta deve estar entre 10 e 65535 (mas geralmente é 80)",
+      "presets": {
+        "no_fermentrack": "Nenhum",
+        "no_fermentrack_desc": "Não use o TiltBridge com Fermentrack 2",
+        "fermentrack_net": "Fermentrack.net",
+        "fermentrack_net_desc": "Use o Fermentrack.net para controlar este TiltBridge",
+        "fermentrack_local": "Fermentrack 2 (Local/Personalizado)",
+        "fermentrack_local_desc": "Use uma instância local do Fermentrack 2 para controlar este TiltBridge"
+      },
+      "errors": {
+        "error_port_out_of_range": "A porta deve ser um número entre 1 e 65535",
+        "missing_data_error": "Faltavam dados na mensagem de registro, que geralmente são definidos internamente pelo TiltBridge. Isso provavelmente significa que o firmware do TiltBridge ou a versão do Fermentrack estão desatualizados. Por favor, atualize o firmware do TiltBridge e/ou Fermentrack e tente novamente.",
+        "invalid_username_error": "O nome de usuário é inválido na instalação alvo do Fermentrack. Por favor, verifique o nome de usuário e tente novamente.",
+        "bad_api_key_error": "A chave API não corresponde a uma brewhouse válida na instalação alvo do Fermentrack. Por favor, insira um nome de usuário válido e tente novamente.",
+        "missing_brewhouse_error": "O usuário Fermentrack especificado não possui uma brewhouse. Por favor, complete a configuração deste usuário no Fermentrack e tente novamente.",
+        "no_username_error": "Nenhum nome de usuário ou chave API especificado.",
+        "waiting_to_register_error": "O dispositivo está aguardando para se registrar no Fermentrack. Por favor, aguarde até 3 minutos e atualize esta página.",
+        "unable_to_reach_fermentrack_error": "O TiltBridge não consegue acessar o Fermentrack. Por favor, verifique se o Fermentrack é acessível no nome do host/porta especificados.",
+        "successful_registration_msg": "TiltBridge registrado com sucesso no Fermentrack",
+        "unknown error": "Um erro desconhecido foi enviado pelo Fermentrack. Isso provavelmente significa que o firmware do TiltBridge ou a versão do Fermentrack estão desatualizados. Por favor, atualize o firmware do TiltBridge e/ou Fermentrack e tente novamente."
+      }
+    },
+    "google_sheets": {
+      "header": "Configurar Google Sheets",
+      "url": "URL do Google Script",
+      "url_desc": "URL do script do Google alvo",
+      "email": "Endereço de Email do Google Script",
+      "email_desc": "Endereço de email usado para criar o script alvo",
+      "color_sheet_tilt_name": "{color} Nome da Planilha do Tilt",
+      "color_sheet_tilt_name_desc": "O nome da planilha onde serão colocados os dados do Tilt {color}"
+    },
+    "brewers_friend": {
+      "header": "Configurar Brewers Friend",
+      "about_header": "Sobre o Brewers Friend",
+      "about_text": "Essas configurações controlam como o TiltBridge se comunica com o Brewers Friend. Com uma conta premium, o Brewers Friend suporta registro a partir de sensores de gravidade, como o Tilt Hydrometer. Para encontrar sua chave API, faça login na sua conta do Brewers Friend e vá para Perfil > Conta. Sua chave API será uma sequência de letras e números (não uma URL).",
+      "api_key": "Chave API",
+      "api_key_desc": "Chave API das configurações da sua conta do Brewers Friend",
+      "error_missing_api_key": "A chave API não pode estar vazia"
+    },
+    "brewfather": {
+      "header": "Configurar Brewfather",
+      "about_header": "Sobre o Brewfather",
+      "about_text": "Essas configurações controlam como o TiltBridge se comunica com o Brewfather. Com uma conta premium, o Brewfather suporta registro a partir de sensores de gravidade, como o Tilt Hydrometer. Para encontrar sua chave API, faça login na sua conta do Brewfather e vá para Configurações > Stream Personalizado. Sua chave de Stream será uma sequência de letras e números (não uma URL).",
+      "api_key": "Chave de Stream",
+      "api_key_desc": "Chave de stream das configurações da sua conta do Brewfather",
+      "error_missing_api_key": "A chave de stream não pode estar vazia",
+      "error_invalid_stream_key": "A chave de stream é uma sequência de letras e números - não uma URL. Por favor, verifique a chave e tente novamente."
+    },
+    "grainfather": {
+      "header": "Configurar Grainfather",
+      "about_header": "Sobre o Grainfather",
+      "about_text": "Essas configurações controlam como o TiltBridge se comunica com o Grainfather. O Grainfather suporta registro a partir de sensores de gravidade, como o Tilt Hydrometer, com uma conta. Para encontrar sua URL do Grainfather, faça login na sua conta do Grainfather e vá para Equipamento > Dispositivos de Fermentação. Adicione um dispositivo de fermentação \"Tilt\" para cada Tilt colorido que você deseja registrar. Após adicionar o Tilt, a URL necessária abaixo pode ser encontrada nas instruções de configuração (acessível clicando no \"i\" circulado ao lado do Tilt no Grainfather).",
+      "grainfather_url_desc": "Insira a URL do Grainfather para o seu Tilt Hydrometer {color}"
+    },
+    "brewstatus": {
+      "header": "Configurar Brewstatus",
+      "about_header": "Sobre o Brewstatus",
+      "about_text": "Essas configurações controlam como o TiltBridge se comunica com o BrewStatus. Para desabilitar o envio para o BrewStatus, exclua a URL do BrewStatus.",
+      "brewstatus_url": "URL do Brewstatus",
+      "brewstatus_url_desc": "URL do Brewstatus para enviar dados de tilt para sua conta",
+      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
+      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+    },
+    "taplist_io": {
+      "header": "Configurar Taplist.IO",
+      "about_header": "Sobre o Taplist.IO",
+      "about_text": "Essas configurações controlam como o TiltBridge se comunica com o Taplist.io. Para desabilitar o envio para o Taplist.io, exclua a URL do Taplist.io.",
+      "taplistio_url": "URL do Taplist.IO",
+      "taplistio_url_desc": "URL do Taplist.IO para enviar dados de tilt para sua conta",
+      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
+      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+    },
+    "mqtt": {
+      "header": "Configurar MQTT",
+      "about_header": "Sobre o MQTT",
+      "about_text_1": "Essas configurações controlam como o TiltBridge publica dados em um Broker MQTT. Para desabilitar o envio para o broker MQTT, exclua o IP do Broker MQTT.",
+      "about_text_hast": "A implementação do MQTT suporta a Descoberta Automática do Home Assistant para sensores de temperatura e gravidade específica.",
+      "about_text_payload_header": "A carga (payload) da mensagem é JSON e é formatada da seguinte forma",
+      "about_text_topic": "Tópico",
+      "about_text_payload": "Carga",
+      "broker_address": "Endereço do Broker MQTT",
+      "broker_address_desc": "Insira o endereço do servidor do broker MQTT (Nome do Host ou IP)",
+      "broker_port": "Porta do Broker MQTT",
+      "broker_port_desc": "Número da porta do servidor do broker MQTT (geralmente 1883)",
+      "broker_username": "Nome de Usuário do Broker MQTT",
+      "broker_username_desc": "Nome de usuário para autenticação no broker MQTT (Opcional)",
+      "broker_password": "Senha do Broker MQTT",
+      "broker_password_desc": "Senha para autenticação no broker MQTT (Opcional)",
+      "mqtt_topic": "Tópico MQTT",
+      "mqtt_topic_desc": "O tópico MQTT para publicar dados",
+      "mqtt_push_every": "Frequência de Envio (segundos)",
+      "mqtt_push_every_desc": "Com que frequência enviar dados (em segundos)"
+    },
+    "generic_target": {
+      "generic_target_menu_item": "Alvo Genérico",
+      "header": "Configurar Alvo Genérico JSON",
+      "about_header": "Sobre Alvos Genéricos JSON",
+      "about_text": "Este alvo permite que você envie uma carga JSON genérica contendo seus dados do Tilt para um serviço que o TiltBridge não suporta de outra forma",
+      "generic_target_url": "URL do Alvo Genérico",
+      "generic_target_url_desc": "A URL para a qual enviar uma carga contendo dados JSON cobrindo seus Tilts",
+      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
+      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+    },
+    "influxdb": {
+      "header": "Configurar InfluxDB",
+      "about_header": "Sobre a Integração com InfluxDB",
+      "about_text": "Essas configurações controlam como o TiltBridge envia dados para o InfluxDB v2. Você precisará de uma instância do InfluxDB v2 e de um token de API com permissões de escrita para o bucket especificado. Para criar um token, faça login na sua instância do InfluxDB e vá para Data > API Tokens.",
+      "url": "URL do InfluxDB",
+      "url_desc": "URL completa do seu servidor InfluxDB v2 (por exemplo, https://us-west-2-1.aws.cloud2.influxdata.com)",
+      "token": "Token da API",
+      "token_desc": "Token da API do InfluxDB v2 com permissão de escrita para o bucket especificado",
+      "organization": "Organização",
+      "organization_desc": "Nome ou ID da organização do InfluxDB",
+      "bucket": "Bucket",
+      "bucket_desc": "Nome do bucket do InfluxDB onde os dados do Tilt serão armazenados",
+      "push_frequency": "Frequência de Envio (segundos)",
+      "push_frequency_desc": "Com que frequência enviar dados para o InfluxDB (recomendado: 900 segundos / 15 minutos)",
+      "error_missing_url": "A URL do InfluxDB é obrigatória",
+      "error_missing_token": "O token da API é obrigatório",
+      "error_missing_org": "A organização é obrigatória",
+      "error_missing_bucket": "O bucket é obrigatório",
+      "error_invalid_url": "Por favor, insira uma URL válida começando com http:// ou https://",
+      "error_invalid_push_frequency": "A frequência de envio deve estar entre 60 e 86400 segundos (1 minuto a 24 horas)"
+    }
+  },
+  "tilt_list": {
+    "header": "Hidrômetros Tilt Disponíveis",
+    "detected_tilts": "Tilts Detectados",
+    "color_column": "Cor",
+    "rssi_column": "RSSI",
+    "battery_age_column": "Idade da Bateria",
+    "gravity_column": "Gravidade",
+    "temperature_column": "Temperatura",
+    "battery_age_week_count": "{weeks} semanas",
+    "no_tilts_detected": "Nenhum Tilt foi detectado",
+    "last_received_column": "Última recepção",
+    "last_received_ago": "há {seconds}s"
+  },
+  "help_page": {
+    "header": "Suporte do TiltBridge",
+    "contact_text": "Para perguntas, dúvidas e relatos de bugs, entre em contato com {lf_on_reddit} no Reddit, {thorrak_on_hbt} nos fóruns do HomeBrewTalk, abra uma issue no {github}, ou entre em contato através de um dos links neste {blog_post}.",
+    "blog_post": "post do blog",
+    "tiltbridge_docs_intro": "A documentação e o suporte do TiltBridge podem ser encontrados nos links a seguir:",
+    "tiltbridge_link": "Visite a {tb_homepage_link}",
+    "tiltbridge_homepage": "Página inicial do TiltBridge",
+    "documentation_link": "Leia a {tb_docs_link}",
+    "documentation": "Documentação",
+    "github_link": "Visite o projeto em {github_link}",
+    "report_issue_link": "Reporte um {issue_link}",
+    "issue_bug_feature_request": "problema, bug ou solicitação de recurso",
+    "homebrewtalk_link": "Obtenha suporte ou converse com outros usuários no {hbt_link}",
+    "homebrewtalk_thread": "tópico do HomeBrewTalk"
+  },
+  "calibration": {
+    "header": "Calibrando o Tilt {color}",
+    "chart_section_title": "Gráfico de Calibração",
+    "current_values_title": "Valores Atuais",
+    "raw_tilt_gravity": "Gravidade bruta do Tilt",
+    "current_calibration_function": "Função de Calibração Atual",
+    "current_calibrated_gravity": "Gravidade Calibrada Atual",
+    "polynomial_degree": "Grau do Polinômio",
+    "new_calibration_function": "Nova Função de Calibração",
+    "new_calibrated_gravity": "Nova Gravidade Calibrada",
+    "save_equation": "Salvar Equação",
+    "clear_equation": "Limpar Equação",
+    "calibration_points_title": "Pontos de Calibração",
+    "add_calibration_point": "Adicionar Ponto de Calibração",
+    "table_raw_gravity": "Gravidade bruta do Tilt",
+    "table_actual_gravity": "Gravidade Real",
+    "table_current_calibrated": "Calibrado Atual",
+    "table_new_calibrated": "Novo Calibrado",
+    "table_actions": "Ações",
+    "delete": "Excluir",
+    "no_calibration_points": "Nenhum ponto de calibração adicionado ainda",
+    "degree_constant_offset": "Deslocamento constante",
+    "degree_1st_polynomial": "Polinômio de 1º Grau",
+    "degree_2nd_polynomial": "Polinômio de 2º Grau",
+    "degree_3rd_polynomial": "Polinômio de 3º Grau",
+    "function_no_points": "Sem pontos de calibração",
+    "function_calculation_error": "Erro de cálculo",
+    "function_no_calibration": "Nenhuma calibração aplicada",
+    "chart_raw_gravity_axis": "Gravidade bruta",
+    "chart_actual_gravity_axis": "Gravidade real",
+    "chart_calibration_points": "Pontos de calibração",
+    "chart_current_calibration": "Calibração atual",
+    "chart_new_calibration": "Nova calibração",
+    "chart_placeholder_message": "O gráfico será exibido à medida que os pontos de calibração forem adicionados",
+    "manual_coefficient_modal": {
+      "title": "Entrada manual de coeficientes",
+      "description": "Insira os coeficientes de calibração diretamente. A fórmula será aplicada como: x0 + x1×(gravidade bruta) + x2×(gravidade bruta)²",
+      "x0_label": "x₀ (Constante)",
+      "x1_label": "x₁ (Linear)",
+      "x2_label": "x₂ (Quadrático)",
+      "preview_title": "Pré-visualização",
+      "raw_gravity": "Gravidade bruta",
+      "formula": "Fórmula",
+      "calibrated_gravity": "Gravidade Calibrada"
+    }
+  }
+}
