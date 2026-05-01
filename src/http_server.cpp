@@ -336,6 +336,7 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
         Log.info("Received FT2 settings.\r\n");
         update_ft2 = true;
         config.fermentrackDeviceID[0] = '\0';
+        config.fermentrackAPIKey[0] = '\0';
         fermentrackRegistrationError = fermentrackRegErrorT::NOT_ATTEMPTED_REGISTRATION;
 
         if(!updateJsonSetting(json, FermentrackSettings::fermentrackHostname, config.fermentrackHostname, sizeof(config.fermentrackHostname)))
