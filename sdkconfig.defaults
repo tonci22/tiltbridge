@@ -1,21 +1,28 @@
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
-# CONFIG_BT_NIMBLE_ROLE_PERIPHERAL is not set
-# CONFIG_BT_NIMBLE_ROLE_BROADCASTER is not set
+# Peripheral + broadcaster + GATT server are required for esp_wifi_config BLE provisioning
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_GATT_SERVER=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_MBEDTLS_PSK_MODES=y
 CONFIG_MBEDTLS_KEY_EXCHANGE_PSK=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
-CONFIG_ESP32_XTAL_FREQ_AUTO=y
+CONFIG_XTAL_FREQ_AUTO=y
 
 # Allow skipping server certificate verification at runtime (for targets that
 # don't need strict TLS validation, e.g. Brewer's Friend, Brewfather, etc.)
 CONFIG_ESP_TLS_INSECURE=y
 CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
 
-# FreeRTOS Timer task needs more stack for WiFi manager and logging callbacks
+# FreeRTOS Timer task needs more stack for WiFi config and logging callbacks
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
-# The host stack needs to be larger to support certain WiFi Manager operations
+# The host stack needs to be larger to support certain WiFi Config operations
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+
+# esp_wifi_config component options
+CONFIG_WIFI_CFG_ENABLE_WEBUI=y
+CONFIG_WIFI_CFG_WEBUI_CUSTOM_PATH="/littlefs/wifiui"
+CONFIG_WIFI_CFG_ENABLE_CUSTOM_BLE=y

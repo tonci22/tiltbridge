@@ -2,7 +2,7 @@
 #include <freertos/task.h>
 #include <esp_system.h>
 #include <mdns.h>
-#include <esp_wifi_manager.h>
+#include <esp_wifi_config.h>
 
 #include <thorlog.h>
 
@@ -34,8 +34,8 @@ void initMDNS() {
 
     registerMdnsServices();
 
-    // Store the mDNS name in wifi_manager's custom variables for persistence
-    wifi_manager_set_var("mdns_name", config.mdnsID);
+    // Store the mDNS name in wifi_cfg's custom variables for persistence
+    wifi_cfg_set_var("mdns_name", config.mdnsID);
 }
 
 void mdnsReset() {
@@ -49,6 +49,6 @@ void mdnsReset() {
         registerMdnsServices();
     }
 
-    // Update the mDNS name in wifi_manager's custom variables
-    wifi_manager_set_var("mdns_name", config.mdnsID);
+    // Update the mDNS name in wifi_cfg's custom variables
+    wifi_cfg_set_var("mdns_name", config.mdnsID);
 }
