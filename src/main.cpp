@@ -9,6 +9,7 @@
 #include <freertos/timers.h>
 #include <nvs_flash.h>
 #include <esp_bus.h>
+#include <NimBLEDevice.h>
 
 #include <thorlog.h>
 
@@ -69,7 +70,7 @@ void setup() {
 
     esp_log_level_set("esp_bus", ESP_LOG_VERBOSE);
 
-    // Initialize esp_bus (required for esp_wifi_manager events)
+    // Initialize esp_bus (required for esp_wifi_config events)
     ESP_LOGI("tiltbridge", "Initializing esp_bus.");
     ESP_ERROR_CHECK(esp_bus_init());
 
@@ -87,7 +88,7 @@ void setup() {
     lcd.init();
     lcd.display_logo();
 
-    // Initialize NVS (required for esp_wifi_manager)
+    // Initialize NVS (required for esp_wifi_config)
     esp_err_t nvs_ret = nvs_flash_init();
     if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         Log.warning("NVS partition was truncated, erasing and reinitializing.\r\n");
@@ -96,13 +97,19 @@ void setup() {
     }
     ESP_ERROR_CHECK(nvs_ret);
 
-
+    // Bring NimBLE up before wifi_cfg. wifi_cfg's BLE provisioning backend
+    // checks esp_bt_controller_get_status() at init time; if the stack is
+    // already running it registers as service-only and leaves the host task
+    // to us. Otherwise it claims ownership of NimBLE and tilt_scanner.init()
+    // later fails with controller-init errors.
+    Log.info("Initializing BLE stack.\r\n");
+    NimBLEDevice::init("");
 
     Log.info("Initializing WiFi.\r\n");
     initWiFi();
 
     Log.info("Initializing scanner.\r\n");
-    tilt_scanner.init();                        // Initialize the BLE scanner
+    tilt_scanner.init();                        // Initialize the BLE scanner (NimBLEDevice::init is idempotent)
     tilt_scanner.wait_until_scan_complete();    // Wait until the initial scan completes
 
     data_sender.init();     // Initialize the data sender
