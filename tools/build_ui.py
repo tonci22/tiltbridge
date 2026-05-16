@@ -7,7 +7,7 @@ Hooked only to the filesystem binary target — regular firmware builds don't
 touch it, so `pio run -e <env>` without `--target buildfs` skips the UI build.
 
 The entire contents of data/ are replaced with the Vite dist/ output, except
-for data/wifiui/ which is owned by the esp_wifi_manager library and must be
+for data/wifiui/ which is owned by the esp_wifi_config library and must be
 preserved across UI rebuilds.
 
 Requires Node.js and npm on PATH. If they are missing, this script exits with
@@ -27,7 +27,7 @@ DATA_DIR = os.path.join(PROJECT_DIR, "data")
 DIST_DIR = os.path.join(UI_DIR, "dist")
 
 # Subdirectories of data/ that are NOT produced by the UI build and must be
-# preserved across rebuilds. Owned by the esp_wifi_manager library.
+# preserved across rebuilds. Owned by the esp_wifi_config library.
 PRESERVE_ENTRIES = ("wifiui",)
 
 BANNER = "=" * 72
@@ -74,7 +74,7 @@ def _copy_tree(src, dst):
         if entry in PRESERVE_ENTRIES:
             # Extremely defensive: the Vue build shouldn't produce anything
             # named wifiui, but if it does, skip it to avoid clobbering.
-            print("  ! skipping '{}' from dist (reserved for esp_wifi_manager)".format(entry))
+            print("  ! skipping '{}' from dist (reserved for esp_wifi_config)".format(entry))
             continue
         s = os.path.join(src, entry)
         d = os.path.join(dst, entry)
