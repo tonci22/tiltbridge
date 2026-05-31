@@ -9,7 +9,6 @@
 #include <freertos/timers.h>
 #include <nvs_flash.h>
 #include <esp_bus.h>
-#include <NimBLEDevice.h>
 
 #include <thorlog.h>
 
@@ -97,19 +96,18 @@ void setup() {
     }
     ESP_ERROR_CHECK(nvs_ret);
 
-    // Bring NimBLE up before wifi_cfg. wifi_cfg's BLE provisioning backend
-    // checks esp_bt_controller_get_status() at init time; if the stack is
-    // already running it registers as service-only and leaves the host task
-    // to us. Otherwise it claims ownership of NimBLE and tilt_scanner.init()
-    // later fails with controller-init errors.
-    Log.info("Initializing BLE stack.\r\n");
-    NimBLEDevice::init("");
-
+    // Order matters: wifi_cfg's Network Provisioning backend uses Espressif's
+    // wifi_prov_scheme_ble, which unconditionally calls esp_bt_controller_init()
+    // and brings up its own NimBLE host. If NimBLE is already up, that fails
+    // with ESP_ERR_INVALID_STATE (0x103) and provisioning never starts. So
+    // wifi_cfg has to be initialised first; tilt_scanner.init() below calls
+    // NimBLEDevice::init() afterwards and re-attaches to the (still-running,
+    // thanks to .prov.memory_policy = KEEP_ALL) controller.
     Log.info("Initializing WiFi.\r\n");
     initWiFi();
 
     Log.info("Initializing scanner.\r\n");
-    tilt_scanner.init();                        // Initialize the BLE scanner (NimBLEDevice::init is idempotent)
+    tilt_scanner.init();                        // NimBLEDevice::init() runs here
     tilt_scanner.wait_until_scan_complete();    // Wait until the initial scan completes
 
     data_sender.init();     // Initialize the data sender

@@ -213,8 +213,20 @@ void initWiFi() {
             .auth_username = NULL,
             .auth_password = NULL,
         },
-        .ble = {
+        .prov_ble = {
             .device_name = "TiltBridge-{id}",
+            .security = WIFI_CFG_PROV_SECURITY_1,
+            .pop = "thorrak",
+            // KEEP_ALL keeps the BT controller + BLE memory alive after the
+            // provisioning manager tears down, so tilt_scanner can re-attach
+            // via NimBLEDevice::init() without re-initialising the controller.
+            .memory_policy = WIFI_CFG_PROV_MEM_KEEP_ALL,
+            // reset_on_failure now defaults to false (was Kconfig-default y);
+            // set explicitly so a wrong-password loop clears stored creds
+            // after max_failed_attempts and accepts a fresh attempt without
+            // rebooting.
+            .reset_on_failure = true,
+            .max_failed_attempts = 3,
         },
     };
 

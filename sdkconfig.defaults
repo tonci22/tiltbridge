@@ -25,4 +25,10 @@ CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
 # esp_wifi_config component options
 CONFIG_WIFI_CFG_ENABLE_WEBUI=y
 CONFIG_WIFI_CFG_WEBUI_CUSTOM_PATH="/littlefs/wifiui"
-CONFIG_WIFI_CFG_ENABLE_CUSTOM_BLE=y
+
+# Network Provisioning (BLE) — wraps ESP-IDF wifi_provisioning manager.
+CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y
+CONFIG_WIFI_CFG_NETWORK_PROVISIONING_BLE=y
+
+# Required due to a bug in ESP-IDF v5.5.3 that causes Bluetooth instability under load (e.g. during WiFi provisioning).
+CONFIG_BT_NIMBLE_HS_FLOW_CTRL=n
