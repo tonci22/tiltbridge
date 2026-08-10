@@ -11,11 +11,15 @@
 
 #include "tiltScanner.h"
 #include "jsonconfig.h"
+#include "../device_config.h"
+#include "../sender_health.h"   // sh_millis()
 
 
 // Create the scanner
 BLEScan *pBLEScan;
 tiltScanner tilt_scanner;
+
+std::atomic<uint32_t> g_last_tilt_advert_ms{0};
 
 ////////////////////////////
 // BLE Scanner Callbacks/Code
@@ -153,8 +157,12 @@ uint8_t tiltScanner::load_tilt_from_advert_hex(const NimBLEAdvertisedDevice* adv
         : advertisedDevice->getAddress();
 
     tiltHydrometer *th = get_or_create_tilt(lookup_address, m_color);
+    th->setAddress(lookup_address);   // refreshes the cached canonical device id
     th->set_values(temp, gravity, tx_pwr, current_rssi);
-    th->m_address = lookup_address;
+
+    // Publish BLE liveness for the sender health monitor. Lock-free on purpose: the
+    // monitor must never touch m_tilt_devices, which this task mutates.
+    g_last_tilt_advert_ms.store(sh_millis(), std::memory_order_relaxed);
 
     return m_color;
 }
@@ -184,6 +192,9 @@ void tiltScanner::tilt_to_json_legacy(JsonDocument &doc)
     tilt_scanner.drop_expired_tilts();
 
     for(tiltHydrometer & th : m_tilt_devices) {
+        if (!device_config.isEnabled(th.deviceId()))
+            continue;
+
         // tilt_data[0] = {'\0'};
         // The other difference is that we send a "gravity" key in the JSON which contains the uncalibrated, smoothed gravity value
         JsonDocument tilt_data = th.to_json(true);
@@ -221,6 +232,16 @@ tiltHydrometer* tiltScanner::get_or_create_tilt(const NimBLEAddress devAddress, 
     return get_tilt(devAddress, color);  // We specifically want to access the object as referenced in the list
 }
 
+
+void tiltScanner::pauseScanning() {
+    shouldRun = false;
+    if (pBLEScan != nullptr && pBLEScan->isScanning())
+        pBLEScan->stop();
+}
+
+void tiltScanner::resumeScanning() {
+    shouldRun = true;
+}
 
 void tiltScanner::drop_expired_tilts() {
     for (auto it = m_tilt_devices.begin(); it != m_tilt_devices.end(); ) {

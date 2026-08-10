@@ -38,6 +38,14 @@ namespace GoogleSheetsSettings {
 constexpr auto scriptsURL = "scriptsURL";
 constexpr auto scriptsEmail = "scriptsEmail";
 constexpr auto gsheetsPrefix = "sheetName";
+constexpr auto gsheetsV2Enabled = "gsheetsV2Enabled";
+}
+
+namespace QueueSettings {
+constexpr auto offlineQueueEnabled = "offlineQueueEnabled";
+constexpr auto queueSnapshotIntervalSec = "queueSnapshotIntervalSec";
+constexpr auto maxQueuedRecords = "maxQueuedRecords";
+constexpr auto queueBatchSize = "queueBatchSize";
 }
 
 

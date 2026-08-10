@@ -21,6 +21,7 @@
 #include "jsonconfig.h"  // For config struct and global instance
 #include "idf_http_server.h"
 #include "http_server.h"
+#include "time_sync.h"
 
 #include "wifi_setup.h"
 
@@ -58,6 +59,19 @@ static void on_wifi_connected(const char *event, const void *data, size_t len, v
 
 // Event callback for WiFi got IP
 static void on_wifi_got_ip(const char *event, const void *data, size_t len, void *ctx) {
+    // Queued readings need a real capture time; this is the first moment SNTP can work.
+    time_sync_start();
+
+    // Disable modem sleep. The default WIFI_PS_MIN_MODEM only wakes the radio on DTIM
+    // beacons, which inflated round trips to 30-80 ms on an otherwise clean link
+    // (-52 dBm, no packet loss). Plain HTTP targets tolerate that, but a TLS handshake is
+    // round-trip heavy and Google was closing the connection mid-handshake
+    // (MBEDTLS_ERR_SSL_CONN_EOF) after ~19 s. Re-applied on every got-IP so it survives
+    // reconnects. Costs ~20 mA, irrelevant for a mains-powered bridge.
+    esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (ps_err != ESP_OK)
+        Log.warning("Unable to disable WiFi power save: %s\r\n", esp_err_to_name(ps_err));
+
     wifi_status_t status;
     if (wifi_cfg_get_status(&status) == ESP_OK) {
         Log.notice("WiFi got IP: %s\r\n", status.ip);
@@ -213,7 +227,9 @@ void initWiFi() {
             .auth_username = NULL,
             .auth_password = NULL,
         },
-        .ble = {
+        // Renamed upstream from `ble` to `prov_ble`. esp_wifi_config is pinned to a moving
+        // `main` in idf_component.yml, so this field can drift again on a component update.
+        .prov_ble = {
             .device_name = "TiltBridge-{id}",
         },
     };
@@ -246,14 +262,55 @@ void initWiFi() {
 
 // Check WiFi connectivity and trigger reconnect if needed.
 // Called from the main loop to ensure the manager's auto-reconnect is engaged.
+//
+// Throttled: loop() runs roughly every 10 ms, and the unthrottled version called
+// wifi_cfg_connect() on every one of those iterations whenever the manager's flag read
+// false. If that flag is ever stale-false while the link is fine, that is thousands of
+// spurious connect calls per minute against the WiFi manager.
 void reconnectWiFi() {
-    if (!wifi_cfg_is_connected()) {
-        wifi_cfg_connect(NULL);
+    static uint32_t lastAttemptMs = 0;
+
+    if (wifi_cfg_is_connected()) {
+        lastAttemptMs = 0;
+        return;
     }
+
+    const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    if (lastAttemptMs != 0 && (now - lastAttemptMs) < 10000)
+        return;
+
+    lastAttemptMs = now;
+    wifi_cfg_connect(NULL);
 }
 
 bool is_wifi_connected() {
     return wifi_cfg_is_connected();
+}
+
+static uint32_t s_wifi_flag_disagreements = 0;
+
+uint32_t wifi_flag_disagreements() {
+    return s_wifi_flag_disagreements;
+}
+
+bool network_is_usable() {
+    if (wifi_cfg_is_connected())
+        return true;
+
+    // The manager says we are down. Before accepting that - and disabling every
+    // outbound target as a result - check the interface itself.
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif == nullptr || !esp_netif_is_netif_up(netif))
+        return false;
+
+    esp_netif_ip_info_t ip = {};
+    if (esp_netif_get_ip_info(netif, &ip) != ESP_OK || ip.ip.addr == 0)
+        return false;
+
+    // Interface is up and holds a lease while the manager reports disconnected.
+    // Let sends proceed; http_request() fails safely if the link really is dead.
+    s_wifi_flag_disagreements++;
+    return true;
 }
 
 bool get_local_ip(char* ip_str, size_t len) {

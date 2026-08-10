@@ -26,3 +26,25 @@ CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
 CONFIG_WIFI_CFG_ENABLE_WEBUI=y
 CONFIG_WIFI_CFG_WEBUI_CUSTOM_PATH="/littlefs/wifiui"
 CONFIG_WIFI_CFG_ENABLE_CUSTOM_BLE=y
+
+# Keep the mbedTLS input buffer at the 16384 default. Google's certificate chain does not
+# fit in 8192 - shrinking it produced MBEDTLS_ERR_SSL_BAD_INPUT_DATA at handshake. The
+# earlier allocation failures here were caused by the Sheets v2 path holding extra buffers
+# during the handshake, which is fixed in gsheets_v2.cpp instead.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+
+# Disable IPv6. The device only ever gets an IPv4 lease (LWIP_IPV6_AUTOCONFIG is off), but
+# with IPv6 compiled in, getaddrinfo returns AAAA records for dual-stack hosts and esp-tls
+# stalls on an unroutable v6 address until the request timeout before falling back to IPv4.
+# script.google.com publishes AAAA and was timing out at 30 s every attempt;
+# www.fermentrack.net is IPv4-only and was unaffected, which is what isolated this.
+CONFIG_LWIP_IPV6=n
+
+# Allocate mbedTLS buffers on demand and release certificate memory as soon as the chain is
+# parsed. script.googleusercontent.com - the host Apps Script redirects to - serves a
+# 12,695-byte certificate chain (script.google.com serves 6,683), and parsing it with static
+# 16 KB buffers exhausted contiguous heap on the classic ESP32. Hosts with small chains were
+# unaffected, which is why this only ever broke Google Sheets.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y

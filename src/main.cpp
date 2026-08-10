@@ -22,7 +22,11 @@
 #include "wifi_setup.h"
 #include "mdns_setup.h"
 #include "sendData.h"
+#include "sender_health.h"
 #include "jsonconfig.h"
+#include "device_config.h"
+#include "queue/reading_queue.h"
+#include "time_sync.h"
 #include "bridge_lcd.h"
 #include "serialhandler.h"
 #include "main.h"
@@ -83,6 +87,15 @@ void setup() {
         Log.error("Unable to initialize filesystem.\r\n");
     }
     config.load();
+    device_config.load();   // per-device Tilt settings; absent file falls back to colour config
+
+    // Needs config.maxQueuedRecords, so it must follow config.load(). A failure here
+    // disables queueing in RAM only - the rest of the firmware runs normally on a broken
+    // filesystem, and the user's saved setting is left untouched.
+    if (!reading_queue.init()) {
+        Log.error("Offline queue unavailable; disabling it for this session.\r\n");
+        config.offlineQueueEnabled = false;
+    }
 
     Log.verbose("Initializing LCD.\r\n");
     lcd.init();
@@ -97,6 +110,10 @@ void setup() {
     }
     ESP_ERROR_CHECK(nvs_ret);
 
+    // Read (and consume) any recovery record left behind by a sender-health restart.
+    // Must run after nvs_flash_init() for the power-loss-durable copy to be readable.
+    sender_health.loadRecoveryRecord();
+
     // Bring NimBLE up before wifi_cfg. wifi_cfg's BLE provisioning backend
     // checks esp_bt_controller_get_status() at init time; if the stack is
     // already running it registers as service-only and leaves the host task
@@ -106,14 +123,20 @@ void setup() {
     NimBLEDevice::init("");
 
     Log.info("Initializing WiFi.\r\n");
+    time_sync_init();   // configured before WiFi; started from the got-IP event
     initWiFi();
 
     Log.info("Initializing scanner.\r\n");
     tilt_scanner.init();                        // Initialize the BLE scanner (NimBLEDevice::init is idempotent)
     tilt_scanner.wait_until_scan_complete();    // Wait until the initial scan completes
 
+    sender_health.init();   // Initialize sender diagnostics before anything can send
     data_sender.init();     // Initialize the data sender
     initButtons();          // Initialize buttons
+
+    // Independent watchdog over the outbound sender. Started last so everything it
+    // observes already exists, and deliberately not on loopTask - the task it watches.
+    sender_health.startMonitorTask();
 
     // Start independent timers using FreeRTOS software timers
     // ARDUINO_LOG_LOG_LEVEL_INFO is 4
@@ -183,6 +206,12 @@ void loop() {
         Log.verbose("Re-initializing MQTT.\r\n");
         http_server.mqtt_init_rqd = false;
         data_sender.init_mqtt();
+    }
+
+    if (http_server.queue_timer_restart_rqd) {
+        Log.verbose("Re-arming queue snapshot timer.\r\n");
+        http_server.queue_timer_restart_rqd = false;
+        data_sender.startTimer(data_sender.queueSnapshotTimer, config.queueSnapshotIntervalSec);
     }
 
     if (http_server.lcd_reinit_rqd) {

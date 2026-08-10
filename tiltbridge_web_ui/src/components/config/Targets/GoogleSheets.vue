@@ -76,6 +76,14 @@
               <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.pink')}) }}</template>
             </TextField>
 
+            <!-- v2 protocol opt-in (CapturedAtUtc / TimestampValid payload) -->
+            <fieldset class="space-y-5 mt-2">
+              <CheckboxField v-model="v2Enabled">
+                <template #FieldName>{{ $t('cloud_config.google_sheets.v2_enabled') }}</template>
+                <template #FieldDescription>{{ $t('cloud_config.google_sheets.v2_enabled_desc') }}</template>
+              </CheckboxField>
+            </fieldset>
+
             <FormErrorMsg :form-error-message="form_error_message" v-if="form_error_message.length > 0" />
 
           </div>
@@ -103,6 +111,7 @@ import SendTargetErrorMsg from "@/components/generic/SendTargetErrorMsg.vue";
 import { useConfigStore } from "@/stores/ConfigStore";
 import { useLoading } from 'vue-loading-overlay'
 import TextField from "@/components/config/form_elements/TextField.vue";
+import CheckboxField from "@/components/config/form_elements/CheckboxField.vue";
 import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue";
 import { ref } from "vue";
 import { i18n } from "@/main.js";
@@ -128,6 +137,7 @@ const orangeName = ref(configStore.scriptsOrangeSheetName);
 const blueName = ref(configStore.scriptsBlueSheetName);
 const yellowName = ref(configStore.scriptsYellowSheetName);
 const pinkName = ref(configStore.scriptsPinkSheetName);
+const v2Enabled = ref(configStore.gsheetsV2Enabled);
 
 function updateCachedSettings() {
   gs_url.value = configStore.scriptsURL;
@@ -140,6 +150,7 @@ function updateCachedSettings() {
   blueName.value = configStore.scriptsBlueSheetName;
   yellowName.value = configStore.scriptsYellowSheetName;
   pinkName.value = configStore.scriptsPinkSheetName;
+  v2Enabled.value = configStore.gsheetsV2Enabled;
 }
 
 
@@ -160,7 +171,8 @@ async function submitForm() {
       orangeName.value,
       blueName.value,
       yellowName.value,
-      pinkName.value
+      pinkName.value,
+      v2Enabled.value
   ).then(() => {
     updateCachedSettings();
     loader.hide();

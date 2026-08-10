@@ -47,7 +47,19 @@ enum SendError : uint8_t {
 struct SendTargetStatus {
     SendError lastError = SEND_OK;      // Most recent error code
     uint32_t lastAttemptTime = 0;       // uptime seconds when last attempted
+    // Per-target, because a shared counter is reset by any healthy target and so hides a
+    // target that is failing every single cycle. Also drives the retry backoff below.
+    uint16_t consecutiveFailures = 0;
 };
+
+// After this many consecutive failures a target's retry interval starts doubling, so a dead
+// endpoint stops claiming the sender on its normal schedule.
+#define SEND_BACKOFF_AFTER_FAILURES 5
+#define SEND_BACKOFF_MAX_SECONDS (30 * 60)
+
+// Stable machine-readable names for each target, in SendTargetID order. Consumed by both
+// the /api/errors/ and /api/sender/ endpoints, so the two always agree.
+extern const char* const sendTargetNames[TARGET_COUNT];
 
 #define GSCRIPTS_DELAY (10 * 60)       // 10 minute delay between pushes to Google Sheets directly
 #define BREWERS_FRIEND_DELAY (15 * 60) // 15 minute delay between pushes to Brewer's Friend
@@ -56,6 +68,13 @@ struct SendTargetStatus {
 #define USER_TARGET_DELAY (10 * 60)    // 10 minute delay between pushes to user specified send target
 
 #define FERMENTRACK_DELAY (5 * 60)    // 5 minute delay between pushes to Fermentrack
+
+// Per-target HTTP time budgets, handed to SenderLock so the health monitor knows how long a
+// given target is legitimately allowed to hold the sender. These must track the timeoutMs
+// actually used by each sender's HttpRequestOptions.
+#define HTTP_TIMEOUT_DEFAULT_MS 6000    // HttpRequestOptions default (send_json_str.h)
+#define HTTP_TIMEOUT_GSHEETS_MS 10000   // Google Scripts can be slow
+#define HTTP_TIMEOUT_FERMENTRACK_MS (3 * HTTP_TIMEOUT_DEFAULT_MS)  // register + status + messages
 
 #define BREWFATHER_MIN_KEY_LENGTH 5
 #define BREWERS_FRIEND_MIN_KEY_LENGTH 12
@@ -95,10 +114,22 @@ public:
     bool send_to_bf_and_bf();
     bool send_to_influxdb();
 
+    // Enhanced batched Google Sheets protocol, drained from the persistent queue.
+    bool send_to_google_v2();
+
+    // Builds and persists one record per enabled Tilt. Runs regardless of network state.
+    void take_queue_snapshot();
+
     // Error tracking
     SendTargetStatus targetStatus[TARGET_COUNT];
     void setTargetStatus(SendTargetID target, SendError error);
     static SendError httpCodeToSendError(int16_t httpCode);
+
+    /**
+     * @brief Effective retry delay for a target, applying exponential backoff once it has
+     *        failed repeatedly. Returns baseSeconds while the target is healthy.
+     */
+    uint32_t backoffDelay(SendTargetID target, uint32_t baseSeconds) const;
 
     // Send Timers (FreeRTOS software timers)
     TimerHandle_t legacyFermentrackTimer;
@@ -112,6 +143,7 @@ public:
     TimerHandle_t gSheetsTimer;
     TimerHandle_t mqttTimer;
     TimerHandle_t influxdbTimer;
+    TimerHandle_t queueSnapshotTimer;
 
     // Timer management methods
     void createTimers();
@@ -129,9 +161,19 @@ public:
     bool send_gSheets = false;
     bool send_mqtt = false;
     bool send_influxdb = false;
+    bool snapshot_due = false;
+    bool send_backlog_now = false;      // set by /api/queue/actions/
+
+    // Reported through /api/queue/ as uploadStatus
+    enum class QueueUploadState : uint8_t { IDLE, SENDING, RETRYING, DISABLED };
+    QueueUploadState queueUploadState = QueueUploadState::IDLE;
+    uint32_t lastQueueUploadSuccessMs = 0;
 
 private:
-    bool send_lock = false;
+    // The former `bool send_lock` lived here. It has been replaced by the mutex owned by
+    // SenderHealthMonitor (sender_health.h), claimed through the scoped SenderLock guard, so
+    // that no send path can leave the sender permanently locked and so a wedged request is
+    // visible to the health monitor.
 
     // MQTT Stuff
     esp_mqtt_client_handle_t mqtt_client = nullptr;

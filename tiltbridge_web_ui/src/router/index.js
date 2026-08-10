@@ -19,6 +19,11 @@ const routes = [
                 component: () => import('@/components/config/TiltBridge/DeviceConfig.vue'),
                 name: 'TiltBridgeConfig',
             },
+            {
+                path: 'queue/',
+                component: () => import('@/components/config/TiltBridge/QueueConfig.vue'),
+                name: 'QueueConfig',
+            },
 
             // {
             //     // UserPosts will be rendered inside User's <router-view>
@@ -102,6 +107,8 @@ const routes = [
         component: () => import('@/components/about/About.vue'),
     },
     {
+        // ":color" is really "colour name or canonical device id" - the panel forwards it to
+        // the API as whichever one it looks like, so colour-only bookmarks keep working.
         path: "/calibrate/:color/",
         name: "Calibration",
         component: () => import('@/components/calibration/CalibrationPanel.vue'),

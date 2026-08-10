@@ -26,6 +26,7 @@ const $loading = useLoading({
 
 const tabs = [
   { name: i18n.global.t('navigation.general_settings'), route_name: 'TiltBridgeConfig' },
+  { name: i18n.global.t('navigation.offline_queue'), route_name: 'QueueConfig' },
 ];
 
 let intervalObject = null;

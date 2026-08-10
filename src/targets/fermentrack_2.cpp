@@ -22,6 +22,7 @@
 
 
 #include "sendData.h"
+#include "sender_health.h"
 #include "version.h"
 #include "jsonconfig.h"
 #include "send_json_str.h"
@@ -103,11 +104,14 @@ bool dataSendHandler::send_to_fermentrack()
 {
     bool result = true;
 
-    if (send_fermentrack && !send_lock)
+    if (send_fermentrack)
     {
+        SenderLock lock(TARGET_FERMENTRACK, HTTP_TIMEOUT_FERMENTRACK_MS);
+        if (!lock)
+            return result;
+
         // Fermentrack
         send_fermentrack = false;
-        send_lock = true;
 //        tilt_scanner.deinit();
 
         // Fermentrack uses a number of functions to process each step of registration/data sending
@@ -143,9 +147,8 @@ bool dataSendHandler::send_to_fermentrack()
         }
 
         // Set up for the next send
-        data_sender.startTimer(data_sender.fermentrackTimer, FERMENTRACK_DELAY); // Set up subsequent send to Fermentrack
+        data_sender.startTimer(data_sender.fermentrackTimer, data_sender.backoffDelay(TARGET_FERMENTRACK, FERMENTRACK_DELAY)); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();
-        send_lock = false;
     }
     return result;
 }
@@ -257,7 +260,6 @@ bool register_with_fermentrack_2() {
 
 bool send_status_to_fermentrack_2() {
     char url[256] = "";
-    char payload[2048];
     char response[1024];
 
     // If we aren't registered, we can't send data
@@ -268,7 +270,13 @@ bool send_status_to_fermentrack_2() {
 
     Log.verbose("Sending status to Fermentrack 2 at %s\r\n", url);
 
-    // Construct the JSON payload
+    // Sized from the document and allocated on the heap rather than a fixed stack buffer.
+    // The per-Tilt JSON grew when device identity and RSSI aggregates were added, and the
+    // previous 2048-byte buffer silently truncated the payload mid-object once several
+    // Tilts were present - the server then rejected it with a JSON parse error. loopTask
+    // only has an 8 KB stack, so a buffer large enough for eight Tilts does not belong there.
+    char *payload = nullptr;
+    size_t payload_size = 0;
     {
         JsonDocument doc;
         // Load the Tilt data from the scanner
@@ -281,13 +289,32 @@ bool send_status_to_fermentrack_2() {
         doc["tilts"] = tilt_doc;
         doc[Fermentrack2SettingsKeys::version] = version();
 
+        payload_size = measureJson(doc) + 1;
+        payload = (char *)malloc(payload_size);
+        if (payload == nullptr) {
+            Log.error("Fermentrack 2: unable to allocate %u bytes for the status payload.\r\n",
+                      (unsigned)payload_size);
+            fermentrackStatusError = fermentrackStatusErrorT::STATUS_ENDPOINT_ERR;
+            return false;
+        }
+
         // Serialize the JSON document
-        serializeJson(doc, payload, sizeof(payload));
+        const size_t written = serializeJson(doc, payload, payload_size);
+        if (written + 1 != payload_size) {
+            // Never expected now that the buffer is measured, but a silent truncation here
+            // is exactly the failure this replaced - fail loudly instead.
+            Log.error("Fermentrack 2: payload truncated (%u of %u bytes); not sending.\r\n",
+                      (unsigned)written, (unsigned)(payload_size - 1));
+            free(payload);
+            fermentrackStatusError = fermentrackStatusErrorT::STATUS_ENDPOINT_ERR;
+            return false;
+        }
     }
 
     Log.info("Sending payload to Fermentrack 2: %s\r\n", payload);
 
     sendResult result = http_request(url, httpMethod::HTTP_PUT, payload, response, sizeof(response));
+    free(payload);
 
     // If we failed to send the data, set an error code
     if(result != sendResult::success) {

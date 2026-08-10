@@ -7,9 +7,15 @@
 
 #include <NimBLEAdvertisedDevice.h>
 #include <ArduinoJson.h>
+#include <atomic>
 #include <list>
 
 #include "tiltHydrometer.h"
+
+// Milliseconds-since-boot of the most recent Tilt advertisement, published by the BLE
+// callback task. The sender health monitor reads this to answer "is BLE still alive?"
+// without iterating m_tilt_devices, which the BLE task mutates concurrently.
+extern std::atomic<uint32_t> g_last_tilt_advert_ms;
 
 
 #define BLE_SCAN_TIME 3 * 1000  // Milliseconds to scan
@@ -39,6 +45,17 @@ public:
     tiltHydrometer* get_or_create_tilt(const NimBLEAddress devAddress, uint8_t color);
 
     void drop_expired_tilts();
+
+    /**
+     * @brief Stop scanning and block new scans until resumeScanning().
+     *
+     * BLE and WiFi share one 2.4 GHz radio. Deliberately a pause rather than the
+     * deinit()/init() the upstream code left commented out around its sends: tearing the
+     * NimBLE stack down and back up risks the controller-ownership problem described in
+     * main.cpp, while this only halts the scan.
+     */
+    void pauseScanning();
+    void resumeScanning();
 
 private:
     ScanCallbacks *callbacks;

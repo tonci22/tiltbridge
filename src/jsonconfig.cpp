@@ -262,6 +262,13 @@ JsonDocument Config::to_json() {
     obj["smoothFactor"] = smoothFactor;
     obj["applyCalibration"] = applyCalibration;
     obj["tempCorrect"] = tempCorrect;
+    obj["senderRecoveryEnabled"] = senderRecoveryEnabled;
+    obj["senderStaleRebootSec"] = senderStaleRebootSec;
+
+    obj[QueueSettings::offlineQueueEnabled] = offlineQueueEnabled;
+    obj[QueueSettings::queueSnapshotIntervalSec] = queueSnapshotIntervalSec;
+    obj[QueueSettings::maxQueuedRecords] = maxQueuedRecords;
+    obj[QueueSettings::queueBatchSize] = queueBatchSize;
 
     for(int x=0;x<TILT_COLORS;x++) {
         obj[tilt_color_names[x]]["x0"] = tilt_calibration[x].x0;
@@ -292,6 +299,7 @@ JsonDocument Config::to_json() {
     obj[TaplistioSettings::taplistioPushEvery] = taplistioPushEvery;
     obj[GoogleSheetsSettings::scriptsURL] = scriptsURL;
     obj[GoogleSheetsSettings::scriptsEmail] = scriptsEmail;
+    obj[GoogleSheetsSettings::gsheetsV2Enabled] = gsheetsV2Enabled;
     obj[BrewersFriendSettings::brewersFriendKey] = brewersFriendKey;
     obj[BrewfatherSettings::brewfatherKey] = brewfatherKey;
     obj[UserTargetSettings::userTargetURL] = userTargetURL;
@@ -368,6 +376,52 @@ void Config::load_from_json(JsonDocument obj) {
 
     if (!obj["tempCorrect"].isNull()) {
         tempCorrect = obj["tempCorrect"];
+    }
+
+    if (!obj["senderRecoveryEnabled"].isNull()) {
+        senderRecoveryEnabled = obj["senderRecoveryEnabled"];
+    }
+
+    if (!obj["senderStaleRebootSec"].isNull()) {
+        senderStaleRebootSec = int(obj["senderStaleRebootSec"]);
+
+        // Below 60s risks tripping on a legitimately slow pass (Fermentrack's three
+        // sequential requests plus Google's 10s budget); above 600s stops being a recovery.
+        if (senderStaleRebootSec < 60 || senderStaleRebootSec > 600) {
+            senderStaleRebootSec = 75;
+        }
+    }
+
+    // Offline queue. Every bound is clamped here so a hand-edited config cannot brick the
+    // device or wear out flash.
+    if (!obj[QueueSettings::offlineQueueEnabled].isNull()) {
+        offlineQueueEnabled = obj[QueueSettings::offlineQueueEnabled];
+    }
+
+    if (!obj[QueueSettings::queueSnapshotIntervalSec].isNull()) {
+        queueSnapshotIntervalSec = int(obj[QueueSettings::queueSnapshotIntervalSec]);
+
+        // Floor of 60s protects flash; ceiling of 6h keeps the queue meaningful.
+        if (queueSnapshotIntervalSec < 60 || queueSnapshotIntervalSec > 21600) {
+            queueSnapshotIntervalSec = 1800;
+        }
+    }
+
+    if (!obj[QueueSettings::maxQueuedRecords].isNull()) {
+        maxQueuedRecords = int(obj[QueueSettings::maxQueuedRecords]);
+
+        // 3000 records * 128 B = 384 KB, which still leaves room on the LittleFS partition.
+        if (maxQueuedRecords < 100 || maxQueuedRecords > 3000) {
+            maxQueuedRecords = 1500;
+        }
+    }
+
+    if (!obj[QueueSettings::queueBatchSize].isNull()) {
+        queueBatchSize = int(obj[QueueSettings::queueBatchSize]);
+
+        if (queueBatchSize < 1 || queueBatchSize > 50) {
+            queueBatchSize = 20;
+        }
     }
 
     // Loop through everything that is a "tilt-specific" setting
@@ -485,6 +539,10 @@ void Config::load_from_json(JsonDocument obj) {
     if (!obj[GoogleSheetsSettings::scriptsEmail].isNull()) {
         const char *se = obj[GoogleSheetsSettings::scriptsEmail];
         strlcpy(scriptsEmail, se, 256);
+    }
+
+    if (!obj[GoogleSheetsSettings::gsheetsV2Enabled].isNull()) {
+        gsheetsV2Enabled = obj[GoogleSheetsSettings::gsheetsV2Enabled];
     }
 
     // Brewers Friend

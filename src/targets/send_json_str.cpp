@@ -14,6 +14,7 @@
 #include "send_json_str.h"
 #include "url_utils.h"
 #include "version.h"
+#include "../sender_health.h"
 
 // Structure to hold response data during HTTP event handling
 struct HttpResponseContext {
@@ -212,7 +213,11 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
     esp_http_client_config_t config = {};
     config.url = resolvedUrl;
     config.timeout_ms = options.timeoutMs;
-    config.disable_auto_redirect = false;
+    // Redirects are followed manually below. esp_http_client's built-in handling re-issues
+    // the original method, but RFC 9110 says a 301/302/303 answering a POST is followed
+    // with GET - which is exactly what Google Apps Script requires: /exec answers a POST
+    // with a 302 to script.googleusercontent.com, and that echo endpoint rejects POST (405).
+    config.disable_auto_redirect = true;
     config.event_handler = http_event_handler;
     config.user_data = &responseCtx;
 
@@ -257,8 +262,46 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
         esp_http_client_set_post_field(client, payload, payload_len);
     }
 
-    // Perform the request
+    // Perform the request. Bracketing it lets the health monitor see how long the
+    // in-flight request has been running, which is what distinguishes "slow endpoint"
+    // from "wedged sender".
+    sender_health.noteRequestStart();
     esp_err_t err = esp_http_client_perform(client);
+
+    // Follow redirects by hand so the method can be downgraded correctly.
+    // 301/302/303 -> GET without a body; 307/308 must preserve the method and body.
+    constexpr int MAX_REDIRECTS = 3;
+    for (int hop = 0; hop < MAX_REDIRECTS; hop++) {
+        if (err != ESP_OK && err != ESP_ERR_NOT_SUPPORTED)
+            break;
+
+        const int status = esp_http_client_get_status_code(client);
+        const bool downgrade = (status == 301 || status == 302 || status == 303);
+        const bool preserve  = (status == 307 || status == 308);
+        if (!downgrade && !preserve)
+            break;
+
+        if (esp_http_client_set_redirection(client) != ESP_OK) {
+            Log.warning("http_request: %d redirect with no usable Location header.\r\n", status);
+            break;
+        }
+
+        if (downgrade) {
+            esp_http_client_set_method(client, HTTP_METHOD_GET);
+            esp_http_client_set_post_field(client, nullptr, 0);
+        }
+
+        // The 302's own (empty) body has already been captured; discard it so the final
+        // response is not concatenated onto it.
+        responseCtx.bytes_received = 0;
+        httpResponseBuf[0] = '\0';
+
+        Log.verbose("http_request: following %d redirect as %s (hop %d).\r\n",
+                    status, downgrade ? "GET" : "same method", hop + 1);
+        err = esp_http_client_perform(client);
+    }
+
+    sender_health.noteRequestEnd();
 
     // esp_http_client returns ESP_ERR_NOT_SUPPORTED when it receives a 401
     // and can't auto-handle authentication. The HTTP response is still valid

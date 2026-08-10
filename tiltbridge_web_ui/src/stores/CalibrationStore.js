@@ -17,9 +17,33 @@ export const useCalibrationStore = defineStore("CalibrationStore", () => {
     const loaded = ref(false);
     const pending_sync = ref(false);
 
-    async function loadCalibrationPoints(color) {
+    /**
+     * Mirrors calibrationFilename() in src/http_calibration.cpp:
+     *   colour-wide      /conf/<colorIndex>-cal.json
+     *   device-specific  /conf/dev-88C255AC2681-cal.json
+     */
+    function calibrationPointsPath(color, deviceId) {
+        if (deviceId) {
+            const compact = String(deviceId).replace(/:/g, '').toUpperCase();
+            return `/conf/dev-${compact}-cal.json`;
+        }
+        return `/conf/${color}-cal.json`;
+    }
+
+    /**
+     * Every mutating endpoint takes an optional deviceId; when it is absent the firmware
+     * behaves exactly as it did before and operates on the shared colour configuration.
+     */
+    function withDeviceId(payload, deviceId) {
+        if (deviceId) {
+            return { ...payload, deviceId: deviceId };
+        }
+        return payload;
+    }
+
+    async function loadCalibrationPoints(color, deviceId = null) {
         try {
-            const response = await fetch(`/conf/${color}-cal.json`);
+            const response = await fetch(calibrationPointsPath(color, deviceId));
             if (response.ok) {
                 const data = await response.json();
                 calibrationPoints.value = data || [];
@@ -37,16 +61,16 @@ export const useCalibrationStore = defineStore("CalibrationStore", () => {
         }
     }
 
-    async function addCalibrationPoint(color, rawGravity, actualGravity) {
+    async function addCalibrationPoint(color, rawGravity, actualGravity, deviceId = null) {
         try {
             const remote_api = mande("/api/calibration/datapoint/", genCSRFOptions());
-            const response = await remote_api.post({
+            const response = await remote_api.post(withDeviceId({
                 color: color,
                 rawGravity: rawGravity,
                 actualGravity: actualGravity
-            });
+            }, deviceId));
             if (response) {
-                await loadCalibrationPoints(color);
+                await loadCalibrationPoints(color, deviceId);
                 calibrationError.value = false;
                 return true;
             } else {
@@ -59,15 +83,15 @@ export const useCalibrationStore = defineStore("CalibrationStore", () => {
         }
     }
 
-    async function deleteCalibrationPoint(color, rawGravity) {
+    async function deleteCalibrationPoint(color, rawGravity, deviceId = null) {
         try {
             const remote_api = mande("/api/calibration/datapoint/delete/", genCSRFOptions());
-            const response = await remote_api.post({
+            const response = await remote_api.post(withDeviceId({
                 color: color,
                 rawGravity: rawGravity
-            });
+            }, deviceId));
             if (response) {
-                await loadCalibrationPoints(color);
+                await loadCalibrationPoints(color, deviceId);
                 calibrationError.value = false;
                 return true;
             } else {
@@ -135,16 +159,16 @@ export const useCalibrationStore = defineStore("CalibrationStore", () => {
         }
     }
 
-    async function saveCalibrationCoefficients(color, coefficients) {
+    async function saveCalibrationCoefficients(color, coefficients, deviceId = null) {
         try {
             const remote_api = mande("/api/calibration/coefficients/", genCSRFOptions());
-            const response = await remote_api.put({
+            const response = await remote_api.put(withDeviceId({
                 color: color,
                 x0: coefficients.x0,
                 x1: coefficients.x1,
                 x2: coefficients.x2,
                 x3: coefficients.x3
-            });
+            }, deviceId));
             if (response) {
                 calibrationCoefficients.value = coefficients;
                 calibrationError.value = false;
@@ -159,7 +183,32 @@ export const useCalibrationStore = defineStore("CalibrationStore", () => {
         }
     }
 
-    async function getCalibrationCoefficients(color) {
+    async function getCalibrationCoefficients(color, deviceId = null) {
+        // Per-device coefficients live in the device table, not in the colour settings.
+        if (deviceId) {
+            try {
+                const devices_api = mande("/api/devices/", genCSRFOptions());
+                const devices = await devices_api.get();
+                const needle = String(deviceId).toLowerCase();
+                const record = (devices && devices.devices ? devices.devices : []).find(
+                    (d) => (d.deviceId || d.mac || "").toLowerCase() === needle
+                );
+                if (record && record.hasCalibration && record.cal) {
+                    calibrationCoefficients.value = {
+                        x0: record.cal.x0 ?? 0,
+                        x1: record.cal.x1 ?? 1,
+                        x2: record.cal.x2 ?? 0,
+                        x3: record.cal.x3 ?? 0
+                    };
+                    return calibrationCoefficients.value;
+                }
+                // No device-specific calibration yet - fall through to the colour defaults,
+                // which is exactly what the firmware resolves to as well.
+            } catch (error) {
+                // Fall through to the colour lookup below.
+            }
+        }
+
         try {
             const remote_api = mande("/api/settings/json/", genCSRFOptions());
             const response = await remote_api.get();

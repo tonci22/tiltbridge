@@ -5,6 +5,7 @@
         <h1 class="text-3xl font-bold text-gray-900">
           {{ $t('calibration.header', { color: colorName }) }}
         </h1>
+        <p class="mt-1 text-sm font-mono text-gray-500" v-if="deviceId">{{ deviceId }}</p>
       </div>
     </header>
     <main>
@@ -179,7 +180,8 @@
     <!-- Add Calibration Point Modal -->
     <AddCalibrationPointModal
       :is-visible="showAddPointModal"
-      :color-number="colorNumber"
+      :color-number="colorResolved ? colorNumber : -1"
+      :device-id="deviceId || ''"
       :prepopulated-raw-gravity="currentRawGravity"
       @close="showAddPointModal = false"
       @saved="onPointSaved"
@@ -198,10 +200,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
-import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useTiltStore } from '@/stores/TiltStore';
 import { useCalibrationStore } from '@/stores/CalibrationStore';
+import { useDeviceConfigStore } from '@/stores/DeviceConfigStore';
+import { isValidMac } from '@/mixins/TiltDevice';
 import { Line } from 'vue-chartjs';
 import AddCalibrationPointModal from './AddCalibrationPointModal.vue';
 import ManualCoefficientModal from './ManualCoefficientModal.vue';
@@ -227,10 +230,10 @@ ChartJS.register(
 );
 
 const props = defineProps(['color']);
-const route = useRoute();
 const { t: $t } = useI18n();
 const tiltStore = useTiltStore();
 const calibrationStore = useCalibrationStore();
+const deviceConfigStore = useDeviceConfigStore();
 
 const showAddPointModal = ref(false);
 const showManualCoefficientModal = ref(false);
@@ -244,13 +247,49 @@ const originalCoeffs = ref({
   x3: 0
 });
 
+// The route param is either a colour name ("red") or a canonical device id
+// ("88:C2:55:AC:26:81"). Both are forwarded to the API - the firmware treats a supplied
+// deviceId as "use this physical Tilt's own calibration" and falls back to the colour
+// otherwise, so old colour bookmarks keep working unchanged.
+const routeTarget = computed(() => {
+  if (!props.color) return "";
+  // Belt and braces: the colons in a device id survive routing unencoded in practice, but a
+  // percent-encoded param would otherwise fail the MAC test and be treated as a colour.
+  try {
+    return decodeURIComponent(props.color);
+  } catch (error) {
+    return props.color;
+  }
+});
+const isDeviceRoute = computed(() => isValidMac(routeTarget.value));
+const deviceId = computed(() => (isDeviceRoute.value ? routeTarget.value.toUpperCase() : null));
+
+// Filled in from /api/devices/ when a device is configured but not currently in range.
+const fallbackColorIndex = ref(null);
+
+const currentTilt = computed(() => tiltStore.findTilt(routeTarget.value));
+
 const colorName = computed(() => {
-  return $t(`sitewide.tilt_colors.${props.color.toLowerCase()}`);
+  if (isDeviceRoute.value) {
+    if (currentTilt.value && currentTilt.value.friendlyName) {
+      return currentTilt.value.friendlyName;
+    }
+    return deviceId.value;
+  }
+  return $t(`sitewide.tilt_colors.${routeTarget.value.toLowerCase()}`);
 });
 
 const colorNumber = computed(() => {
-  return tiltStore.getColorNumber(props.color);
+  if (!isDeviceRoute.value) {
+    return tiltStore.getColorNumber(routeTarget.value);
+  }
+  if (currentTilt.value && currentTilt.value.colorIndex >= 0) {
+    return currentTilt.value.colorIndex;
+  }
+  return fallbackColorIndex.value;
 });
+
+const colorResolved = computed(() => Number.isInteger(colorNumber.value) && colorNumber.value >= 0);
 
 const maxDegree = computed(() => {
   const points = calibrationStore.calibrationPoints.length;
@@ -266,10 +305,6 @@ const availableDegrees = computed(() => {
     degrees.push(i);
   }
   return degrees;
-});
-
-const currentTilt = computed(() => {
-  return tiltStore.tilts.find(tilt => tilt.color.toLowerCase() === props.color.toLowerCase());
 });
 
 const currentRawGravity = computed(() => {
@@ -436,7 +471,7 @@ const combinedChartData = computed(() => {
 });
 
 async function deletePoint(rawGravity) {
-  await calibrationStore.deleteCalibrationPoint(colorNumber.value, rawGravity);
+  await calibrationStore.deleteCalibrationPoint(colorNumber.value, rawGravity, deviceId.value);
   
   // If we no longer have enough points to support the selected degree, lower it to the largest supported degree
   const newMaxDegree = Math.max(0, calibrationStore.calibrationPoints.length - 1);
@@ -484,13 +519,13 @@ function getModalCoefficients() {
 
 async function saveManualCoefficients(coefficients) {
   // Save the manually entered coefficients to the device
-  await calibrationStore.saveCalibrationCoefficients(colorNumber.value, coefficients);
+  await calibrationStore.saveCalibrationCoefficients(colorNumber.value, coefficients, deviceId.value);
   
   // Clear any existing calibration points since we're using manual coefficients
   calibrationStore.calibrationPoints = [];
   
   // Refresh the coefficients from the device to update the "original" coefficients
-  await calibrationStore.getCalibrationCoefficients(colorNumber.value).then((coeffs) => {
+  await calibrationStore.getCalibrationCoefficients(colorNumber.value, deviceId.value).then((coeffs) => {
     originalCoeffs.value = { ...coeffs };
   });
   
@@ -554,8 +589,8 @@ async function saveCalibration() {
   if (calibrationStore.calibrationPoints.length === 0 && hasCurrentCalibration.value) {
     // Clear calibration by setting coefficients to default (no calibration)
     const defaultCoeffs = { x0: 0, x1: 1, x2: 0, x3: 0 };
-    await calibrationStore.saveCalibrationCoefficients(colorNumber.value, defaultCoeffs).then(() => {
-      calibrationStore.getCalibrationCoefficients(colorNumber.value).then((coeffs) => {
+    await calibrationStore.saveCalibrationCoefficients(colorNumber.value, defaultCoeffs, deviceId.value).then(() => {
+      calibrationStore.getCalibrationCoefficients(colorNumber.value, deviceId.value).then((coeffs) => {
         originalCoeffs.value = { ...coeffs };
       });
       tiltStore.getTilts();
@@ -567,10 +602,10 @@ async function saveCalibration() {
         selectedDegree.value
     );
     if (coefficients) {
-      await calibrationStore.saveCalibrationCoefficients(colorNumber.value, coefficients).then(() => {
+      await calibrationStore.saveCalibrationCoefficients(colorNumber.value, coefficients, deviceId.value).then(() => {
         // Once we've saved the coefficients, update the "original" coefficients to match what is on the device
         // (hopefully, what we just saved)
-        calibrationStore.getCalibrationCoefficients(colorNumber.value).then((coeffs) => {
+        calibrationStore.getCalibrationCoefficients(colorNumber.value, deviceId.value).then((coeffs) => {
           originalCoeffs.value = { ...coeffs }; // Store original coefficients for comparison
         });
         tiltStore.getTilts(); // Refresh tilts to apply new calibration
@@ -592,8 +627,21 @@ watch(() => calibrationStore.calibrationPoints.length, (newLength) => {
 });
 
 onMounted(async () => {
-  await calibrationStore.loadCalibrationPoints(colorNumber.value);
-  await calibrationStore.getCalibrationCoefficients(colorNumber.value).then((coeffs) => {
+  // Tilts first: on a device-id route the colour index (which the API still requires) comes
+  // from the detected Tilt, so it has to be known before anything else is requested.
+  await tiltStore.getTilts();
+
+  if (isDeviceRoute.value && !colorResolved.value) {
+    // Configured but not currently advertising - fall back to the stored device record.
+    await deviceConfigStore.getDevices();
+    const record = deviceConfigStore.findDevice(deviceId.value);
+    if (record && Number.isInteger(record.colorIndex)) {
+      fallbackColorIndex.value = record.colorIndex;
+    }
+  }
+
+  await calibrationStore.loadCalibrationPoints(colorNumber.value, deviceId.value);
+  await calibrationStore.getCalibrationCoefficients(colorNumber.value, deviceId.value).then((coeffs) => {
     originalCoeffs.value = { ...coeffs }; // Store original coefficients for comparison
     
     // Impute the degree from the loaded coefficients and set it if we have enough points
@@ -610,8 +658,7 @@ onMounted(async () => {
       }
     }
   });
-  await tiltStore.getTilts();
-  
+
   // Set up periodic refresh for Tilt values
   intervalObject = window.setInterval(() => {
     tiltStore.getTilts();

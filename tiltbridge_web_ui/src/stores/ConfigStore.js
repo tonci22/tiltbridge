@@ -21,6 +21,13 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     const applyCalibration = ref(false);
     const tempCorrect = ref(false);
 
+    // Outbound sender watchdog (see docs/phase1/03-sender-recovery.md)
+    const senderRecoveryEnabled = ref(true);
+    const senderStaleRebootSec = ref(75);
+
+    // Google Sheets v2 protocol opt-in
+    const gsheetsV2Enabled = ref(false);
+
     const brewstatusURL = ref("");
     const brewstatusPushEvery = ref(0);
     const taplistioURL = ref("");
@@ -110,6 +117,9 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             gravityUnit.value = response.gravityUnit || "SG";
             applyCalibration.value = response.applyCalibration;
             tempCorrect.value = response.tempCorrect;
+            senderRecoveryEnabled.value = response.senderRecoveryEnabled ?? true;
+            senderStaleRebootSec.value = response.senderStaleRebootSec ?? 75;
+            gsheetsV2Enabled.value = response.gsheetsV2Enabled ?? false;
             fermentrackUrl.value = response.legacyFermentrackURL;
             fermentrackPushFrequency.value = response.legacyFermentrackPushEvery;
             // Fermentrack 2
@@ -204,6 +214,9 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         gravityUnit.value = "SG";
         applyCalibration.value = false;
         tempCorrect.value = false;
+        senderRecoveryEnabled.value = true;
+        senderStaleRebootSec.value = 75;
+        gsheetsV2Enabled.value = false;
         brewstatusURL.value = "";
         brewstatusPushEvery.value = 0;
         taplistioURL.value = "";
@@ -306,6 +319,31 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     }
 
 
+    /**
+     * Sender watchdog settings. Same controller endpoint as the general settings, but written
+     * from the Offline Queue page because that is where the reliability knobs live together.
+     */
+    async function updateSenderRecoveryConfig(recoveryEnabled, staleRebootSec) {
+        try {
+            const remote_api = mande("/api/settings/controller/", genCSRFOptions());
+            const response = await remote_api.put({
+                senderRecoveryEnabled: recoveryEnabled,
+                senderStaleRebootSec: staleRebootSec,
+            });
+            if (response && response.status === "ok") {
+                senderRecoveryEnabled.value = recoveryEnabled;
+                senderStaleRebootSec.value = staleRebootSec;
+                configUpdateError.value = false;
+                return true;
+            }
+            configUpdateError.value = true;
+            return false;
+        } catch (error) {
+            configUpdateError.value = true;
+            return false;
+        }
+    }
+
     async function updateLegacyFermentrackConfig(ft_url, pushFrequency) {
         await updateTargetConfig({
             legacyFermentrackURL: ft_url,
@@ -330,10 +368,11 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     }
 
 
-    async function updateGoogleSheetsConfig(gs_url, gs_email, red_name, green_name, black_name, purple_name, orange_name, blue_name, yellow_name, pink_name) {
+    async function updateGoogleSheetsConfig(gs_url, gs_email, red_name, green_name, black_name, purple_name, orange_name, blue_name, yellow_name, pink_name, v2Enabled) {
         await updateTargetConfig({
             scriptsURL: gs_url,
             scriptsEmail: gs_email,
+            gsheetsV2Enabled: v2Enabled,
             sheetName_red: red_name,
             sheetName_green: green_name,
             sheetName_black: black_name,
@@ -345,6 +384,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         }, () => {
             scriptsURL.value = gs_url;
             scriptsEmail.value = gs_email;
+            gsheetsV2Enabled.value = v2Enabled;
             scriptsRedSheetName.value = red_name;
             scriptsGreenSheetName.value = green_name;
             scriptsBlackSheetName.value = black_name;
@@ -490,6 +530,9 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         gravityUnit,
         applyCalibration,
         tempCorrect,
+        senderRecoveryEnabled,
+        senderStaleRebootSec,
+        gsheetsV2Enabled,
         brewstatusURL,
         brewstatusPushEvery,
         taplistioURL,
@@ -545,6 +588,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         getConfig,
         clearConfig,
         updateDeviceConfig,
+        updateSenderRecoveryConfig,
         updateLegacyFermentrackConfig,
         updateFermentrackConfig,
         updateGoogleSheetsConfig,

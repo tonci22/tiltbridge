@@ -23,9 +23,8 @@ export const useTiltStore = defineStore("TiltStore", () => {
             gravityUnit.value = response.gravityUnit || "SG";
 
             for (const tiltKey in tiltArray) {
-                const tiltData = tiltArray[tiltKey];
-                // TODO - Fix this if I implement temperature calibration
-                const tilt = new TiltDevice(tiltData.color, tiltData.temp, tiltData.tempUnit, tiltData.calibratedGravity, tiltData.weeks_on_battery, tiltData.sends_battery, tiltData.high_resolution, tiltData.fw_version, tiltData.rssi, tiltData.gsheets_name, tiltData.gsheets_link, 0, tiltData.latestGravity, tiltData.lastReceived);
+                // TiltDevice reads the named fields it needs straight off the API object.
+                const tilt = new TiltDevice(tiltArray[tiltKey]);
                 tilts.value.push(tilt);
             }
 
@@ -43,6 +42,20 @@ export const useTiltStore = defineStore("TiltStore", () => {
         gravityUnit.value = "SG";
         loaded.value = false;
         tiltUpdateError.value = false;
+    }
+
+    /**
+     * Look a Tilt up by whatever identifier we happen to have. Routes and modals carry either
+     * a canonical device id ("88:C2:55:AC:26:81") or a colour name, so both are accepted.
+     */
+    function findTilt(identifier) {
+        if (!identifier) return undefined;
+        const needle = String(identifier).toLowerCase();
+        return tilts.value.find((tilt) => {
+            if (tilt.deviceId && tilt.deviceId.toLowerCase() === needle) return true;
+            if (tilt.mac && tilt.mac.toLowerCase() === needle) return true;
+            return !!tilt.color && tilt.color.toLowerCase() === needle;
+        });
     }
 
     function getColorNumber(colorName) {
@@ -73,6 +86,7 @@ export const useTiltStore = defineStore("TiltStore", () => {
 
         getTilts,
         clearTilts,
+        findTilt,
         getColorNumber,
         getColorName
     };

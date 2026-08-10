@@ -33,6 +33,7 @@ public:
     bool wifi_reset_requested = false;
     bool factoryreset_requested = false;
     bool mqtt_init_rqd = false;
+    bool queue_timer_restart_rqd = false;   // snapshot interval changed - re-arm the one-shot timer
 
 private:
     /**
@@ -54,6 +55,11 @@ private:
      * @brief Register action API endpoints (resetWifi, resetDevice)
      */
     void registerActionHandlers();
+
+    /**
+     * @brief Register per-device (MAC-keyed) Tilt configuration endpoints
+     */
+    void registerDeviceHandlers();
 };
 
 extern httpServer http_server;

@@ -277,6 +277,7 @@ esp_err_t idf_static_register_spa_routes(void) {
     static const char *vue_routes[] = {
         "/config/",
         "/config/tiltbridge/",
+        "/config/queue/",
         "/target/",
         "/target/fermentrack/",
         "/target/legacy_fermentrack/",

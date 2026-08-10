@@ -6,11 +6,49 @@
 #include <sys/stat.h>
 #include "filesystem.h"
 #include "jsonconfig.h"
+#include "device_config.h"
 #include "tilt/tiltHydrometer.h"
 #include "JsonKeys.h"
 
 // Buffer size for JSON file operations
 #define JSON_FILE_BUFFER_SIZE 2048
+
+/**
+ * @brief Build the calibration-points filename for a colour or a specific device.
+ *
+ * Colour-wide:      /littlefs/conf/0-cal.json          (unchanged, pre-existing files)
+ * Device-specific:  /littlefs/conf/dev-88C255AC2681-cal.json
+ *
+ * Colons are stripped so the name stays short and filesystem-safe.
+ */
+static void calibrationFilename(const char* deviceId, uint8_t color, char* out, size_t outSize) {
+    if (deviceId != nullptr && deviceId[0] != '\0') {
+        char compact[13] = {0};
+        size_t j = 0;
+        for (size_t i = 0; deviceId[i] != '\0' && j < sizeof(compact) - 1; i++) {
+            if (deviceId[i] != ':')
+                compact[j++] = (char)toupper((unsigned char)deviceId[i]);
+        }
+        compact[j] = '\0';
+        snprintf(out, outSize, "%s/dev-%s-cal.json", CONFIG_DIR, compact);
+        return;
+    }
+
+    snprintf(out, outSize, "%s/%d-cal.json", CONFIG_DIR, color);
+}
+
+/**
+ * @brief Pull an optional, validated deviceId out of a request body.
+ * @return canonical id written into `out`, or nullptr when absent/invalid.
+ */
+static const char* optionalDeviceId(const JsonDocument& json, char* out, size_t outSize) {
+    const char* raw = json["deviceId"].as<const char*>();
+    if (!isValidDeviceId(raw))
+        return nullptr;
+
+    canonicalizeDeviceId(raw, out, outSize);
+    return out;
+}
 
 /**
  * @brief Read file contents into a dynamically allocated buffer
@@ -130,9 +168,12 @@ bool processCalibrationDataPoint(const JsonDocument& json, bool triggerUpstreamU
     double rawGravity = json["rawGravity"].as<double>();
     double actualGravity = json["actualGravity"].as<double>();
 
-    // Create filename for calibration data
+    // Create filename for calibration data (device-specific when a deviceId was supplied)
+    char deviceIdBuf[DEVICE_ID_LEN];
+    const char* deviceId = optionalDeviceId(json, deviceIdBuf, sizeof(deviceIdBuf));
+
     char filename[64];
-    snprintf(filename, sizeof(filename), "%s/%d-cal.json", CONFIG_DIR, color);
+    calibrationFilename(deviceId, color, filename, sizeof(filename));
 
     // Load existing calibration data or create new document
     JsonDocument calDoc;
@@ -164,8 +205,10 @@ bool processCalibrationDataPoint(const JsonDocument& json, bool triggerUpstreamU
         return false;
     }
 
-    Log.notice("Calibration point saved: color=%d, raw=%.3f, actual=%.3f\r\n",
-               color, rawGravity, actualGravity);
+    Log.notice("Calibration point saved: %s=%s, raw=%.3f, actual=%.3f\r\n",
+               deviceId ? "device" : "color",
+               deviceId ? deviceId : tilt_color_names[color],
+               rawGravity, actualGravity);
 
     return true;
 }
@@ -186,55 +229,80 @@ bool processCalibrationCoefficients(const JsonDocument& json, bool triggerUpstre
         return false;
     }
 
+    char deviceIdBuf[DEVICE_ID_LEN];
+    const char* deviceId = optionalDeviceId(json, deviceIdBuf, sizeof(deviceIdBuf));
+
+    // Point the writes at the device's own coefficients when a deviceId was supplied,
+    // otherwise at the shared colour coefficients exactly as before.
+    TiltCalData* target = nullptr;
+    DeviceConfig* dev = nullptr;
+
+    if (deviceId != nullptr) {
+        dev = device_config.findOrCreate(deviceId, color);
+        if (dev == nullptr) {
+            Log.error("Error: Unable to create device configuration for %s (table full?).\r\n", deviceId);
+            return false;
+        }
+        target = &dev->cal;
+    } else {
+        target = &config.tilt_calibration[color];
+    }
+
     // Update coefficients if provided
     bool updated = false;
 
     if (json["x0"].is<double>()) {
-        config.tilt_calibration[color].x0 = json["x0"].as<double>();
+        target->x0 = json["x0"].as<double>();
         updated = true;
-        Log.notice("Updated x0 for color %d: %.6f\r\n", color, config.tilt_calibration[color].x0);
     }
 
     if (json["x1"].is<double>()) {
-        config.tilt_calibration[color].x1 = json["x1"].as<double>();
+        target->x1 = json["x1"].as<double>();
         updated = true;
-        Log.notice("Updated x1 for color %d: %.6f\r\n", color, config.tilt_calibration[color].x1);
     }
 
     if (json["x2"].is<double>()) {
-        config.tilt_calibration[color].x2 = json["x2"].as<double>();
+        target->x2 = json["x2"].as<double>();
         updated = true;
-        Log.notice("Updated x2 for color %d: %.6f\r\n", color, config.tilt_calibration[color].x2);
     }
 
     if (json["x3"].is<double>()) {
-        config.tilt_calibration[color].x3 = json["x3"].as<double>();
+        target->x3 = json["x3"].as<double>();
         updated = true;
-        Log.notice("Updated x3 for color %d: %.6f\r\n", color, config.tilt_calibration[color].x3);
     }
 
     if (updated) {
-        // Save configuration
-        if (!config.save()) {
-            Log.error("Error: Unable to save calibration coefficients.\r\n");
-            return false;
+        if (dev != nullptr) {
+            // Flipping this is what makes the device stop falling back to its colour.
+            dev->hasCalibration = true;
+            if (!device_config.save()) {
+                Log.error("Error: Unable to save device calibration coefficients.\r\n");
+                return false;
+            }
+            Log.notice("Calibration coefficients saved for device %s (%.6f, %.6f, %.6f, %.6f)\r\n",
+                       deviceId, target->x0, target->x1, target->x2, target->x3);
+        } else {
+            if (!config.save()) {
+                Log.error("Error: Unable to save calibration coefficients.\r\n");
+                return false;
+            }
+            Log.notice("Calibration coefficients saved for color %d (%.6f, %.6f, %.6f, %.6f)\r\n",
+                       color, target->x0, target->x1, target->x2, target->x3);
         }
-
-        Log.notice("Calibration coefficients saved for color %d\r\n", color);
     }
 
     return true;
 }
 
 // Function to get calibration points for a specific color
-bool getCalibrationPoints(uint8_t color, JsonDocument& doc) {
+bool getCalibrationPoints(uint8_t color, JsonDocument& doc, const char* deviceId) {
     if (color >= TILT_COLORS) {
         Log.error("Error: Invalid Tilt color: %d.\r\n", color);
         return false;
     }
 
     char filename[64];
-    snprintf(filename, sizeof(filename), "%s/%d-cal.json", CONFIG_DIR, color);
+    calibrationFilename(deviceId, color, filename, sizeof(filename));
 
     if (!filesystem_exists(filename)) {
         // Return empty array if file doesn't exist
@@ -252,38 +320,40 @@ bool getCalibrationPoints(uint8_t color, JsonDocument& doc) {
 }
 
 // Function to clear calibration points for a specific color
-bool clearCalibrationPoints(uint8_t color) {
+bool clearCalibrationPoints(uint8_t color, const char* deviceId) {
     if (color >= TILT_COLORS) {
         Log.error("Error: Invalid Tilt color: %d.\r\n", color);
         return false;
     }
 
     char filename[64];
-    snprintf(filename, sizeof(filename), "%s/%d-cal.json", CONFIG_DIR, color);
+    calibrationFilename(deviceId, color, filename, sizeof(filename));
 
     if (filesystem_exists(filename)) {
         if (!(remove(filename) == 0)) {
             Log.error("Error: Failed to delete calibration file.\r\n");
             return false;
         }
-        Log.notice("Calibration points cleared for color %d\r\n", color);
+        Log.notice("Calibration points cleared for %s\r\n",
+                   deviceId ? deviceId : tilt_color_names[color]);
     }
 
     return true;
 }
 
 // Function to delete individual calibration data point by raw gravity
-bool deleteCalibrationPoint(uint8_t color, double rawGravity) {
+bool deleteCalibrationPoint(uint8_t color, double rawGravity, const char* deviceId) {
     if (color >= TILT_COLORS) {
         Log.error("Error: Invalid Tilt color: %d.\r\n", color);
         return false;
     }
 
     char filename[64];
-    snprintf(filename, sizeof(filename), "%s/%d-cal.json", CONFIG_DIR, color);
+    calibrationFilename(deviceId, color, filename, sizeof(filename));
 
     if (!filesystem_exists(filename)) {
-        Log.error("Error: No calibration file exists for color %d.\r\n", color);
+        Log.error("Error: No calibration file exists for %s.\r\n",
+                  deviceId ? deviceId : tilt_color_names[color]);
         return false;
     }
 
@@ -334,12 +404,15 @@ bool processCalibrationDataDelete(const JsonDocument& json, bool triggerUpstream
 
     uint8_t color = json["color"].as<uint8_t>();
 
+    char deviceIdBuf[DEVICE_ID_LEN];
+    const char* deviceId = optionalDeviceId(json, deviceIdBuf, sizeof(deviceIdBuf));
+
     // Check if rawGravity is provided for individual point deletion
     if (json["rawGravity"].is<double>()) {
         double rawGravity = json["rawGravity"].as<double>();
-        return deleteCalibrationPoint(color, rawGravity);
+        return deleteCalibrationPoint(color, rawGravity, deviceId);
     } else {
         // No rawGravity provided, clear all points
-        return clearCalibrationPoints(color);
+        return clearCalibrationPoints(color, deviceId);
     }
 }

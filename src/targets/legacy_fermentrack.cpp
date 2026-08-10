@@ -2,6 +2,7 @@
 
 #include "jsonconfig.h"
 #include "sendData.h"
+#include "sender_health.h"
 #include "tilt/tiltScanner.h"
 #include "targets/send_json_str.h"
 
@@ -10,11 +11,14 @@ bool dataSendHandler::send_to_legacy_fermentrack()
 {
     bool result = true;
 
-    if (send_legacy_fermentrack && !send_lock)
+    if (send_legacy_fermentrack)
     {
+        SenderLock lock(TARGET_LEGACY_FERMENTRACK, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return result;
+
         // Fermentrack
         send_legacy_fermentrack = false;
-        send_lock = true;
 //        tilt_scanner.deinit();
 
         if (strlen(config.legacyFermentrackURL) >= FERMENTRACK_MIN_URL_LENGTH) {
@@ -47,9 +51,8 @@ bool dataSendHandler::send_to_legacy_fermentrack()
             }
             data_sender.setTargetStatus(TARGET_LEGACY_FERMENTRACK, dataSendHandler::httpCodeToSendError(httpCode));
         }
-        data_sender.startTimer(data_sender.legacyFermentrackTimer, config.legacyFermentrackPushEvery); // Set up subsequent send to Fermentrack
+        data_sender.startTimer(data_sender.legacyFermentrackTimer, data_sender.backoffDelay(TARGET_LEGACY_FERMENTRACK, config.legacyFermentrackPushEvery)); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();
-        send_lock = false;
     }
     return result;
 }

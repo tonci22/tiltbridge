@@ -65,6 +65,24 @@ public:
     bool applyCalibration = true;
     bool tempCorrect = false;
 
+    // Outbound sender health / automatic recovery
+    bool senderRecoveryEnabled = true;      // restart when outbound processing stops progressing
+    // Heartbeat age that counts as stalled (clamped 60..600). At the top of the spec's
+    // 60-90s window because a single Google Sheets upload may legitimately hold the sender
+    // for up to 60 s (two TLS handshakes via the Apps Script redirect).
+    uint16_t senderStaleRebootSec = 90;
+
+    // Persistent offline queue. The snapshot interval governs flash-write frequency and is
+    // deliberately independent of every cloud push interval; the record cap governs storage.
+    bool offlineQueueEnabled = true;
+    uint16_t queueSnapshotIntervalSec = 1800;   // 30 minutes
+    uint16_t maxQueuedRecords = 1500;           // ~7 days at 4 Tilts / 30 min; 1500 * 128 B = 192 KB
+    // Records per upload request. 10 rather than 20: on a classic ESP32 the mbedTLS
+    // handshake to Google needs a large contiguous allocation, and a 4 KB payload from a
+    // 20-record batch was enough to make it fail with MBEDTLS_ERR_X509_ALLOC_FAILED on a
+    // fragmented heap. Raise it only if free heap and fragmentation allow.
+    uint8_t queueBatchSize = 10;
+
     TiltCalData tilt_calibration[TILT_COLORS];
     GsheetsConfig gsheets_config[TILT_COLORS];
     GrainfatherURL grainfatherURL[TILT_COLORS];
@@ -87,6 +105,11 @@ public:
     uint16_t taplistioPushEvery = 300;
     char scriptsURL[256] = "";
     char scriptsEmail[256] = "";
+    // Enhanced batched Google Sheets protocol. On by default for this fork: it requires an
+    // Apps Script implementing docs/phase1/APPS_SCRIPT_PROTOCOL.md, and without one nothing
+    // is ever acknowledged and the queue simply grows. Set false to fall back to the
+    // legacy single-reading path.
+    bool gsheetsV2Enabled = true;
     char brewersFriendKey[65] = "";
     char brewfatherKey[65] = "";
     char userTargetURL[129] = "";

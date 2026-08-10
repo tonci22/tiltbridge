@@ -16,10 +16,28 @@
 #include "wifi_setup.h"
 
 #include "sendData.h"
+#include "sender_health.h"
+#include "device_config.h"
+#include "queue/reading_queue.h"
+#include "time_sync.h"
 #include "uptime.h"
 
 
 dataSendHandler data_sender; // Global data sender
+
+const char* const sendTargetNames[TARGET_COUNT] = {
+    "legacy_fermentrack",
+    "fermentrack",
+    "brewers_friend",
+    "brewfather",
+    "user_target",
+    "grainfather",
+    "brew_status",
+    "taplistio",
+    "google_sheets",
+    "mqtt",
+    "influxdb"
+};
 
 dataSendHandler::dataSendHandler() {}
 
@@ -27,7 +45,42 @@ void dataSendHandler::setTargetStatus(SendTargetID target, SendError error) {
     if (target < TARGET_COUNT) {
         targetStatus[target].lastError = error;
         targetStatus[target].lastAttemptTime = (uint32_t)uptimeSeconds(true);
+
+        if (error == SEND_OK) {
+            targetStatus[target].consecutiveFailures = 0;
+        } else if (targetStatus[target].consecutiveFailures < UINT16_MAX) {
+            targetStatus[target].consecutiveFailures++;
+        }
+
+        // Every sender routes its result through here, so this is the one place that needs
+        // to feed the health monitor.
+        sender_health.noteTargetResult((uint8_t)target, error == SEND_OK);
     }
+}
+
+uint32_t dataSendHandler::backoffDelay(SendTargetID target, uint32_t baseSeconds) const {
+    if (target >= TARGET_COUNT)
+        return baseSeconds;
+
+    const uint16_t failures = targetStatus[target].consecutiveFailures;
+    if (failures <= SEND_BACKOFF_AFTER_FAILURES)
+        return baseSeconds;
+
+    // Double per failure past the threshold, capped. Shifting beyond 16 would overflow, and
+    // the cap is reached long before that anyway.
+    const uint16_t steps = (failures - SEND_BACKOFF_AFTER_FAILURES) > 16
+                         ? 16
+                         : (uint16_t)(failures - SEND_BACKOFF_AFTER_FAILURES);
+
+    uint64_t delay = (uint64_t)baseSeconds << steps;
+    if (delay > SEND_BACKOFF_MAX_SECONDS)
+        delay = SEND_BACKOFF_MAX_SECONDS;
+
+    if (delay != baseSeconds) {
+        Log.verbose("%s backing off to %us after %u consecutive failures.\r\n",
+                    sendTargetNames[target], (unsigned)delay, (unsigned)failures);
+    }
+    return (uint32_t)delay;
 }
 
 SendError dataSendHandler::httpCodeToSendError(int16_t httpCode) {
@@ -91,6 +144,10 @@ static void influxdbTimerCallback(TimerHandle_t xTimer) {
     data_sender.send_influxdb = true;
 }
 
+static void queueSnapshotTimerCallback(TimerHandle_t xTimer) {
+    data_sender.snapshot_due = true;
+}
+
 void dataSendHandler::createTimers() {
     // Create all send timers as one-shot timers (pdFALSE)
     // Initial period is 1 tick - we'll change it when we start the timer
@@ -105,15 +162,29 @@ void dataSendHandler::createTimers() {
     grainfatherTimer = xTimerCreate("Grainfather", pdMS_TO_TICKS(1000), pdFALSE, nullptr, grainfatherTimerCallback);
     taplistioTimer = xTimerCreate("Taplistio", pdMS_TO_TICKS(1000), pdFALSE, nullptr, taplistioTimerCallback);
     influxdbTimer = xTimerCreate("InfluxDB", pdMS_TO_TICKS(1000), pdFALSE, nullptr, influxdbTimerCallback);
+    queueSnapshotTimer = xTimerCreate("QueueSnap", pdMS_TO_TICKS(1000), pdFALSE, nullptr, queueSnapshotTimerCallback);
 }
 
 void dataSendHandler::startTimer(TimerHandle_t timer, uint32_t periodSeconds) {
-    if (timer != nullptr) {
-        // Stop the timer first (without triggering callback) to ensure clean restart
-        xTimerStop(timer, 0);
-        // Change period and start - xTimerChangePeriod implicitly starts the timer
-        xTimerChangePeriod(timer, pdMS_TO_TICKS(periodSeconds * 1000), 0);
-    }
+    if (timer == nullptr)
+        return;
+
+    // Ticks are computed here rather than with pdMS_TO_TICKS(periodSeconds * 1000).
+    // On the non-SMP kernel that macro multiplies by configTICK_RATE_HZ in 32-bit
+    // arithmetic, so a millisecond value above ~4,294,967 (about 4294 s) overflows and
+    // yields a wildly short period - a 6-hour interval became ~125 s. Several settings
+    // permit periods past that: queueSnapshotIntervalSec allows 21600 and
+    // legacyFermentrackPushEvery allows 43200.
+    uint64_t ticks = (uint64_t)periodSeconds * (uint64_t)configTICK_RATE_HZ;
+    if (ticks == 0)
+        ticks = 1;                          // a zero period is rejected by the timer API
+    if (ticks > (uint64_t)(portMAX_DELAY - 1))
+        ticks = (uint64_t)(portMAX_DELAY - 1);
+
+    // Stop the timer first (without triggering callback) to ensure clean restart
+    xTimerStop(timer, 0);
+    // Change period and start - xTimerChangePeriod implicitly starts the timer
+    xTimerChangePeriod(timer, (TickType_t)ticks, 0);
 }
 
 void dataSendHandler::init()
@@ -135,30 +206,148 @@ void dataSendHandler::init()
     startTimer(grainfatherTimer, 80);            // Schedule first send to Grainfather
     startTimer(taplistioTimer, 90);              // Schedule first send to Taplist.io
     startTimer(influxdbTimer, 100);              // Schedule first send to InfluxDB
+    startTimer(queueSnapshotTimer, 120);         // First queue snapshot shortly after boot,
+                                                 // then config.queueSnapshotIntervalSec
 }
 
 void dataSendHandler::process()
 {
-    if (is_wifi_connected()) {
+#ifdef TB_DEBUG_FREEZE
+    // Acceptance-test hook only: simulate a wedged outbound loop. Must return BEFORE the
+    // heartbeat, since a stale heartbeat is exactly what is being simulated.
+    // See docs/phase1/10-acceptance-tests.md T6.
+    if (sender_health.debugFreeze)
+        return;
+#endif
+
+    // Unconditional, and before any gate below: this is the only signal that proves the
+    // outbound loop is still being serviced. The health monitor reboots the device if it
+    // stops advancing while BLE and WiFi are alive.
+    sender_health.heartbeat();
+
+    // Snapshots are taken before the network gate and hold no sender lock: the whole
+    // point of the queue is to keep accumulating while the network is down, and a wedged
+    // HTTP request must not be able to stop it.
+    if (snapshot_due) {
+        snapshot_due = false;
+        take_queue_snapshot();
+    }
+
+    if (network_is_usable()) {
+        // Google Sheets runs first so that within a single pass it claims the sender
+        // before either Fermentrack target can, per the requirement that a stuck
+        // Fermentrack request must not keep other targets from operating.
+        if (config.gsheetsV2Enabled)
+            send_to_google_v2();
+        else
+            send_to_google();
+
+        // The heartbeat is refreshed between targets, not just at the top of the pass.
+        // Completing a target IS progress, and after an outage every timer can be due at
+        // once - a legitimate pass can then block for longer than senderStaleRebootSec and
+        // would otherwise trip a spurious recovery reboot. A target wedged inside its own
+        // HTTP call still never reaches the next heartbeat, which is the case we detect.
+        sender_health.heartbeat();
         send_to_legacy_fermentrack();
+        sender_health.heartbeat();
         send_to_fermentrack();
+        sender_health.heartbeat();
         send_to_bf_and_bf();
+        sender_health.heartbeat();
         send_to_grainfather();
+        sender_health.heartbeat();
         send_to_brewstatus();
+        sender_health.heartbeat();
         send_to_taplistio();
-        send_to_google();
+        sender_health.heartbeat();
         send_to_mqtt();
+        sender_health.heartbeat();
         send_to_influxdb();
     }
 }
 
 
+void dataSendHandler::take_queue_snapshot()
+{
+    // Always re-arm, even when disabled or when nothing gets written, so the cadence
+    // survives a configuration change or a temporary filesystem problem.
+    startTimer(queueSnapshotTimer, config.queueSnapshotIntervalSec);
+
+    if (!config.offlineQueueEnabled || !reading_queue.isHealthy())
+        return;
+
+    tilt_scanner.drop_expired_tilts();
+
+    uint16_t stored = 0;
+    for (tiltHydrometer &th : tilt_scanner.m_tilt_devices) {
+        if (!device_config.isEnabled(th.deviceId()))
+            continue;
+
+        // Never queue a Tilt that has not actually reported a gravity yet - that would
+        // persist a zero and pollute the sheet.
+        if (th.latest_gravity_value() == 0)
+            continue;
+
+        QueuedReading rec;
+        memset(&rec, 0, sizeof(rec));   // deterministic padding keeps the CRC stable
+
+        reading_queue.assignIdentity(rec, th.deviceId());
+
+        strlcpy(rec.deviceId, th.deviceId(), sizeof(rec.deviceId));
+        rec.colorIndex = th.m_color;
+        strlcpy(rec.sheetName, device_config.sheetName(th.deviceId(), th.m_color), sizeof(rec.sheetName));
+
+        char buf[12];
+        th.converted_temp(buf, sizeof(buf), true);      // always Fahrenheit
+        rec.tempF = strtof(buf, nullptr);
+
+        // `gravity` is the normal final TiltBridge value; the other two are the existing
+        // intermediates. No smoothing or calibration behaviour changes here.
+        th.cal_smooth_gravity_str(buf, sizeof(buf));
+        rec.gravity = strtof(buf, nullptr);
+        th.uncal_smooth_gravity_str(buf, sizeof(buf));
+        rec.gravitySmoothed = strtof(buf, nullptr);
+        th.latest_gravity_str(buf, sizeof(buf));
+        rec.gravityRaw = strtof(buf, nullptr);
+
+        rec.rssiLatest  = th.rssi;
+        rec.rssiAverage = th.rssi_stats.average();
+        rec.rssiMinimum = th.rssi_stats.minimum;
+        rec.rssiMaximum = th.rssi_stats.maximum;
+        rec.rssiSamples = th.rssi_stats.samples;
+
+        if (th.tilt_pro)
+            rec.flags |= QR_FLAG_TILT_PRO;
+
+        // Never fabricate a timestamp. Ordering is preserved by the sequence number and
+        // by the uptime-relative capture time regardless.
+        if (time_is_valid()) {
+            rec.capturedAtUtc = utc_now();
+            rec.flags |= QR_FLAG_TIMESTAMP_VALID;
+        }
+        rec.capturedAtUptimeMs = sh_millis();
+
+        if (reading_queue.append(rec)) {
+            // Only start a new RSSI interval once the record is durably on flash; if the
+            // write failed, keep accumulating so the next snapshot still covers the gap.
+            th.rssi_stats.resetInterval();
+            stored++;
+        }
+    }
+
+    if (stored > 0)
+        Log.notice("Queue snapshot: stored %u reading%s.\r\n", stored, (stored == 1) ? "" : "s");
+}
+
 bool dataSendHandler::send_to_bf_and_bf()
 {
     bool retval = false;
-    if (data_sender.send_brewersFriend && !send_lock)
+    if (data_sender.send_brewersFriend)
     {
-        send_lock = true;
+        SenderLock lock(TARGET_BREWERS_FRIEND, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return retval;  // Another target holds the sender; retry on the next pass
+
         // Brewer's Friend
         data_sender.send_brewersFriend = false;
         if (strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH) {
@@ -173,13 +362,15 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to Brewer's Friend.\r\n");
             }
         }
-        startTimer(brewersFriendTimer, BREWERS_FRIEND_DELAY); // Set up subsequent send to Brewer's Friend
-        send_lock = false;
+        startTimer(brewersFriendTimer, backoffDelay(TARGET_BREWERS_FRIEND, BREWERS_FRIEND_DELAY)); // Set up subsequent send to Brewer's Friend
     }
 
-    if (data_sender.send_brewfather && !send_lock)
+    if (data_sender.send_brewfather)
     {
-        send_lock = true;
+        SenderLock lock(TARGET_BREWFATHER, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return retval;
+
         // Brewfather
         data_sender.send_brewfather = false;
         if (strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH) {
@@ -194,14 +385,16 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to Brewfather.\r\n");
             }
         }
-        startTimer(brewfatherTimer, BREWFATHER_DELAY); // Set up subsequent send to Brewfather
-        send_lock = false;
+        startTimer(brewfatherTimer, backoffDelay(TARGET_BREWFATHER, BREWFATHER_DELAY)); // Set up subsequent send to Brewfather
     }
 
 
-    if (data_sender.send_userTarget && !send_lock)
+    if (data_sender.send_userTarget)
     {
-        send_lock = true;
+        SenderLock lock(TARGET_USER_TARGET, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return retval;
+
         // User Target
         data_sender.send_userTarget = false;
         if (strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
@@ -217,8 +410,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to User Target.\r\n");
             }
         }
-        startTimer(userTargetTimer, USER_TARGET_DELAY); // Set up subsequent send to User Target
-        send_lock = false;
+        startTimer(userTargetTimer, backoffDelay(TARGET_USER_TARGET, USER_TARGET_DELAY)); // Set up subsequent send to User Target
     }
     return retval;
 }
@@ -280,11 +472,15 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     tilt_scanner.drop_expired_tilts();
     bool attempted = false;
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
+        if (!device_config.isEnabled(th.deviceId()))
+            continue;
+
         char gravity[10];
         char temp[6];
 
         Log.verbose("Tilt loaded with color name: %s\r\n", tilt_color_names[th.m_color]);
-        j["name"] = tilt_color_names[th.m_color];
+        // Falls back to the colour name when no friendly name is configured.
+        j["name"] = device_config.displayName(th.deviceId(), th.m_color);
         th.converted_temp(temp, sizeof(temp), true); // Always in Fahrenheit
         j["temp"] = temp;
         j["temp_unit"] = "F";
@@ -313,11 +509,14 @@ bool dataSendHandler::send_to_grainfather()
 {
     bool result = true;
 
-    if (send_grainfather && !send_lock)
+    if (send_grainfather)
     {
+        SenderLock lock(TARGET_GRAINFATHER, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return result;
+
         // Brew Status
         send_grainfather = false;
-        send_lock = true;
         int16_t httpCode = 0;
 
         // Loop through each of the tilt colors cached by tilt_scanner, sending
@@ -325,6 +524,9 @@ bool dataSendHandler::send_to_grainfather()
         tilt_scanner.drop_expired_tilts();
         bool attempted = false;
         for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
+            if (!device_config.isEnabled(th.deviceId()))
+                continue;
+
             // If there's no Grainfather URL for this color, just continue
             if (strlen(config.grainfatherURL[th.m_color].link) == 0)
                 continue;
@@ -349,8 +551,7 @@ bool dataSendHandler::send_to_grainfather()
         }
         if (attempted)
             setTargetStatus(TARGET_GRAINFATHER, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
-        startTimer(grainfatherTimer, GRAINFATHER_DELAY); // Set up subsequent send to Grainfather
-        send_lock = false;
+        startTimer(grainfatherTimer, backoffDelay(TARGET_GRAINFATHER, GRAINFATHER_DELAY)); // Set up subsequent send to Grainfather
     }
     return result;
 }
@@ -367,11 +568,13 @@ bool dataSendHandler::send_to_taplistio()
     // See if it's our time to send.
     if (!send_taplistio) {
         return false;
-    } else if (send_lock) {
-        Log.verbose("taplist.io: send lock set.\r\n");
-        return false;
     }
 
+    SenderLock lock(TARGET_TAPLISTIO, HTTP_TIMEOUT_DEFAULT_MS);
+    if (!lock) {
+        Log.verbose("taplist.io: sender busy.\r\n");
+        return false;
+    }
 
     // Since we're using one-shot timers, stop the timer before restarting with new period
     if (taplistioTimer != nullptr) {
@@ -380,7 +583,6 @@ bool dataSendHandler::send_to_taplistio()
 
     // Attempt to send.
     send_taplistio = false;
-    send_lock = true;
 
 
     tilt_scanner.drop_expired_tilts();
@@ -388,6 +590,9 @@ bool dataSendHandler::send_to_taplistio()
     bool attempted = false;
 
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
+        if (!device_config.isEnabled(th.deviceId()))
+            continue;
+
         JsonDocument j;
         char payload_string[192];
         char gravity[10];
@@ -411,8 +616,7 @@ bool dataSendHandler::send_to_taplistio()
 
     if (attempted)
         setTargetStatus(TARGET_TAPLISTIO, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
-    startTimer(taplistioTimer, config.taplistioPushEvery);
-    send_lock = false;
+    startTimer(taplistioTimer, backoffDelay(TARGET_TAPLISTIO, config.taplistioPushEvery));
     return result;
 }
 
@@ -423,11 +627,14 @@ bool dataSendHandler::send_to_brewstatus()
     const int payload_size = 512;
     char payload[payload_size];
 
-    if (send_brewStatus && ! send_lock)
+    if (send_brewStatus)
     {
+        SenderLock lock(TARGET_BREW_STATUS, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return result;
+
         // Brew Status
         send_brewStatus = false;
-        send_lock = true;
         if (strlen(config.brewstatusURL) > BREWSTATUS_MIN_URL_LENGTH) {
             Log.verbose("Calling send to Brew Status.\r\n");
 
@@ -445,6 +652,9 @@ bool dataSendHandler::send_to_brewstatus()
             int16_t httpCode = 0;
             bool attempted = false;
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
+                if (!device_config.isEnabled(th.deviceId()))
+                    continue;
+
                 char gravity[10];
                 char temp[6];
                 th.cal_smooth_gravity_str(gravity, sizeof(gravity));
@@ -465,8 +675,7 @@ bool dataSendHandler::send_to_brewstatus()
             if (attempted)
                 setTargetStatus(TARGET_BREW_STATUS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         }
-        startTimer(brewStatusTimer, config.brewstatusPushEvery); // Set up subsequent send to Brew Status
-        send_lock = false;
+        startTimer(brewStatusTimer, backoffDelay(TARGET_BREW_STATUS, config.brewstatusPushEvery)); // Set up subsequent send to Brew Status
     }
     return result;
 }
@@ -476,10 +685,13 @@ bool dataSendHandler::send_to_google()
 {
     bool result = true;
 
-    if (send_gSheets && !send_lock) {
+    if (send_gSheets) {
+        SenderLock lock(TARGET_GOOGLE_SHEETS, HTTP_TIMEOUT_GSHEETS_MS);
+        if (!lock)
+            return result;
+
         // Google Sheets
         send_gSheets = false;
-        send_lock = true;
 
         JsonDocument payload;
         char payload_string[GSHEETS_JSON];
@@ -496,15 +708,20 @@ bool dataSendHandler::send_to_google()
             bool attempted = false;
 
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
-                // Check if there is a google sheet name associated with the specific Tilt
-                if (strlen(config.gsheets_config[th.m_color].name) > 0) {
+                if (!device_config.isEnabled(th.deviceId()))
+                    continue;
+
+                // Check if there is a google sheet name associated with the specific Tilt.
+                // Resolves to the device-specific name when configured, else the colour's.
+                const char *sheetName = device_config.sheetName(th.deviceId(), th.m_color);
+                if (sheetName != nullptr && strlen(sheetName) > 0) {
                     char gravity[10];
                     char temp[6];
 
                     // If there's a sheet name saved, then we should send the data
                     if (numSent == 0)
                         Log.notice("Beginning GSheets check-in.\r\n");
-                    payload["Beer"] = config.gsheets_config[th.m_color].name;
+                    payload["Beer"] = sheetName;
                     th.converted_temp(temp, sizeof(temp), true); // Always in Fahrenheit
                     payload["Temp"] = temp;
                     th.cal_smooth_gravity_str(gravity, sizeof(gravity));
@@ -534,12 +751,21 @@ bool dataSendHandler::send_to_google()
                     if (sendRes == sendResult::success) {
                         // POST success - parse response for doclongurl
                         Log.verbose("HTTP Response: 200\r\nFull Response:\r\n\t%s\r\n", response);
-                        deserializeJson(retval, response);
 
-                        if(strcmp(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>()) != 0) {
-                            Log.verbose("Storing new doclongurl: %s.\r\n", retval["doclongurl"].as<const char *>());
-                            strlcpy(config.gsheets_config[th.m_color].link, retval["doclongurl"].as<const char *>(), 255);
-                            config.save();
+                        // A 200 does not guarantee JSON - Apps Script happily returns an HTML
+                        // error page. Check the parse and the key before dereferencing, or
+                        // strcmp() faults on a null pointer and panics the device.
+                        DeserializationError parseErr = deserializeJson(retval, response);
+                        if (parseErr) {
+                            Log.warning("Google response was not valid JSON (%s); skipping doclongurl update.\r\n",
+                                        parseErr.c_str());
+                        } else {
+                            const char *docurl = retval["doclongurl"].as<const char *>();
+                            if (docurl != nullptr) {
+                                // Caches against the device entry when one exists, else
+                                // against the colour, and only writes when it changed.
+                                device_config.setSheetLink(th.deviceId(), th.m_color, docurl);
+                            }
                         }
                         retval.clear();
                         numSent++;
@@ -558,9 +784,7 @@ bool dataSendHandler::send_to_google()
             if (attempted)
                 setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         }
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY); // Set up subsequent send to Google Sheets
-
-        send_lock = false;
+        startTimer(gSheetsTimer, backoffDelay(TARGET_GOOGLE_SHEETS, GSCRIPTS_DELAY)); // Set up subsequent send to Google Sheets
     }
     return result;
 }
@@ -570,10 +794,13 @@ bool dataSendHandler::send_to_influxdb()
 {
     bool result = true;
 
-    if (send_influxdb && !send_lock)
+    if (send_influxdb)
     {
+        SenderLock lock(TARGET_INFLUXDB, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return result;
+
         send_influxdb = false;
-        send_lock = true;
 
         if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && strlen(config.influxdbToken) > 0 && strlen(config.influxdbOrg) > 0 && strlen(config.influxdbBucket) > 0) 
         {
@@ -592,6 +819,9 @@ bool dataSendHandler::send_to_influxdb()
 
             tilt_scanner.drop_expired_tilts();
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
+                if (!device_config.isEnabled(th.deviceId()))
+                    continue;
+
                 char gravity[10];
                 char temp[6];
                 char battery_str[4];
@@ -643,8 +873,7 @@ bool dataSendHandler::send_to_influxdb()
             }
         }
 
-        startTimer(influxdbTimer, config.influxdbPushEvery); // Set up subsequent send to InfluxDB
-        send_lock = false;
+        startTimer(influxdbTimer, backoffDelay(TARGET_INFLUXDB, config.influxdbPushEvery)); // Set up subsequent send to InfluxDB
     }
     return result;
 }

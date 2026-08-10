@@ -91,6 +91,12 @@ const props = defineProps({
     type: Number,
     required: true
   },
+  // Canonical device id when calibrating a specific physical Tilt; empty string means the
+  // shared colour calibration.
+  deviceId: {
+    type: String,
+    default: ''
+  },
   prepopulatedRawGravity: {
     type: String,
     default: ''
@@ -155,7 +161,8 @@ async function savePoint() {
     const success = await calibrationStore.addCalibrationPoint(
       props.colorNumber,
       rawGrav,
-      actualGrav
+      actualGrav,
+      props.deviceId || null
     );
     
     if (success) {

@@ -8,6 +8,9 @@
     "warning": "Warning",
     "unused": "Unused",
     "unknown": "Unknown",
+    "none": "None",
+    "never": "Never",
+    "age_ago": "{age} ago",
     "close_sidebar": "Close Sidebar",
     "open_sidebar": "Open Sidebar",
     "validation_error": "Validation Error",
@@ -35,7 +38,8 @@
     }
   },
   "navigation": {
-    "general_settings": "General Settings"
+    "general_settings": "General Settings",
+    "offline_queue": "Offline Queue"
   },
   "about":{
     "uptime":{
@@ -51,6 +55,38 @@
     "version": {
       "loading_version": "Loading build/version information...",
       "error_loading_version": "Error loading build/version information"
+    },
+    "sender": {
+      "header": "Outbound Sender",
+      "state": "State",
+      "states": {
+        "idle": "IDLE",
+        "sending": "SENDING",
+        "stale": "STALE"
+      },
+      "current_target": "Current target",
+      "heartbeat": "Sender heartbeat",
+      "send_lock": "Send lock",
+      "lock_held": "Held",
+      "lock_free": "Free",
+      "request_age": "Request age",
+      "lock_age": "Send lock age",
+      "consecutive_failures": "Consecutive failures",
+      "wifi_disagreements": "Wi-Fi flag disagreements",
+      "wifi_disagreements_tooltip": "Times the Wi-Fi library reported 'disconnected' while the network interface was demonstrably up. A non-zero count here confirms the stale Wi-Fi flag that stops all outbound sending.",
+      "stale_events": "Stale sender events",
+      "google_last_success": "Google Sheets - last success",
+      "fermentrack_last_success": "Fermentrack - last success",
+      "any_last_success": "Any target - last success",
+      "last_recovery_title": "Automatic recovery performed",
+      "last_recovery_line": "The device restarted itself because the {reason} (target at the time: {target}).",
+      "last_recovery_detail": "Heartbeat age {heartbeat}, send lock age {lock}, uptime at restart {uptime}, boot count {boot}.",
+      "recovery_reasons": {
+        "sender_heartbeat_stale": "sender heartbeat went stale",
+        "sender_lock_stuck": "send lock was stuck",
+        "unknown": "sender stopped responding"
+      },
+      "load_failed": "Unable to read sender status from the TiltBridge."
     },
     "reset_actions": {
       "header": "Device Reset Actions",
@@ -186,7 +222,9 @@
       "email": "Google Script Email Address",
       "email_desc": "Email address used to create the targeted script",
       "color_sheet_tilt_name": "{color} Tilt Sheet Name",
-      "color_sheet_tilt_name_desc": "The spreadsheet name to place data for the {color} tilt on"
+      "color_sheet_tilt_name_desc": "The spreadsheet name to place data for the {color} tilt on",
+      "v2_enabled": "Use the v2 Google Sheets protocol",
+      "v2_enabled_desc": "Sends the capture time with each reading so backlogged readings land under the time they were taken rather than the time they were uploaded. Requires an updated Apps Script."
     },
     "brewers_friend": {
       "header": "Configure Brewers Friend",
@@ -287,7 +325,10 @@
   "tilt_list": {
     "header": "Available Tilt Hydrometers",
     "detected_tilts": "Detected Tilts",
+    "name_column": "Name",
     "color_column": "Color",
+    "mac_column": "MAC",
+    "model_column": "Model",
     "rssi_column": "RSSI",
     "battery_age_column": "Battery Age",
     "gravity_column": "Gravity",
@@ -295,7 +336,124 @@
     "battery_age_week_count":"{weeks} weeks",
     "no_tilts_detected": "No Tilts have been detected",
     "last_received_column": "Last Received",
-    "last_received_ago": "{seconds}s ago"
+    "last_received_ago": "{seconds}s ago",
+    "rssi_value": "({dbm} dBm) {quality}",
+    "rssi_tooltip": "Average {average} dBm, min {minimum} dBm, max {maximum} dBm over {samples} samples",
+    "calibrate_button": "Calibrate this Tilt",
+    "configure_button": "Configure this Tilt",
+    "configure_button_unconfigured": "Configure this Tilt (currently using the shared color settings)",
+    "combine_tilts_notice": "\"Combine Tilts of the same color\" is enabled, so readings from same-color Tilts are merged into one entry and per-device configuration is unavailable. Turn it off in General Settings to configure each physical Tilt separately."
+  },
+  "tilt_device_config": {
+    "header": "Tilt Device Configuration",
+    "description": "These settings are attached to this physical Tilt (by MAC address), not to its color. Anything left blank falls back to the shared color settings.",
+    "mac_label": "MAC address",
+    "detected_color_label": "Detected color",
+    "detected_model_label": "Detected model",
+    "friendly_name": "Friendly Name",
+    "friendly_name_desc": "Name shown in the Tilt list and sent to targets that support it. Maximum 32 characters.",
+    "gsheets_name": "Google Sheets Name",
+    "gsheets_name_desc": "Spreadsheet tab name used for this Tilt. Overrides the color-wide sheet name. Maximum 25 characters.",
+    "model_label": "Manual Model Label",
+    "model_label_desc": "Overrides the automatically detected model. Leave blank to keep the detected value. Maximum 16 characters.",
+    "notes": "Notes",
+    "notes_desc": "Free-form note for your own reference. Maximum 64 characters.",
+    "notes_placeholder": "Fermenter 3, second batch",
+    "alias_one": "Repeater Alias 1",
+    "alias_two": "Repeater Alias 2",
+    "alias_desc": "MAC address of a repeater that rebroadcasts this Tilt. Readings from the alias are treated as coming from this device. Optional.",
+    "enabled": "Enabled",
+    "enabled_desc": "When unchecked, this Tilt stays visible in the list but its readings are not sent to any target.",
+    "calibration_link": "Calibrate this Tilt",
+    "calibration_link_desc": "Opens the calibration page for this specific device rather than for the whole color.",
+    "reset_header": "Reset to color defaults",
+    "reset_desc": "Deletes this device's stored configuration. The Tilt keeps reporting, but goes back to using the shared settings for its color.",
+    "reset_button": "Reset to color defaults",
+    "reset_confirm_button": "Yes, delete this device configuration",
+    "errors": {
+      "missing_device_id": "This Tilt has no MAC address, so per-device settings cannot be saved. Update the TiltBridge firmware.",
+      "friendly_name_too_long": "Friendly name must be 32 characters or fewer",
+      "gsheets_name_too_long": "Google Sheets name must be 25 characters or fewer",
+      "model_label_too_long": "Model label must be 16 characters or fewer",
+      "notes_too_long": "Notes must be 64 characters or fewer",
+      "invalid_alias": "Repeater aliases must be MAC addresses in the form 88:C2:55:AC:26:81"
+    }
+  },
+  "queue": {
+    "upload_status": {
+      "idle": "Idle",
+      "sending": "Sending",
+      "retrying": "Retrying",
+      "disabled": "Disabled"
+    },
+    "status": {
+      "header": "Offline Queue",
+      "description": "Readings captured while the TiltBridge could not reach its targets are stored on the device and uploaded once the connection returns.",
+      "queued_readings": "Queued readings",
+      "oldest_reading": "Oldest reading",
+      "storage_used": "Storage used",
+      "storage_percent": "{percent}%",
+      "storage_bytes": "{bytes} bytes used, {record} bytes per record",
+      "maximum_records": "Maximum records",
+      "snapshot_interval": "Snapshot interval",
+      "minutes": "{minutes} min",
+      "last_upload": "Last successful upload",
+      "upload_status": "Upload status",
+      "dropped_overflow": "Dropped due to overflow",
+      "queue_state": "Queue state",
+      "queue_disabled": "Disabled - readings are not being stored while offline",
+      "health": "Queue health",
+      "unhealthy": "The queue file could not be read or written. Check the device storage.",
+      "dropped_warning_title": "{count} readings were discarded because the queue was full",
+      "dropped_warning_desc": "Raise the maximum queued records, shorten the snapshot interval, or fix the connection to the send target. The count resets when the queue is cleared or the device restarts.",
+      "time_not_valid_title": "Time sync not established",
+      "time_not_valid_desc": "The device clock has not been set, so readings queued now are marked TimestampValid: false and will be uploaded without a trustworthy capture time.",
+      "send_backlog_button": "Send backlog now",
+      "clear_queue_button": "Clear queue",
+      "action_failed": "The TiltBridge rejected that action. Please try again.",
+      "load_failed": "Unable to read queue status from the TiltBridge."
+    },
+    "clear_modal": {
+      "title": "Permanently delete queued readings?",
+      "message": "{count} stored readings will be permanently destroyed and can never be uploaded.",
+      "irreversible": "This cannot be undone. If you only want to retry the upload, use \"Send backlog now\" instead.",
+      "acknowledge": "I understand that {count} readings will be permanently deleted",
+      "confirm_button": "Delete all queued readings"
+    },
+    "settings": {
+      "header": "Offline Queue Settings",
+      "description": "Two independent knobs: how often the queue is written to flash, and how much it can hold.",
+      "interval_group": "Flash-write frequency",
+      "interval_group_desc": "How often queued readings are committed to flash. Writing more often loses less data on a sudden power cut, but consumes flash write cycles faster.",
+      "snapshot_interval": "Offline Queue Snapshot Interval",
+      "snapshot_interval_desc": "How often the queue is written to flash storage.",
+      "minutes_option": "{minutes} minutes",
+      "custom_option": "Custom...",
+      "custom_interval": "Custom Interval (minutes)",
+      "custom_interval_desc": "Valid range is 1 to 360 minutes. The TiltBridge clamps values outside that range.",
+      "capacity_group": "Storage capacity",
+      "capacity_group_desc": "How many readings can be held before the oldest are dropped. This sets how long an outage can last without losing data.",
+      "max_records": "Maximum queued records",
+      "max_records_desc": "Valid range is 100 to 3000. At the current record size this reserves roughly {bytes} bytes of flash.",
+      "batch_size": "Batch size (advanced)",
+      "batch_size_desc": "How many queued readings are uploaded per attempt. Valid range is 1 to 50. Lower this if uploads time out.",
+      "enable_queue": "Enable offline queue",
+      "enable_queue_desc": "When unchecked, readings taken while offline are discarded instead of being stored."
+    },
+    "recovery": {
+      "header": "Sender Recovery",
+      "description": "An independent watchdog restarts the TiltBridge if the outbound sender stops responding while Bluetooth and the network are still working. Repeated send failures alone never trigger a restart.",
+      "stale_reboot_sec": "Stale sender timeout (seconds)",
+      "stale_reboot_sec_desc": "How long the sender heartbeat may go without an update before the device restarts itself. Valid range is 60 to 600 seconds.",
+      "enable_recovery": "Enable automatic sender recovery",
+      "enable_recovery_desc": "Uncheck to report a stale sender on the About page without restarting the device."
+    },
+    "errors": {
+      "invalid_interval": "Snapshot interval must be between 1 and 360 minutes",
+      "invalid_max_records": "Maximum queued records must be between 100 and 3000",
+      "invalid_batch_size": "Batch size must be between 1 and 50",
+      "invalid_stale_reboot": "Stale sender timeout must be between 60 and 600 seconds"
+    }
   },
   "help_page": {
     "header": "TiltBridge Support",

@@ -7,6 +7,7 @@
 #include <thorlog.h>
 #include "tiltHydrometer.h"
 #include "jsonconfig.h"
+#include "../device_config.h"
 
 // ESP-IDF replacement for Arduino millis()
 static inline unsigned long millis() {
@@ -63,9 +64,23 @@ tiltHydrometer::tiltHydrometer(NimBLEAddress address, uint8_t color)
     tilt_pro = false;
     receives_battery = false;
     m_has_sent_197 = false;
-    m_address = address;
+    setAddress(address);
 
 } // tiltHydrometer
+
+void tiltHydrometer::setAddress(NimBLEAddress address)
+{
+    m_address = address;
+    // Cache the canonical form once rather than re-formatting it on every send.
+    canonicalizeDeviceId(address.toString().c_str(), m_device_id, sizeof(m_device_id));
+}
+
+uint32_t tiltHydrometer::last_update_age_ms() const
+{
+    if (m_lastUpdate == 0)
+        return UINT32_MAX;
+    return (uint32_t)(millis() - m_lastUpdate);
+}
 
 uint8_t tiltHydrometer::uuid_to_color_no(const char* uuid)
 {
@@ -96,12 +111,12 @@ uint8_t tiltHydrometer::uuid_to_color_no(const char* uuid)
 
 double tiltHydrometer::apply_calibration(double d_grav)
 {
-    double x0 = config.tilt_calibration[m_color].x0;
-    double x1 = config.tilt_calibration[m_color].x1;
-    double x2 = config.tilt_calibration[m_color].x2;
-    double x3 = config.tilt_calibration[m_color].x3;
+    // Coefficients now come from the device-specific config when one exists, and from the
+    // colour config otherwise. The polynomial itself is unchanged, so a Tilt with no
+    // device entry produces bit-identical results to previous firmware.
+    const TiltCalData cal = device_config.calibration(m_device_id, m_color);
 
-    double o_grav = x0 + x1 * d_grav + x2 * d_grav * d_grav + x3 * d_grav * d_grav * d_grav;
+    double o_grav = cal.x0 + cal.x1 * d_grav + cal.x2 * d_grav * d_grav + cal.x3 * d_grav * d_grav * d_grav;
 
     return o_grav;
 } // apply_calibration
@@ -114,6 +129,11 @@ bool tiltHydrometer::set_values(uint16_t i_temp, uint16_t i_grav, uint8_t i_tx_p
     double smoothed_cal_d_grav;
     uint32_t smoothed_i_grav_1000;
     bool is_pro = tilt_pro; //Temporarily store whether the model is Pro so we can reset smoothing filter if changed.
+
+    // Captured before the version-code early return below, so firmware-version adverts
+    // still count as signal-strength samples - they are real packets from the device.
+    rssi = current_rssi;
+    rssi_stats.add(current_rssi);
 
     if (i_temp == 999)
     { // If the temp is 999, the SG actually represents the firmware version of the Tilt.
@@ -203,8 +223,6 @@ bool tiltHydrometer::set_values(uint16_t i_temp, uint16_t i_grav, uint8_t i_tx_p
     cal_smooth_gravity = (int)round(smoothed_cal_d_grav * grav_scalar);     // Store the calibrated, smoothed, temperature corrected gravity value
     uncal_smooth_gravity = (int)round(smoothed_d_grav * grav_scalar);       // Store the uncalibrated, smoothed, temperature corrected gravity value
     latest_gravity = i_grav;                                                // Store the latest (uncalibrated, uncorrected) gravity value
-
-    rssi = current_rssi;
 
     m_lastUpdate = millis();
     return true;
@@ -297,13 +315,33 @@ JsonDocument tiltHydrometer::to_json(bool legacy_keys=false) {
     j["high_resolution"] = tilt_pro;
     j["fwVersion"] = version_code;
     j["rssi"] = rssi;
-    j["mac"] = m_address.toString();
+    j["mac"] = m_device_id;
     j["lastReceived"] = (millis() - m_lastUpdate) / 1000;
 
+    // Device identity, RSSI aggregates and resolved per-device settings. Confined to the
+    // non-legacy branch: the legacy Fermentrack payload is size-bounded by
+    // TILT_ALL_DATA_SIZE, and growing it there would overflow that buffer.
+    if (!legacy_keys) {
+        j["deviceId"] = m_device_id;
+        j["friendlyName"] = device_config.displayName(m_device_id, m_color);
+        j["modelLabel"] = device_config.modelLabel(m_device_id, m_color, tilt_pro);
+        j["enabled"] = device_config.isEnabled(m_device_id);
+        j["hasDeviceConfig"] = device_config.find(m_device_id) != nullptr;
+
+        j["rssiLatest"] = rssi;
+        j["rssiAverage"] = rssi_stats.average();
+        j["rssiMinimum"] = rssi_stats.minimum;
+        j["rssiMaximum"] = rssi_stats.maximum;
+        j["rssiSamples"] = rssi_stats.samples;
+        // Classification lives in firmware so the thresholds exist in exactly one place.
+        j["rssiQuality"] = rssiQualityName(rssi);
+    }
+
     // These are loaded from config, but are included in the JSON for simplicity in generating the dashboard without
-    // an additional API call
-    j["gsheets_name"] = config.gsheets_config[m_color].name;
-    j["gsheets_link"] = config.gsheets_config[m_color].link;
+    // an additional API call. Resolved through the device store so the UI shows the
+    // effective value rather than only the colour default.
+    j["gsheets_name"] = device_config.sheetName(m_device_id, m_color);
+    j["gsheets_link"] = device_config.sheetLink(m_device_id, m_color);
 
     return j;
 }

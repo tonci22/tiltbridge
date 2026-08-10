@@ -6,6 +6,8 @@
 #include <NimBLEAddress.h>
 #include <ArduinoJson.h>
 
+#include "../rssi_stats.h"
+
 #define TILT_DATA_SIZE 477 // JSON size of a Tilt
 #define TILT_ALL_DATA_SIZE (TILT_DATA_SIZE * TILT_COLORS + 71) // JSON size of 8 Tilts
 
@@ -62,7 +64,8 @@ public:
     uint16_t temp;                  // The calibrated temperature value last read from the Tilt
 
     uint16_t version_code;
-    int8_t rssi;
+    int8_t rssi;                    // latest value; rssi_stats carries the interval aggregate
+    RssiStats rssi_stats;
 
     uint8_t weeks_since_last_battery_change;
 
@@ -72,10 +75,23 @@ public:
 
     NimBLEAddress m_address;
 
+    // Canonical uppercase BLE address, e.g. "88:C2:55:AC:26:81". This is the physical
+    // device's identity - colour is not, since several Tilts can share one.
+    const char* deviceId() const { return m_device_id; }
+    void setAddress(NimBLEAddress address);
+
     bool expired();
+
+    // Milliseconds since this Tilt last reported. UINT32_MAX before the first reading.
+    uint32_t last_update_age_ms() const;
+
+    // Raw latest gravity counts. Zero means no reading has been received yet.
+    uint16_t latest_gravity_value() const { return latest_gravity; }
 
 private:
     void grav_to_str(uint16_t grav, char* output, size_t output_size);
+
+    char m_device_id[18] = "";
 
     uint16_t latest_gravity;        // The latest (unsmoothed) uncalibrated, uncorrected gravity value read from the Tilt (used for the calibration workflow)
     uint16_t uncal_smooth_gravity;  // The uncalibrated, smoothed, temperature corrected gravity value last updated from the Tilt (sent to Fermentrack which applies its own calibration)

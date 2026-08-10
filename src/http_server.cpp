@@ -16,6 +16,9 @@
 #include "jsonconfig.h"
 #include "tilt/tiltScanner.h"
 #include "sendData.h"
+#include "sender_health.h"
+#include "device_config.h"
+#include "queue/reading_queue.h"
 #include "JsonKeys.h"
 
 #include <esp_wifi_config.h>
@@ -127,26 +130,40 @@ static void reset_reason_json(JsonDocument &doc) {
     doc["description"] = resetDescription[reset];
 }
 
-static const char* sendTargetNames[] = {
-    "legacy_fermentrack",
-    "fermentrack",
-    "brewers_friend",
-    "brewfather",
-    "user_target",
-    "grainfather",
-    "brew_status",
-    "taplistio",
-    "google_sheets",
-    "mqtt",
-    "influxdb"
-};
-
 static void errors_json(JsonDocument &doc) {
     for (uint8_t i = 0; i < TARGET_COUNT; i++) {
         JsonObject target = doc[sendTargetNames[i]].to<JsonObject>();
         target["error_code"] = (uint8_t)data_sender.targetStatus[i].lastError;
         target["last_attempt_at"] = data_sender.targetStatus[i].lastAttemptTime;
     }
+}
+
+static void sender_json(JsonDocument &doc) {
+    sender_health.to_json(doc);
+}
+
+static void devices_json(JsonDocument &doc) {
+    device_config.to_json(doc);
+}
+
+static const char* queueUploadStateName(dataSendHandler::QueueUploadState s) {
+    switch (s) {
+        case dataSendHandler::QueueUploadState::SENDING:  return "SENDING";
+        case dataSendHandler::QueueUploadState::RETRYING: return "RETRYING";
+        case dataSendHandler::QueueUploadState::DISABLED: return "DISABLED";
+        default:                                          return "IDLE";
+    }
+}
+
+static void queue_json(JsonDocument &doc) {
+    reading_queue.to_json(doc);
+
+    doc["uploadStatus"] = queueUploadStateName(data_sender.queueUploadState);
+
+    if (data_sender.lastQueueUploadSuccessMs != 0)
+        doc["lastUploadSuccessAgeSec"] = (sh_millis() - data_sender.lastQueueUploadSuccessMs) / 1000;
+    else
+        doc["lastUploadSuccessAgeSec"] = nullptr;
 }
 
 
@@ -274,6 +291,61 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
         }
     }
 
+    // queueSnapshotIntervalSec - device-wide, so it lives here rather than with any one target
+    if(json[QueueSettings::queueSnapshotIntervalSec].is<uint16_t>()) {
+        uint16_t interval = json[QueueSettings::queueSnapshotIntervalSec].as<uint16_t>();
+        if(interval < 60 || interval > 21600) {  // the 60 s floor protects flash from snapshot churn
+            Log.warning("Settings update error, [queueSnapshotIntervalSec]:(%d) not valid.\r\n", interval);
+            failCount++;
+        } else {
+            if(config.queueSnapshotIntervalSec != interval)
+                http_server.queue_timer_restart_rqd = true;  // the running one-shot is re-armed by the main loop
+            config.queueSnapshotIntervalSec = interval;
+            Log.notice("Settings update, [queueSnapshotIntervalSec]:(%d) applied.\r\n", interval);
+        }
+    }
+
+    // maxQueuedRecords
+    if(json[QueueSettings::maxQueuedRecords].is<uint16_t>()) {
+        uint16_t maxRecords = json[QueueSettings::maxQueuedRecords].as<uint16_t>();
+        if(maxRecords < 100 || maxRecords > 3000) {  // 3000 * 128 B = 384 KB of filesystem
+            Log.warning("Settings update error, [maxQueuedRecords]:(%d) not valid.\r\n", maxRecords);
+            failCount++;
+        } else {
+            config.maxQueuedRecords = maxRecords;
+            Log.notice("Settings update, [maxQueuedRecords]:(%d) applied.\r\n", maxRecords);
+        }
+    }
+
+    // queueBatchSize
+    if(json[QueueSettings::queueBatchSize].is<uint8_t>()) {
+        uint8_t batchSize = json[QueueSettings::queueBatchSize].as<uint8_t>();
+        if(batchSize < 1 || batchSize > 50) {  // 50 records is already a ~13 KB POST body
+            Log.warning("Settings update error, [queueBatchSize]:(%d) not valid.\r\n", batchSize);
+            failCount++;
+        } else {
+            config.queueBatchSize = batchSize;
+            Log.notice("Settings update, [queueBatchSize]:(%d) applied.\r\n", batchSize);
+        }
+    }
+
+    // senderStaleRebootSec
+    if(json["senderStaleRebootSec"].is<uint16_t>()) {
+        uint16_t staleSec = json["senderStaleRebootSec"].as<uint16_t>();
+        if(staleSec < 60 || staleSec > 600) {
+            Log.warning("Settings update error, [senderStaleRebootSec]:(%d) not valid.\r\n", staleSec);
+            failCount++;
+        } else {
+            config.senderStaleRebootSec = staleSec;
+            Log.notice("Settings update, [senderStaleRebootSec]:(%d) applied.\r\n", staleSec);
+        }
+    }
+
+    // Optional booleans - the return value is deliberately ignored, as it is also false
+    // when the key is simply absent from a partial controller settings update
+    updateJsonSettingBool(json, QueueSettings::offlineQueueEnabled, config.offlineQueueEnabled);
+    updateJsonSettingBool(json, "senderRecoveryEnabled", config.senderRecoveryEnabled);
+
     // Process everything we were passed
     if (failCount) {
         Log.error("Error: Invalid controller configuration.\r\n");
@@ -388,6 +460,9 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
             failCount++;
         i++;
     }
+
+    // Optional - absent means "leave the current mode alone", so the return value is ignored
+    updateJsonSettingBool(json, GoogleSheetsSettings::gsheetsV2Enabled, config.gsheetsV2Enabled);
 
     if(failCount > 0) {
         Log.error("Error: Invalid Google Sheets configuration.\r\n");
@@ -684,6 +759,9 @@ MAKE_GET_HANDLER(handle_api_uptime, uptime_json)
 MAKE_GET_HANDLER(handle_api_heap, heap_json)
 MAKE_GET_HANDLER(handle_api_resetreason, reset_reason_json)
 MAKE_GET_HANDLER(handle_api_errors, errors_json)
+MAKE_GET_HANDLER(handle_api_sender, sender_json)
+MAKE_GET_HANDLER(handle_api_devices, devices_json)
+MAKE_GET_HANDLER(handle_api_queue, queue_json)
 
 // Generate PUT handlers
 MAKE_PUT_HANDLER(handle_settings_controller, processTiltBridgeSettingsJson)
@@ -694,6 +772,90 @@ MAKE_PUT_HANDLER(handle_settings_targets, processTargetSettings)
 MAKE_PUT_HANDLER(handle_calibration_datapoint, processCalibrationDataPoint)
 MAKE_PUT_HANDLER(handle_calibration_coefficients, processCalibrationCoefficients)
 MAKE_PUT_HANDLER(handle_calibration_delete, processCalibrationDataDelete)
+
+// Device configuration upsert. Creates the entry when it does not exist, which is how a
+// user attaches settings to a newly detected physical Tilt.
+static esp_err_t handle_devices_put(httpd_req_t *req) {
+    JsonDocument doc;
+
+    if (idf_json_parse_body(req, doc) != ESP_OK) {
+        return ESP_OK;  // Error response already sent
+    }
+
+    const char *err = nullptr;
+    if (!device_config.upsert_from_json(doc, &err)) {
+        Log.warning("Device config update rejected: %s\r\n", err ? err : "unknown");
+        return idf_json_send_error(req, 400, err ? err : "Invalid device configuration");
+    }
+
+    return idf_json_send_status(req, true);
+}
+
+// Removing a device entry reverts that Tilt to the shared colour configuration.
+static esp_err_t handle_devices_delete(httpd_req_t *req) {
+    JsonDocument doc;
+
+    if (idf_json_parse_body(req, doc) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    const char *rawId = doc["deviceId"].as<const char*>();
+    if (!isValidDeviceId(rawId)) {
+        return idf_json_send_error(req, 400, "Invalid or missing deviceId");
+    }
+
+    char id[DEVICE_ID_LEN];
+    canonicalizeDeviceId(rawId, id, sizeof(id));
+
+    if (!device_config.remove(id)) {
+        return idf_json_send_error(req, 404, "No configuration exists for that device");
+    }
+
+    if (!device_config.save()) {
+        return idf_json_send_error(req, 500, "Unable to save device configuration");
+    }
+
+    Log.notice("Device configuration removed for %s; reverting to colour settings.\r\n", id);
+    return idf_json_send_status(req, true);
+}
+
+// Queue actions. Clearing is destructive, so it requires an explicit confirm flag on the
+// wire as well as a confirmation step in the UI.
+static esp_err_t handle_queue_actions(httpd_req_t *req) {
+    JsonDocument doc;
+
+    if (idf_json_parse_body(req, doc) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    const char *action = doc["action"];
+    if (!action) {
+        return idf_json_send_error(req, 400, "Missing 'action' field");
+    }
+
+    if (strcmp(action, "sendBacklogNow") == 0) {
+        if (!config.gsheetsV2Enabled) {
+            return idf_json_send_error(req, 400,
+                "Enhanced Google Sheets mode is off; the backlog has no configured destination");
+        }
+        data_sender.send_backlog_now = true;
+        Log.notice("Backlog upload requested via API.\r\n");
+
+    } else if (strcmp(action, "clearQueue") == 0) {
+        if (!doc["confirm"].is<bool>() || !doc["confirm"].as<bool>()) {
+            return idf_json_send_error(req, 400,
+                "Clearing the queue permanently discards queued readings and requires confirm:true");
+        }
+        const size_t discarded = reading_queue.pendingCount();
+        reading_queue.clear();
+        Log.warning("Queue cleared via API; %u pending readings discarded.\r\n", (unsigned)discarded);
+
+    } else {
+        return idf_json_send_error(req, 400, "Unknown action");
+    }
+
+    return idf_json_send_status(req, true);
+}
 
 // Action handler — dispatches based on "action" field in JSON body
 static esp_err_t handle_action(httpd_req_t *req) {
@@ -710,6 +872,13 @@ static esp_err_t handle_action(httpd_req_t *req) {
 
     if (strcmp(action, "resetWifi") == 0) {
         http_server.wifi_reset_requested = true;
+#ifdef TB_DEBUG_FREEZE
+    } else if (strcmp(action, "debugFreezeSender") == 0) {
+        // Acceptance-test hook (T6): stop refreshing the sender heartbeat so the health
+        // monitor sees the outbound loop as wedged. Compiled in only with -D TB_DEBUG_FREEZE=1.
+        sender_health.debugFreeze = true;
+        Log.warning("DEBUG: sender heartbeat frozen by request.\r\n");
+#endif
     } else if (strcmp(action, "resetDevice") == 0) {
         http_server.factoryreset_requested = true;
     } else if (strcmp(action, "restartDevice") == 0) {
@@ -738,6 +907,9 @@ void httpServer::registerJsonGetHandlers() {
         {"/api/heap/", handle_api_heap},
         {"/api/resetreason/", handle_api_resetreason},
         {"/api/errors/", handle_api_errors},
+        {"/api/sender/", handle_api_sender},
+        {"/api/devices/", handle_api_devices},
+        {"/api/queue/", handle_api_queue},
     };
 
     for (const auto& endpoint : get_endpoints) {
@@ -819,6 +991,36 @@ void httpServer::registerActionHandlers() {
     ESP_LOGI(TAG, "Registered action handlers");
 }
 
+void httpServer::registerDeviceHandlers() {
+    // PUT upserts a single device; the GET half is registered with the other JSON GETs.
+    httpd_uri_t put_uri = {
+        .uri = "/api/devices/",
+        .method = HTTP_PUT,
+        .handler = handle_devices_put,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&put_uri);
+
+    // POST rather than DELETE, matching the existing calibration delete endpoint.
+    httpd_uri_t delete_uri = {
+        .uri = "/api/devices/delete/",
+        .method = HTTP_POST,
+        .handler = handle_devices_delete,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&delete_uri);
+
+    httpd_uri_t queue_actions_uri = {
+        .uri = "/api/queue/actions/",
+        .method = HTTP_POST,
+        .handler = handle_queue_actions,
+        .user_ctx = NULL
+    };
+    idf_httpd_register_uri(&queue_actions_uri);
+
+    ESP_LOGI(TAG, "Registered device configuration and queue handlers");
+}
+
 void httpServer::init() {
     // Start the HTTP server with worker pool
     // esp_err_t ret = idf_httpd_start();
@@ -836,6 +1038,7 @@ void httpServer::init() {
     registerJsonPutHandlers();
     registerCalibrationHandlers();
     registerActionHandlers();
+    registerDeviceHandlers();
 
     // Register catch-all for static files LAST (so specific routes take precedence)
     idf_static_register_catchall();

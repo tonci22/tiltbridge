@@ -7,6 +7,7 @@
 #include "jsonconfig.h"
 #include "wifi_setup.h"
 #include "sendData.h"
+#include "sender_health.h"
 #include "tilt/tiltScanner.h"
 #include "mqtt_client.h"
 #include "version.h"
@@ -152,9 +153,12 @@ bool dataSendHandler::send_to_mqtt() {
         connect_mqtt();
     }
 
-    if (send_mqtt && !send_lock) {
+    if (send_mqtt) {
+        SenderLock lock(TARGET_MQTT, HTTP_TIMEOUT_DEFAULT_MS);
+        if (!lock)
+            return result;
+
         send_mqtt = false;
-        send_lock = true;
 
         Log.verbose("Publishing available results to MQTT Broker.\r\n");
 
@@ -174,8 +178,7 @@ bool dataSendHandler::send_to_mqtt() {
         // Track MQTT status
         setTargetStatus(TARGET_MQTT, mqtt_connected ? SEND_OK : SEND_ERR_MQTT_DISCONNECTED);
 
-        data_sender.startTimer(data_sender.mqttTimer, config.mqttPushEvery);
-        send_lock = false;
+        data_sender.startTimer(data_sender.mqttTimer, data_sender.backoffDelay(TARGET_MQTT, config.mqttPushEvery));
     }
 
     return result;
