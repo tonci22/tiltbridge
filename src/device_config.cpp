@@ -120,15 +120,55 @@ size_t DeviceConfigStore::count() const {
 // Resolved accessors - device value first, colour config as fallback
 //=============================================================================
 
-const char* DeviceConfigStore::sheetName(const char *deviceId, uint8_t colorIndex) const {
+/*
+ * A sheet belongs to a Tilt, so the per-device name always wins.
+ *
+ * What to do WITHOUT one changed once two Tilts of the same colour became possible. The
+ * per-colour name is only unambiguous while exactly one Tilt of that colour exists; handing
+ * it to a second one would silently merge two ferments into a single sheet - far worse than
+ * any naming mistake, and effectively impossible to unpick afterwards.
+ *
+ * So a device with NO configuration at all gets a name derived from its own address,
+ * "Red-396D": it cannot collide, and it reads as a placeholder asking to be configured. A
+ * device that HAS a configuration but left the name blank still falls back to the colour,
+ * because that is a deliberate choice made in front of the per-device field.
+ */
+void DeviceConfigStore::sheetName(const char *deviceId, uint8_t colorIndex,
+                                  char *out, size_t outSize) const {
+    if (out == nullptr || outSize == 0)
+        return;
+
+    out[0] = '\0';
+
     const DeviceConfig *d = find(deviceId);
-    if (d != nullptr && d->googleSheetsName[0] != '\0')
-        return d->googleSheetsName;
 
-    if (colorIndex < TILT_COLORS)
-        return config.gsheets_config[colorIndex].name;
+    if (d != nullptr) {
+        if (d->googleSheetsName[0] != '\0')
+            strlcpy(out, d->googleSheetsName, outSize);
+        else if (colorIndex < TILT_COLORS)
+            strlcpy(out, config.gsheets_config[colorIndex].name, outSize);
+        return;
+    }
 
-    return "";
+    // Unconfigured: last two octets of the address, which are unique enough in practice and
+    // short enough to leave the name readable.
+    char suffix[5] = {0};
+    if (deviceId != nullptr) {
+        const size_t len = strlen(deviceId);
+        const char *tail = (len >= 5) ? (deviceId + len - 5) : deviceId;
+        size_t s = 0;
+        for (size_t i = 0; tail[i] != '\0' && s < sizeof(suffix) - 1; i++) {
+            if (tail[i] != ':')
+                suffix[s++] = tail[i];
+        }
+    }
+
+    const char *colorName = (colorIndex < TILT_COLORS) ? tilt_color_names[colorIndex] : "Tilt";
+
+    if (suffix[0] == '\0')
+        strlcpy(out, colorName, outSize);
+    else
+        snprintf(out, outSize, "%s-%s", colorName, suffix);
 }
 
 const char* DeviceConfigStore::displayName(const char *deviceId, uint8_t colorIndex) const {

@@ -340,7 +340,10 @@ JsonDocument tiltHydrometer::to_json(bool legacy_keys=false) {
     // These are loaded from config, but are included in the JSON for simplicity in generating the dashboard without
     // an additional API call. Resolved through the device store so the UI shows the
     // effective value rather than only the colour default.
-    j["gsheets_name"] = device_config.sheetName(m_device_id, m_color);
+    // A local buffer, so ArduinoJson copies the value rather than storing a pointer.
+    char sheetName[sizeof(GsheetsConfig::name)];
+    device_config.sheetName(m_device_id, m_color, sheetName, sizeof(sheetName));
+    j["gsheets_name"] = sheetName;
     j["gsheets_link"] = device_config.sheetLink(m_device_id, m_color);
 
     return j;

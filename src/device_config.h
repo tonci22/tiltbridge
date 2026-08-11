@@ -55,7 +55,14 @@ public:
 
     // Resolved accessors. Each falls back to the colour-keyed config when no
     // device-specific value exists.
-    const char* sheetName(const char *deviceId, uint8_t colorIndex) const;
+    /**
+     * @brief Sheet name for a reading, written into `out`.
+     *
+     * Writes rather than returning a pointer because the fallback is now derived per device
+     * and would otherwise need shared scratch storage - which one caller hands straight to
+     * ArduinoJson, where a reused buffer would make every Tilt report the last one's name.
+     */
+    void sheetName(const char *deviceId, uint8_t colorIndex, char *out, size_t outSize) const;
     const char* displayName(const char *deviceId, uint8_t colorIndex) const;
     TiltCalData calibration(const char *deviceId, uint8_t colorIndex) const;
     bool        isEnabled(const char *deviceId) const;

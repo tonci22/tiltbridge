@@ -305,7 +305,7 @@ uint16_t dataSendHandler::collectCurrentReadings(QueuedReading *out, uint16_t ma
 
         strlcpy(rec.deviceId, th.deviceId(), sizeof(rec.deviceId));
         rec.colorIndex = th.m_color;
-        strlcpy(rec.sheetName, device_config.sheetName(th.deviceId(), th.m_color), sizeof(rec.sheetName));
+        device_config.sheetName(th.deviceId(), th.m_color, rec.sheetName, sizeof(rec.sheetName));
 
         char buf[12];
         th.converted_temp(buf, sizeof(buf), true);      // always Fahrenheit
@@ -814,8 +814,9 @@ bool dataSendHandler::send_to_google()
 
                 // Check if there is a google sheet name associated with the specific Tilt.
                 // Resolves to the device-specific name when configured, else the colour's.
-                const char *sheetName = device_config.sheetName(th.deviceId(), th.m_color);
-                if (sheetName != nullptr && strlen(sheetName) > 0) {
+                char sheetName[QR_SHEET_NAME_LEN];
+                device_config.sheetName(th.deviceId(), th.m_color, sheetName, sizeof(sheetName));
+                if (strlen(sheetName) > 0) {
                     char gravity[10];
                     char temp[6];
 
