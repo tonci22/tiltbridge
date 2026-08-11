@@ -43,7 +43,11 @@ export const useCalibrationStore = defineStore("CalibrationStore", () => {
 
     async function loadCalibrationPoints(color, deviceId = null) {
         try {
-            const response = await fetch(calibrationPointsPath(color, deviceId));
+            // no-store because this is re-read immediately after every add and delete; a
+            // cached copy shows the previous contents and makes the change look like it
+            // never happened. The firmware also sends no-store for /conf/, so this is belt
+            // and braces against an older build.
+            const response = await fetch(calibrationPointsPath(color, deviceId), { cache: "no-store" });
             if (response.ok) {
                 const data = await response.json();
                 calibrationPoints.value = data || [];

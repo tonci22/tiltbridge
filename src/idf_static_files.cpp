@@ -117,9 +117,32 @@ esp_err_t idf_static_serve_file(httpd_req_t *req, const char *file_path) {
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     }
 
-    // Set cache control
+    /*
+     * Cache the UI, never the configuration.
+     *
+     * Everything under /conf/ is live device state - the calibration point files the web UI
+     * re-reads immediately after changing them. Serving those with max-age meant the browser
+     * answered the reload from cache and showed the OLD contents, so a calibration point that
+     * had genuinely been deleted stayed on screen and the delete button looked dead.
+     *
+     * The UI assets are still cached: they only change when the filesystem is reflashed.
+     */
     char cache_control[32];
-    snprintf(cache_control, sizeof(cache_control), "max-age=%d", STATIC_CACHE_MAX_AGE);
+
+    // file_path arrives without a leading slash here (the separator is added when full_path
+    // is built), but tolerate one so this cannot silently stop matching.
+    const char *rel = file_path;
+    while (*rel == '/')
+        rel++;
+
+    const bool is_config = (strncmp(rel, "conf/", 5) == 0);
+
+    if (is_config) {
+        strlcpy(cache_control, "no-store", sizeof(cache_control));
+    } else {
+        snprintf(cache_control, sizeof(cache_control), "max-age=%d", STATIC_CACHE_MAX_AGE);
+    }
+
     httpd_resp_set_hdr(req, "Cache-Control", cache_control);
 
     // Stream file in chunks
