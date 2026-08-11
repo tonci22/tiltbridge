@@ -63,6 +63,15 @@ public:
     void compact();
     bool clear();
 
+    /**
+     * @brief Delete every trace of the queue, including the state file and the NVS counters.
+     *
+     * clear() drops the queued readings but deliberately keeps the boot counter and the
+     * overflow tally, which is right for "empty the queue" from the UI. A factory reset must
+     * leave nothing behind, so it uses this instead.
+     */
+    void eraseAll();
+
     // Status
     size_t   pendingCount() const { return m_pendingCount; }
     uint32_t droppedOverflow() const { return m_droppedOverflow; }

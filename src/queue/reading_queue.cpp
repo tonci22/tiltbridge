@@ -625,6 +625,27 @@ void ReadingQueue::rewriteJournal() {
         remove(QUEUE_JOURNAL_PATH ".tmp");
 }
 
+void ReadingQueue::eraseAll() {
+    clear();                        // segments and the journal
+
+    ::remove(QUEUE_STATE_PATH);     // clear() keeps this; a factory reset must not
+
+    // The boot counter and the overflow tally live in NVS, so deleting files alone would
+    // carry a "dropped N readings" figure across a reset that claims to erase everything.
+    nvs_handle_t h;
+    if (nvs_open(NVS_QUEUE_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_erase_all(h);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
+    m_droppedOverflow = 0;
+    m_nextSequence = 1;
+    m_headSequence = 0;
+
+    Log.warning("Queue erased for factory reset.\r\n");
+}
+
 bool ReadingQueue::clear() {
     DIR *dir = opendir(QUEUE_DIR);
     if (dir != nullptr) {

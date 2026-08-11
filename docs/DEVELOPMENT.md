@@ -156,11 +156,87 @@ So a full flash after changing both firmware and UI is:
 ~/.platformio/penv/bin/pio run -e esp32_headless --target upload --target buildfs --target uploadfs
 ```
 
+### Do not combine `upload` with `buildfs`/`uploadfs`
+
+```bash
+# BROKEN - writes the filesystem twice and never writes the firmware
+pio run -e esp32_headless --target upload --target buildfs --target uploadfs
+```
+
+PlatformIO reorders and dedupes targets, and the firmware write silently disappears: the log
+shows two writes to `0x00330000` (the LittleFS partition) and none to `0x00010000` (the app).
+The device reboots running the OLD firmware with the NEW web UI, which looks like the firmware
+change simply did not work.
+
+**Always run them as separate commands**, and check the addresses in the output:
+
+```bash
+pio run -e esp32_headless --target upload                      # expect 0x00010000
+pio run -e esp32_headless --target buildfs --target uploadfs   # expect 0x00330000
+```
+
 ### If upload fails
+
+Uploads fail transiently often enough to be worth knowing: the log can show `Hash of data
+verified` and still end in `[FAILED]`. **Just run it again** — a retry has always worked.
+
+A failed firmware write can leave a bad app image, and then the device never joins WiFi. That
+looks alarming but is not a brick: esptool still talks to it over serial. Confirm and re-flash:
+
+```bash
+pio pkg exec -p tool-esptoolpy -- esptool.py --port /dev/cu.usbserial-0001 --no-stub flash_id
+pio run -e esp32_headless --target upload --upload-port /dev/cu.usbserial-0001
+```
 
 Most boards auto-reset into the bootloader via DTR/RTS. If yours does not, hold **BOOT/GPIO0**,
 tap **RESET**, release BOOT, then start the upload. `upload_speed` is 460800; drop it in
 `platformio.ini` if you see checksum errors on a long or unpowered USB cable.
+
+---
+
+## 5.1 Flashing the filesystem DESTROYS the device configuration
+
+`uploadfs` writes a whole LittleFS image, and that partition holds more than the web UI:
+
+| Path | Contents | Survives `uploadfs`? |
+|---|---|---|
+| `/littlefs/conf/tiltbridgeConfig.json` | all settings, target URLs, calibration | **no** |
+| `/littlefs/conf/devices.json` | per-Tilt names, sheet names, per-device calibration | **no** |
+| `/littlefs/queue/` | readings not yet uploaded | **no** |
+| NVS partition | WiFi credentials, queue counters | yes |
+
+WiFi survives, so the device comes back on the network — with a default configuration.
+
+**Back up and restore around every `uploadfs`:**
+
+```bash
+# 1. Wait until nothing is queued, or those readings are lost for good
+curl -s http://<device>/api/queue/     # queuedReadings must be 0
+
+# 2. Back up
+curl -s http://<device>/api/settings/json/ -o config.json
+curl -s http://<device>/api/devices/     -o devices.json
+
+# 3. Flash, then restore (see the ordering warning below)
+```
+
+Restore is plain unauthenticated PUTs — there is no CSRF check in the firmware:
+
+| Endpoint | Carries |
+|---|---|
+| `PUT /api/devices/` | one body per Tilt: `deviceId`, `colorIndex`, `friendlyName`, `googleSheetsName`, … |
+| `PUT /api/settings/targets/` | `scriptsURL`, `scriptsEmail`, `gsheetsV2Enabled`, `gsheetsPushEvery`, … |
+| `PUT /api/settings/calibration/` | `applyCalibration`, `tempCorrect` |
+| `PUT /api/settings/controller/` | `mdnsID`, `tzOffset`, `tempUnit`, queue settings, … |
+
+**Restore in that order.** Device configs and sheet names must land *before* anything that can
+trigger a reading capture — writing `queueSnapshotIntervalSec` triggers one immediately, and a
+Tilt with no configuration yet produces an empty sheet name, which makes the Apps Script fall
+back to the colour and create stray `Red`/`Green`/`Black` tabs.
+
+Note `TZoffset` is **served** under that name but was historically only **accepted** as
+`tzOffset`. Both spellings are accepted now, but a backup taken from an older build and PUT back
+verbatim will silently drop the timezone.
 
 ---
 
@@ -175,6 +251,32 @@ Using `-e` matters: it picks up `monitor_speed = 115200` and, more importantly,
 instead of raw addresses. Without the environment you get 115200 defaults and unreadable crashes.
 
 `Ctrl-C` exits. The monitor holds the port open, so **stop it before flashing**.
+
+### Capturing the log non-interactively
+
+`pio device monitor` needs a real TTY and dies with `termios.error: (19, 'Operation not
+supported by device')` if its output is piped or redirected — so it cannot be used from a
+script. Use pyserial directly (it ships in the PlatformIO venv):
+
+```python
+import serial, time, sys
+s = serial.Serial("/dev/cu.usbserial-0001", 115200, timeout=0.2)
+
+# Classic ESP32 auto-reset: EN low via DTR/RTS, then release into normal run mode.
+s.setDTR(False); s.setRTS(True); time.sleep(0.15)
+s.setRTS(False);                 time.sleep(0.05)
+s.reset_input_buffer()
+
+deadline, out = time.time() + 12, bytearray()
+while time.time() < deadline:
+    out += s.read(4096)
+s.close()
+sys.stdout.write(out.decode("utf-8", "replace"))
+```
+
+Omit the DTR/RTS lines to attach without resetting a running device. The boot log is the fastest
+way to identify a board: it prints the partition table, `Project name`, `App version`, the
+compile time, and which subsystems came up.
 
 Log verbosity is compile-time, in `[common] build_flags`: `ARDUINO_LOG_LEVEL` (6 = most verbose),
 `CORE_DEBUG_LEVEL`, `CONFIG_NIMBLE_CPP_LOG_LEVEL` and `PRINT_GRAV_UPDATES`.
@@ -230,7 +332,51 @@ the device drop the record from its offline queue.
 
 ---
 
-## 8. Useful extras
+## 8. Checking a running device over HTTP
+
+No credentials are needed. `mdnsID` is configurable, so prefer the IP once you know it.
+
+| Endpoint | Answers |
+|---|---|
+| `/api/version/` | firmware version, **git branch and commit**, `hardware` string — the reliable way to confirm a flash landed and which board build is running |
+| `/api/queue/` | `queuedReadings`, `bytesUsed`, `uploadStatus`, `lastUploadSuccessAgeSec`, `maxRecordsSupported`, `activeTilts`, `estimatedRunwayHours` |
+| `/api/errors/` | per-target `error_code` (0 = OK) and last attempt time |
+| `/api/json/` | live Tilt readings, each with `mac`, `hasDeviceConfig`, `gsheets_name` |
+| `/api/settings/json/` | the whole configuration — this is the backup |
+| `/api/devices/` | per-Tilt configurations |
+| `/api/uptime/`, `/api/heap/` | uptime, free heap and fragmentation |
+
+`hardware` tells you which environment the running firmware was built from (`Headless`,
+`Small TFT`, `S3 OLED`, …), which is how to pick the right `-e` without guessing.
+
+### Recipes
+
+**Confirm a flash landed** — `/api/version/` reports `branch` and `build` from `tools/git_rev.py`,
+so it changes when you flash a different commit.
+
+**Wait for the queue to drain before flashing the filesystem:**
+
+```bash
+until [ "$(curl -s http://<device>/api/queue/ | python3 -c \
+  'import json,sys;print(json.load(sys.stdin)["queuedReadings"])')" = "0" ]; do sleep 20; done
+```
+
+**Simulate an outage** without unplugging anything — point the script URL at a deployment that
+does not exist, watch the queue grow at the persistence interval, then restore the real URL and
+watch it drain:
+
+```bash
+curl -X PUT http://<device>/api/settings/targets/ -H 'Content-Type: application/json' -d '{
+  "scriptsURL":"https://script.google.com/macros/s/INVALID_FOR_TEST/exec",
+  "scriptsEmail":"you@example.com","gsheetsV2Enabled":true,"gsheetsPushEvery":600}'
+```
+
+Records only reach flash while sending is failing, so `bytesUsed` staying at 0 during normal
+operation is the check that the live path is working.
+
+---
+
+## 9. Useful extras
 
 ```bash
 # Everything PlatformIO knows about an environment
@@ -251,7 +397,7 @@ which is why the About page knows your git branch.
 
 ---
 
-## 9. Editing config settings
+## 10. Editing config settings
 
 Adding a setting means touching five places, and missing one fails quietly:
 

@@ -98,7 +98,7 @@
       },
       "reset_device": {
         "title": "Reset Device",
-        "description": "Perform a complete factory reset. All settings (including WiFi settings) and calibration data will be lost.",
+        "description": "Perform a complete factory reset. Everything stored on the device is erased: all settings, WiFi credentials, per-Tilt configurations (names, sheet names and calibration) and any readings still waiting in the offline queue.",
         "button": "Reset Device"
       },
       "confirm_modal": {
@@ -108,7 +108,7 @@
         },
         "device": {
           "title": "Confirm Device Reset",
-          "message": "Are you sure you want to perform a factory reset? This will erase ALL settings, calibration data, and configuration. This action cannot be undone."
+          "message": "Are you sure you want to perform a factory reset? This erases every setting, your WiFi credentials, every per-Tilt configuration including calibration, and any readings still queued for upload. Queued readings have not reached your targets yet and cannot be recovered. This action cannot be undone."
         },
         "confirm_button": "Yes, Reset"
       },
@@ -123,9 +123,9 @@
         },
         "device": {
           "title": "Resetting Device...",
-          "message": "The device is performing a factory reset and will restart. All settings and data have been erased. You will need to reconfigure the device (including WiFi access) from scratch.",
+          "message": "The device is performing a factory reset and will restart. All settings, per-Tilt configurations and queued readings have been erased. You will need to reconfigure the device (including WiFi access) from scratch.",
           "success_title": "Device Reset Sent",
-          "success_message": "The factory reset command was accepted. The device will restart shortly. You will need to reconfigure the device (including WiFi access) from scratch.",
+          "success_message": "The factory reset command was accepted. The device will erase everything and restart shortly. You will need to reconfigure the device (including WiFi access) from scratch.",
           "failed_title": "Device Reset Failed",
           "failed_message": "The factory reset command could not be sent. Please check your connection to the device and try again."
         }

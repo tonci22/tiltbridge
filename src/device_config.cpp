@@ -98,6 +98,14 @@ DeviceConfig* DeviceConfigStore::findOrCreate(const char *deviceId, uint8_t colo
     return nullptr;   // table full
 }
 
+void DeviceConfigStore::eraseAll() {
+    for (uint8_t i = 0; i < MAX_DEVICE_CONFIGS; i++)
+        devices[i] = DeviceConfig{};
+
+    ::remove(DEVICE_CONFIG_FILE);
+    Log.warning("Device configurations erased.\r\n");
+}
+
 bool DeviceConfigStore::remove(const char *deviceId) {
     DeviceConfig *d = find(deviceId);
     if (d == nullptr)

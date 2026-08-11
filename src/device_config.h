@@ -53,6 +53,15 @@ public:
     DeviceConfig*       findOrCreate(const char *deviceId, uint8_t colorIndex);
     bool                remove(const char *deviceId);
 
+    /**
+     * @brief Forget every device configuration and delete devices.json.
+     *
+     * Part of a factory reset. Per-device names, sheet names, calibration and enabled flags
+     * all live here, so leaving this file behind meant a "reset" that kept every Tilt's
+     * identity - which the UI already told the user had been erased.
+     */
+    void                eraseAll();
+
     // Resolved accessors. Each falls back to the colour-keyed config when no
     // device-specific value exists.
     /**

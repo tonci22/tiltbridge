@@ -195,10 +195,23 @@ void loop() {
     }
 
     if (http_server.factoryreset_requested) {
-        Log.verbose("Resetting to original settings.\r\n");
+        Log.warning("Factory reset: erasing all settings and stored data.\r\n");
         http_server.factoryreset_requested = false;
         tilt_scanner.wait_until_scan_complete();    // Wait for scans to complete
-        config.deleteFile();                        // Delete the config file in the filesystem
+
+        /*
+         * Everything that survives a reboot, in one place. The UI has always promised that a
+         * reset erases "ALL settings, calibration data, and configuration", but only the main
+         * config file was actually deleted - so per-device names, per-device calibration and
+         * every queued reading came back afterwards.
+         */
+        config.deleteFile();                        // tiltbridgeConfig.json
+        device_config.eraseAll();                   // devices.json - per-Tilt identity and calibration
+        reading_queue.eraseAll();                   // queued readings, journal, state, NVS counters
+
+        // Also drops the live scan results, so nothing lingers in RAM until the restart.
+        tilt_scanner.m_tilt_devices.clear();
+
         disconnectWiFi();                           // Clear wifi config and restart
     }
 
