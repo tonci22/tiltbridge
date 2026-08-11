@@ -67,25 +67,66 @@ TiltBridge send data" has three plausible answers depending on which one you mea
 | `<target>PushEvery` | each target's panel | how often captured readings are **uploaded** to that target — latency and batching only |
 | `maxQueuedRecords` | Queue page (device-wide) | how long an **outage** the queue can absorb |
 
-**The snapshot interval is not just a flash-wear knob, and the name undersells it.**
-`take_queue_snapshot()` walks every enabled Tilt, builds a `QueuedReading` and appends it to
-flash. The append is what persists the queue, which is where the name comes from — but the walk
-is what *creates the reading*. Raising this interval does not merely write to flash less often;
-it samples less often, and the spreadsheet gets proportionally fewer rows.
+### Readings are sent live; the queue is the fallback
 
-So the row cadence you see in the sheet is the **snapshot** interval. The push interval only
-decides how long a captured row waits before it is uploaded, and it can never produce a row that
-was never captured. A device on a 15-minute snapshot and a 10-minute push writes a row every
-15 minutes, each arriving within 10 minutes of capture.
+In steady state **nothing is written to flash**. Every push interval `send_to_google_v2()` builds
+records from the scanner's current values, sends them, and drops them on acknowledgement. Verified
+on hardware: `bytesUsed` stays at 0 across successful sends.
 
-Changing the snapshot interval **captures a reading immediately** and restarts the cadence from
-that moment. `http_server` sets `queue_timer_restart_rqd`, the main loop turns that into a due
-snapshot, and `take_queue_snapshot()` re-arms its own one-shot on the new interval.
+The queue is what happens when that stops working:
 
-It used to re-arm for a full interval instead, which meant a change always *postponed* the next
-reading — so shortening the interval made the queue go quiet for longer than the old setting did.
-That is the opposite of the intent and is indistinguishable from a broken queue, which is exactly
-how it was found.
+| | |
+|---|---|
+| First failed send | persists **those exact records**, immediately |
+| While a backlog exists | the live path stands down; `take_queue_snapshot()` persists on `queueSnapshotIntervalSec` |
+| On recovery | backlog drains oldest-first, then live sending resumes |
+
+The first failure persists verbatim rather than capturing fresh values on purpose. "Failed"
+includes a POST the server actually processed whose response was lost, and re-sending the
+identical `recordId` is what lets the script's duplicate suppression absorb that. Capturing fresh
+values would mint a new id and write a second, near-identical row.
+
+That first write also leaves the queue non-empty, which is what makes it fire only once per
+outage: every later pass takes the drain path, so persistence reverts to the configured interval.
+
+**This is why the two intervals are independent.** The push interval sets the row cadence while
+healthy. The persistence interval sets how coarsely an outage is recorded — and therefore how long
+the queue lasts before it overflows:
+
+```
+runway = maxQueuedRecords ÷ (tilts × 60 ÷ persist_minutes)
+```
+
+At 15 Tilts and 1200 records that is 13 hours at 10-minute persistence but 40 hours at 30 minutes.
+Coarser keeps fewer readings and buys proportionally more time to notice. No other arrangement of
+one interval can express "10-minute rows *and* a 40-hour runway".
+
+Two cases that must not be missed, both covered by `queuePersistenceNeeded()`:
+
+- **No usable network.** The sender is never called, so no failure is ever recorded. Keying only
+  on the failure count would have silently lost everything during a WiFi outage — the single most
+  likely reason to need the queue at all.
+- **Legacy single-reading mode.** Nothing drains the queue, so filling it would be a leak.
+
+More Tilts than `queueBatchSize` skips the live path entirely and uses the queue for that pass,
+with a warning. Sending a partial live batch would silently drop the remainder.
+
+Changing the persistence interval re-evaluates immediately rather than re-arming for a full
+interval, so a change takes effect now instead of one interval later. While the sender is healthy
+this writes nothing — the interval only governs behaviour once sending has stopped working — so in
+normal operation changing it is visibly a no-op, which is correct.
+
+### Settings updates are atomic
+
+`json_put_wrapper()` snapshots the running config before calling a handler and restores it if the
+handler reports failure. The `process*Settings()` handlers write straight into `config` as they go
+and only accumulate a failure count, so without this a rejected update left the device running the
+new values while flash kept the old ones — reporting failure, behaving as though it had succeeded,
+and silently reverting on the next reboot. A partial payload to `/api/settings/targets/` was enough
+to trigger it, since those handlers count an absent key as a failure.
+
+Rolling back centrally rather than in each of the eleven handlers means no handler can be missed,
+and it keeps holding for handlers added later.
 
 Every target now has its own `PushEvery`. Google Sheets, Fermentrack 2, Brewer's Friend,
 Brewfather, Grainfather and the generic JSON target used to hold theirs as `#define`s in

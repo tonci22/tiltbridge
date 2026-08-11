@@ -45,6 +45,11 @@ struct GrainfatherURL {
 
 class ConfigFile {
 public:
+    // This base already has virtual methods, so it needs a virtual destructor to be a
+    // well-formed polymorphic base - without it, destroying a derived object through any
+    // ConfigFile handle is undefined, and -Wdelete-non-virtual-dtor rightly refuses it.
+    virtual ~ConfigFile() = default;
+
     // The following two functions when implemented should handle the derivation of the config filename as
     // well as then passing that filename to saveFile/loadFile
     bool save();

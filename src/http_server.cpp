@@ -3,6 +3,7 @@
 #include <freertos/timers.h>
 
 #include <ArduinoJson.h>
+#include <new>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
@@ -805,7 +806,42 @@ static esp_err_t json_put_wrapper(httpd_req_t *req, json_put_handler_t handler) 
         return ESP_OK;  // Error response already sent
     }
 
-    bool success = handler(doc, true);
+    /*
+     * A settings update is applied ATOMICALLY: either every field lands, or none does.
+     *
+     * The process*Settings() handlers write straight into `config` as they go and only
+     * accumulate a failure count, saving to flash at the end if it is zero. That left a
+     * rejected update having already mutated the RUNNING config while flash kept the old
+     * values - so the device would report the update as failed, keep operating on the new
+     * values anyway, and silently revert on the next reboot. A partial payload to
+     * /api/settings/targets/ was enough to trigger it, because those handlers count an
+     * absent key as a failure.
+     *
+     * Snapshotting and rolling back is done here rather than in each of the eleven
+     * handlers so no handler can be missed, and so it keeps holding for handlers added
+     * later. Config is plain data plus fixed-size buffers, so the implicit copy is a
+     * faithful snapshot; it goes on the heap because it is several KB and this runs on the
+     * HTTP server task.
+     */
+    Config *previous = new (std::nothrow) Config(config);
+    const fermentrackRegErrorT previousRegError = fermentrackRegistrationError;
+
+    const bool success = handler(doc, true);
+
+    if (!success) {
+        if (previous != nullptr) {
+            config = *previous;
+            fermentrackRegistrationError = previousRegError;
+            Log.warning("Settings update rejected; running configuration rolled back.\r\n");
+        } else {
+            // Could not snapshot, so the partial update stands. Say so - the alternative is
+            // a device quietly running values it just told the caller it refused.
+            Log.error("Settings update rejected but could not be rolled back (out of memory). "
+                      "Reboot to reload the saved configuration.\r\n");
+        }
+    }
+
+    delete previous;
     return idf_json_send_status(req, success);
 }
 

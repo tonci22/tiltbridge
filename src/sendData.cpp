@@ -267,19 +267,29 @@ void dataSendHandler::process()
 }
 
 
-void dataSendHandler::take_queue_snapshot()
+/**
+ * @brief Build a QueuedReading for every enabled Tilt that has a usable gravity.
+ *
+ * Reads whatever the scanner holds right now, which is what makes it usable for both
+ * paths: the live sender wants the newest values, and the persistence path wants the
+ * newest values at the moment persistence falls due. Neither writes to flash here, and
+ * neither resets the RSSI interval - that only happens once a record is durably stored or
+ * actually delivered, so a failure keeps accumulating instead of losing the window.
+ *
+ * @return number of records written to `out`, never more than maxRecords.
+ */
+uint16_t dataSendHandler::collectCurrentReadings(QueuedReading *out, uint16_t maxRecords)
 {
-    // Always re-arm, even when disabled or when nothing gets written, so the cadence
-    // survives a configuration change or a temporary filesystem problem.
-    startTimer(queueSnapshotTimer, config.queueSnapshotIntervalSec);
-
-    if (!config.offlineQueueEnabled || !reading_queue.isHealthy())
-        return;
+    if (out == nullptr || maxRecords == 0)
+        return 0;
 
     tilt_scanner.drop_expired_tilts();
 
-    uint16_t stored = 0;
+    uint16_t collected = 0;
     for (tiltHydrometer &th : tilt_scanner.m_tilt_devices) {
+        if (collected >= maxRecords)
+            break;
+
         if (!device_config.isEnabled(th.deviceId()))
             continue;
 
@@ -288,7 +298,7 @@ void dataSendHandler::take_queue_snapshot()
         if (th.latest_gravity_value() == 0)
             continue;
 
-        QueuedReading rec;
+        QueuedReading &rec = out[collected];
         memset(&rec, 0, sizeof(rec));   // deterministic padding keeps the CRC stable
 
         reading_queue.assignIdentity(rec, th.deviceId());
@@ -327,16 +337,107 @@ void dataSendHandler::take_queue_snapshot()
         }
         rec.capturedAtUptimeMs = sh_millis();
 
-        if (reading_queue.append(rec)) {
+        collected++;
+    }
+
+    return collected;
+}
+
+/**
+ * @brief Start a fresh RSSI aggregation window for the Tilts in `batch`.
+ *
+ * Called only once those records are accounted for - durably on flash, or accepted by the
+ * server. Until then the window keeps accumulating, so a failure does not silently narrow
+ * the min/max/sample count of the reading that eventually gets through.
+ */
+void dataSendHandler::resetCollectedRssiIntervals(const QueuedReading *batch, uint16_t count)
+{
+    for (uint16_t i = 0; i < count; i++) {
+        for (tiltHydrometer &th : tilt_scanner.m_tilt_devices) {
+            if (strcmp(th.deviceId(), batch[i].deviceId) == 0) {
+                th.rssi_stats.resetInterval();
+                break;
+            }
+        }
+    }
+}
+
+/**
+ * @brief Persist the current readings to flash.
+ *
+ * ONLY runs when the live sender is not delivering. In steady state every reading is sent
+ * and dropped without ever touching flash; this is the fallback that makes an outage
+ * survivable, and its cadence (config.queueSnapshotIntervalSec) is what decides how much
+ * of an outage fits in maxQueuedRecords. Coarser here means fewer rows kept but a longer
+ * runway before the queue overflows - the whole point of separating it from the push
+ * interval.
+ */
+void dataSendHandler::take_queue_snapshot()
+{
+    // Always re-arm, even when disabled or when nothing gets written, so the cadence
+    // survives a configuration change or a temporary filesystem problem.
+    startTimer(queueSnapshotTimer, config.queueSnapshotIntervalSec);
+
+    if (!config.offlineQueueEnabled || !reading_queue.isHealthy())
+        return;
+
+    // Nothing to fall back to while the live path is delivering and no backlog is waiting.
+    // A backlog counts because the live path stands down until it drains, so these are the
+    // only readings being captured in that window.
+    if (!queuePersistenceNeeded())
+        return;
+
+    uint16_t maxRecords = config.queueBatchSize;
+    if (maxRecords == 0) maxRecords = 1;
+    if (maxRecords < TILT_COLORS) maxRecords = TILT_COLORS;
+
+    QueuedReading *batch = (QueuedReading *)malloc(maxRecords * sizeof(QueuedReading));
+    if (batch == nullptr) {
+        Log.error("Queue snapshot: unable to allocate a %u-record buffer.\r\n", (unsigned)maxRecords);
+        return;
+    }
+
+    const uint16_t collected = collectCurrentReadings(batch, maxRecords);
+
+    uint16_t stored = 0;
+    for (uint16_t i = 0; i < collected; i++) {
+        if (reading_queue.append(batch[i])) {
             // Only start a new RSSI interval once the record is durably on flash; if the
             // write failed, keep accumulating so the next snapshot still covers the gap.
-            th.rssi_stats.resetInterval();
+            resetCollectedRssiIntervals(&batch[i], 1);
             stored++;
         }
     }
 
+    free(batch);
+
     if (stored > 0)
         Log.notice("Queue snapshot: stored %u reading%s.\r\n", stored, (stored == 1) ? "" : "s");
+}
+
+/**
+ * @brief Whether readings currently need to be written to flash.
+ *
+ * True when the Google Sheets sender is failing, or when a backlog is already waiting -
+ * the queue is that target's alone (nothing else reads it), and no other target can accept
+ * a backlog anyway, because only the schemaVersion 2 payload carries a capture time.
+ */
+bool dataSendHandler::queuePersistenceNeeded() const
+{
+    if (reading_queue.pendingCount() > 0)
+        return true;
+
+    // Legacy single-reading mode never drains the queue, so filling it would be a leak.
+    if (!config.gsheetsV2Enabled)
+        return false;
+
+    // No usable network means the sender is never even called, so there is no failure count
+    // to read - but every reading is undeliverable. Miss this and a WiFi outage, the single
+    // most likely reason to need the queue, would silently lose everything.
+    if (!network_is_usable())
+        return true;
+
+    return targetStatus[TARGET_GOOGLE_SHEETS].consecutiveFailures > 0;
 }
 
 bool dataSendHandler::send_to_bf_and_bf()

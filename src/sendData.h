@@ -9,6 +9,10 @@
 #include "tilt/tiltHydrometer.h"
 #include "targets/send_json_str.h"
 
+// Only pointers to it are passed across this interface, so the queue's record layout does
+// not need to be visible to everything that includes this header.
+struct QueuedReading;
+
 // Send target identifiers for error tracking
 enum SendTargetID : uint8_t {
     TARGET_LEGACY_FERMENTRACK = 0,
@@ -117,8 +121,18 @@ public:
     // Enhanced batched Google Sheets protocol, drained from the persistent queue.
     bool send_to_google_v2();
 
-    // Builds and persists one record per enabled Tilt. Runs regardless of network state.
+    // Persists one record per enabled Tilt - but ONLY while the live sender is failing or a
+    // backlog is waiting. In steady state readings are sent and dropped without ever
+    // reaching flash, so this is the outage fallback rather than the normal data path.
     void take_queue_snapshot();
+
+    // Build records from the scanner's current values. Touches neither flash nor the RSSI
+    // windows, so both the live sender and the persistence path can use it.
+    uint16_t collectCurrentReadings(QueuedReading *out, uint16_t maxRecords);
+    void resetCollectedRssiIntervals(const QueuedReading *batch, uint16_t count);
+
+    // True when readings must be written to flash rather than simply sent and dropped.
+    bool queuePersistenceNeeded() const;
 
     // Error tracking
     SendTargetStatus targetStatus[TARGET_COUNT];

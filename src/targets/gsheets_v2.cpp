@@ -82,7 +82,37 @@ bool dataSendHandler::send_to_google_v2()
         return false;
     }
 
-    const size_t count = reading_queue.peekBatch(batch, batchSize);
+    /*
+     * A backlog is always drained first, in order, before anything live goes out - the
+     * queue holds older captures and the sheet reads better chronologically.
+     *
+     * With no backlog the readings are taken live and never touch flash: they are built
+     * here, sent, and dropped on acknowledgement. Persistence only happens once this stops
+     * working, from take_queue_snapshot() on its own interval, which is what lets an
+     * outage be recorded coarsely (long runway) while healthy operation stays fine-grained.
+     */
+    const bool fromQueue = reading_queue.pendingCount() > 0;
+
+    size_t count;
+    if (fromQueue) {
+        count = reading_queue.peekBatch(batch, batchSize);
+    } else {
+        count = collectCurrentReadings(batch, (uint16_t)batchSize);
+
+        // More Tilts than fit in one request. Sending a partial live batch would silently
+        // drop the rest, so fall back to the queue for this pass: the snapshot captures
+        // every Tilt and the drain above sends them batchSize at a time.
+        if (count > 0 && tilt_scanner.m_tilt_devices.size() > batchSize) {
+            free(batch);
+            Log.warning("GSheets v2: %u Tilts exceed queueBatchSize %u; queueing instead of sending live. "
+                        "Raise queueBatchSize to send them in one request.\r\n",
+                        (unsigned)tilt_scanner.m_tilt_devices.size(), (unsigned)batchSize);
+            snapshot_due = true;
+            startTimer(gSheetsTimer, config.gsheetsPushEvery);
+            return true;
+        }
+    }
+
     if (count == 0) {
         free(batch);
         queueUploadState = QueueUploadState::IDLE;
@@ -91,6 +121,22 @@ bool dataSendHandler::send_to_google_v2()
     }
 
     queueUploadState = QueueUploadState::SENDING;
+
+    /*
+     * Record ids are kept because `batch` is freed before the TLS handshake, and the live
+     * path has no queue to acknowledge against - it has to match the returned ids itself.
+     */
+    char (*sentIds)[QR_RECORD_ID_LEN] = nullptr;
+    if (!fromQueue) {
+        sentIds = (char (*)[QR_RECORD_ID_LEN])malloc(count * QR_RECORD_ID_LEN);
+        if (sentIds == nullptr) {
+            free(batch);
+            startTimer(gSheetsTimer, config.gsheetsPushEvery);
+            return false;
+        }
+        for (size_t i = 0; i < count; i++)
+            qr_format_record_id(batch[i], sentIds[i], QR_RECORD_ID_LEN);
+    }
 
     // ---- Build the request ----
     JsonDocument payload;
@@ -144,6 +190,7 @@ bool dataSendHandler::send_to_google_v2()
     if (payloadStr == nullptr) {
         Log.error("GSheets v2: unable to allocate a %u-byte payload buffer.\r\n", (unsigned)(payloadLen + 1));
         free(batch);
+        free(sentIds);
         queueUploadState = QueueUploadState::RETRYING;
         startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return false;
@@ -155,6 +202,15 @@ bool dataSendHandler::send_to_google_v2()
     // driven entirely by the record ids the server echoes back, so nothing here is needed
     // again - and the mbedTLS handshake needs a large contiguous allocation
     // (CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN is 16 KB) that fails on a fragmented heap.
+    QueuedReading *batchForRssi = nullptr;
+    if (!fromQueue) {
+        // Only the deviceIds are needed afterwards, but the records are small and this
+        // keeps the reset honest about which Tilts were actually in the request.
+        batchForRssi = (QueuedReading *)malloc(count * sizeof(QueuedReading));
+        if (batchForRssi != nullptr)
+            memcpy(batchForRssi, batch, count * sizeof(QueuedReading));
+    }
+
     free(batch);
     batch = nullptr;
 
@@ -169,6 +225,8 @@ bool dataSendHandler::send_to_google_v2()
     char *response = (char *)malloc(GSHEETS_V2_RESPONSE_SIZE);
     if (response == nullptr) {
         free(payloadStr);
+        free(sentIds);
+        free(batchForRssi);
         queueUploadState = QueueUploadState::RETRYING;
         startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return false;
@@ -206,9 +264,37 @@ bool dataSendHandler::send_to_google_v2()
         // goes out again and the server's duplicate suppression absorbs it.
         Log.error("GSheets v2: upload failed (http %d). Nothing acknowledged; will retry the same records.\r\n",
                   (int)httpCode);
+
         setTargetStatus(TARGET_GOOGLE_SHEETS,
                         httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         queueUploadState = QueueUploadState::RETRYING;
+
+        /*
+         * A live reading exists only in this buffer, so persist it now rather than dropping
+         * it and waiting for the next snapshot.
+         *
+         * THESE records, not freshly captured ones. "Failed" includes a POST the server
+         * actually processed whose response was lost, and re-sending the identical record id
+         * is what lets the script's duplicate suppression absorb that. Capturing fresh values
+         * instead would mint a new id and write a second, near-identical row.
+         *
+         * This only fires once per outage: it leaves the queue non-empty, so every later pass
+         * takes the drain path above and persistence reverts to take_queue_snapshot() on its
+         * configured interval - which is what keeps the queue growing slowly.
+         */
+        if (!fromQueue && batchForRssi != nullptr && reading_queue.isHealthy()) {
+            uint16_t stored = 0;
+            for (size_t i = 0; i < count; i++) {
+                if (reading_queue.append(batchForRssi[i])) {
+                    resetCollectedRssiIntervals(&batchForRssi[i], 1);
+                    stored++;
+                }
+            }
+
+            if (stored > 0)
+                Log.notice("GSheets v2: persisted %u undelivered reading%s to the queue.\r\n",
+                           (unsigned)stored, (stored == 1) ? "" : "s");
+        }
     } else {
         JsonDocument reply;
         const DeserializationError err = deserializeJson(reply, response);
@@ -231,21 +317,36 @@ bool dataSendHandler::send_to_google_v2()
                 const char *id = v.as<const char *>();
                 if (id == nullptr)
                     continue;
-                if (reading_queue.acknowledgeId(id))
-                    acceptedCount++;
+
+                if (fromQueue) {
+                    if (reading_queue.acknowledgeId(id))
+                        acceptedCount++;
+                } else {
+                    // Live records were never stored, so acceptance is simply "delivered".
+                    for (size_t i = 0; i < count; i++) {
+                        if (strcmp(sentIds[i], id) == 0) {
+                            acceptedCount++;
+                            break;
+                        }
+                    }
+                }
             }
 
-            reading_queue.compact();
+            if (fromQueue)
+                reading_queue.compact();
 
             result = true;
             lastQueueUploadSuccessMs = sh_millis();
             setTargetStatus(TARGET_GOOGLE_SHEETS, SEND_OK);
 
             if (acceptedCount < count) {
-                // Partial acknowledgement is legitimate: the remainder stay queued and go
-                // out in the next batch under the same ids.
+                // Queued records simply stay queued and go out again under the same ids.
+                // Live ones have nowhere to go, so persist instead of dropping them - the
+                // snapshot captures every Tilt, including the ones that did not land.
                 Log.warning("GSheets v2: server accepted %u of %u records; %u will be retried.\r\n",
                             (unsigned)acceptedCount, (unsigned)count, (unsigned)(count - acceptedCount));
+                if (!fromQueue)
+                    snapshot_due = true;
             } else {
                 Log.notice("GSheets v2: all %u records accepted (%u still queued).\r\n",
                            (unsigned)acceptedCount, (unsigned)reading_queue.pendingCount());
@@ -257,6 +358,13 @@ bool dataSendHandler::send_to_google_v2()
         }
     }
 
+    // The RSSI aggregation window restarts only now, and only for live records that were
+    // actually delivered. Queued ones reset when they were written to flash.
+    if (!fromQueue && result && acceptedCount == count && batchForRssi != nullptr)
+        resetCollectedRssiIntervals(batchForRssi, (uint16_t)count);
+
+    free(batchForRssi);
+    free(sentIds);
     free(response);
 
     // Drain a backlog quickly, but only when the last batch actually made progress -

@@ -209,16 +209,16 @@ void loop() {
     }
 
     if (http_server.queue_timer_restart_rqd) {
-        Log.verbose("Snapshot interval changed - capturing a reading now.\r\n");
+        Log.verbose("Queue persistence interval changed - re-evaluating now.\r\n");
         http_server.queue_timer_restart_rqd = false;
 
-        // Capture immediately rather than re-arming for a full interval. Re-arming meant a
-        // change always postponed the next reading, so shortening the interval made the queue
-        // go quiet for longer than the OLD setting - the opposite of what was asked for, and
-        // indistinguishable from a broken queue.
+        // Evaluate immediately rather than re-arming for a full interval, so a change takes
+        // effect now instead of one interval later. take_queue_snapshot() re-arms the one-shot
+        // itself on the new interval.
         //
-        // take_queue_snapshot() re-arms the one-shot itself, on the new interval, so this both
-        // gives immediate feedback that the setting took and restarts the cadence from now.
+        // While the sender is healthy this writes nothing - the interval only governs how
+        // often readings are persisted once sending has stopped working - so in normal
+        // operation changing it is visibly a no-op, which is correct.
         data_sender.snapshot_due = true;
     }
 
