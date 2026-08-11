@@ -119,3 +119,6 @@ dependencies.lock
 # Reassert .DS_Store ignore (the !/data/wifiui/** re-include above would otherwise
 # un-ignore it inside that subdir).
 **/.DS_Store
+
+# Device config backups - contain the Apps Script deployment URL and email
+backups/

@@ -28,6 +28,12 @@
               <template #FieldDescription>{{ $t('cloud_config.google_sheets.email_desc') }}</template>
             </TextField>
 
+            <!-- Upload interval. Not the queue snapshot interval, which lives on the Queue page. -->
+            <PushIntervalField v-model="gsPushEvery">
+              <template #FieldName>{{ $t('cloud_config.google_sheets.push_frequency') }}</template>
+              <template #FieldDescription>{{ $t('cloud_config.google_sheets.push_frequency_desc') }}</template>
+            </PushIntervalField>
+
             <!-- Red Beer Name Field -->
             <TextField v-model="redName" placeholder="BeerName">
               <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.red')}) }}</template>
@@ -112,6 +118,7 @@ import { useConfigStore } from "@/stores/ConfigStore";
 import { useLoading } from 'vue-loading-overlay'
 import TextField from "@/components/config/form_elements/TextField.vue";
 import CheckboxField from "@/components/config/form_elements/CheckboxField.vue";
+import PushIntervalField from "@/components/config/form_elements/PushIntervalField.vue";
 import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue";
 import { ref } from "vue";
 import { i18n } from "@/main.js";
@@ -138,6 +145,7 @@ const blueName = ref(configStore.scriptsBlueSheetName);
 const yellowName = ref(configStore.scriptsYellowSheetName);
 const pinkName = ref(configStore.scriptsPinkSheetName);
 const v2Enabled = ref(configStore.gsheetsV2Enabled);
+const gsPushEvery = ref(configStore.gsheetsPushEvery);
 
 function updateCachedSettings() {
   gs_url.value = configStore.scriptsURL;
@@ -151,6 +159,7 @@ function updateCachedSettings() {
   yellowName.value = configStore.scriptsYellowSheetName;
   pinkName.value = configStore.scriptsPinkSheetName;
   v2Enabled.value = configStore.gsheetsV2Enabled;
+  gsPushEvery.value = configStore.gsheetsPushEvery;
 }
 
 
@@ -172,7 +181,8 @@ async function submitForm() {
       blueName.value,
       yellowName.value,
       pinkName.value,
-      v2Enabled.value
+      v2Enabled.value,
+      gsPushEvery.value
   ).then(() => {
     updateCachedSettings();
     loader.hide();

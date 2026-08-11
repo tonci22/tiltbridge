@@ -209,6 +209,36 @@ static bool updateJsonSetting(const JsonDocument& json, const char* key, uint16_
     return false;
 }
 
+/**
+ * @brief Apply an optional per-target push interval - how often a reading is UPLOADED there.
+ *
+ * Absent means "leave it alone", unlike updateJsonSetting(), so one target's panel saving its
+ * own fields never disturbs another's interval. Out of range is refused rather than silently
+ * clamped, so the UI is told the value did not take.
+ *
+ * Not to be confused with queueSnapshotIntervalSec, which is how often the offline queue is
+ * written to flash. That one is device-wide and lives with the controller settings.
+ */
+static bool applyPushEvery(const JsonDocument& json, const char* key, uint16_t& configVar,
+                           uint16_t minSeconds = PUSH_EVERY_MIN_SEC) {
+    if(!json[key].is<int32_t>())
+        return true;
+
+    // Read wider than the field so a value too large to be a uint16_t is REPORTED as out of
+    // range rather than silently failing is<uint16_t>() and looking like an absent key.
+    const int32_t value = json[key].as<int32_t>();
+
+    if(value < minSeconds || value > PUSH_EVERY_MAX_SEC) {
+        Log.warning("Settings update error, [%s]:(%d) outside %d..%d.\r\n",
+                    key, (int)value, (int)minSeconds, PUSH_EVERY_MAX_SEC);
+        return false;
+    }
+
+    configVar = (uint16_t)value;
+    Log.notice("Settings update, [%s]:(%d) applied.\r\n", key, (int)value);
+    return true;
+}
+
 static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
     bool hostnamechanged = false;
@@ -229,13 +259,29 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
         }
     }
 
-    // tzOffset
-    if(json["tzOffset"].is<int8_t>()) {
-        if(json["tzOffset"].as<int8_t>() < -12 || json["tzOffset"].as<int8_t>() > 14) {
-            Log.warning("Settings update error, [tzOffset]:(%d) not valid.\r\n", json["tzOffset"].as<int8_t>());
+    // tzOffset. Accepted under BOTH spellings, deliberately.
+    //
+    // The web UI has always sent "tzOffset", but /api/settings/json/ serves the field as
+    // "TZoffset" - that is its name in Config::to_json() and in the config file on flash.
+    // A client that GETs the settings and PUTs them back therefore had its timezone silently
+    // dropped, reset to the -5 default on the next load, and was still told {"status":"ok"}.
+    // Backup-and-restore is exactly that round trip.
+    //
+    // "tzOffset" stays the canonical spelling for input; "TZoffset" is accepted so a served
+    // document is valid input to the endpoint that served it.
+    JsonVariantConst tzOffsetValue =
+        json["tzOffset"].isNull() ? json["TZoffset"] : json["tzOffset"];
+
+    // Read as int rather than int8_t so a wildly out-of-range value is REPORTED rather than
+    // failing the type test and looking like an absent key.
+    if(tzOffsetValue.is<int>()) {
+        const int tzOffset = tzOffsetValue.as<int>();
+        if(tzOffset < -12 || tzOffset > 14) {
+            Log.warning("Settings update error, [tzOffset]:(%d) not valid.\r\n", tzOffset);
+            failCount++;
         } else {
-            config.TZoffset = json["tzOffset"];
-            Log.notice("Settings update, [tzOffset]:(%d) applied.\r\n", json["tzOffset"].as<int8_t>());
+            config.TZoffset = (int8_t)tzOffset;
+            Log.notice("Settings update, [tzOffset]:(%d) applied.\r\n", tzOffset);
         }
     }
 
@@ -390,6 +436,14 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
     bool update_legacy = false;
     bool update_ft2 = false;
 
+    /*
+     * The FT2 push interval is applied outside the branch below, and its presence must never
+     * be what selects a branch: the FT2 branch clears the device id and API key to force
+     * re-registration, and changing how often readings are uploaded is no reason to do that.
+     */
+    if(!applyPushEvery(json, FermentrackSettings::fermentrackPushEvery, config.fermentrackPushEvery))
+        failCount++;
+
     if (json[FermentrackSettings::legacyFermentrackPushEvery].is<uint16_t>()) {
         Log.info("Received legacy fermentrack settings.\r\n");
         update_legacy = true;
@@ -404,7 +458,7 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
             config.legacyFermentrackPushEvery = 30;
             failCount++;
         }
-    } else {
+    } else if (json[FermentrackSettings::fermentrackHostname].is<const char*>()) {
         Log.info("Received FT2 settings.\r\n");
         update_ft2 = true;
         config.fermentrackDeviceID[0] = '\0';
@@ -464,6 +518,9 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
     // Optional - absent means "leave the current mode alone", so the return value is ignored
     updateJsonSettingBool(json, GoogleSheetsSettings::gsheetsV2Enabled, config.gsheetsV2Enabled);
 
+    if(!applyPushEvery(json, GoogleSheetsSettings::gsheetsPushEvery, config.gsheetsPushEvery))
+        failCount++;
+
     if(failCount > 0) {
         Log.error("Error: Invalid Google Sheets configuration.\r\n");
     } else if (!config.save()) {
@@ -481,6 +538,9 @@ static bool processBrewersFriendSettings(const JsonDocument& json, bool triggerU
         failCount++;
     if(strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH)
         startSendNowTimer(sendNowBrewersFriendTimer, "SendBF", sendNowBrewersFriendCallback, 5);
+
+    if(!applyPushEvery(json, BrewersFriendSettings::brewersFriendPushEvery, config.brewersFriendPushEvery))
+        failCount++;
 
     if(failCount > 0) {
         Log.error("Error: Invalid Brewer's Friend configuration.\r\n");
@@ -500,6 +560,9 @@ static bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpst
     if(strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH)
         startSendNowTimer(sendNowBrewfatherTimer, "SendBrewfather", sendNowBrewfatherCallback, 5);
 
+    if(!applyPushEvery(json, BrewfatherSettings::brewfatherPushEvery, config.brewfatherPushEvery))
+        failCount++;
+
     if(failCount > 0) {
         Log.error("Error: Invalid Brewfather configuration.\r\n");
     } else if (!config.save()) {
@@ -517,6 +580,9 @@ static bool processUserTargetSettings(const JsonDocument& json, bool triggerUpst
         failCount++;
     if(strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
         startSendNowTimer(sendNowUserTargetTimer, "SendUserTarget", sendNowUserTargetCallback, 5);
+
+    if(!applyPushEvery(json, UserTargetSettings::userTargetPushEvery, config.userTargetPushEvery))
+        failCount++;
 
     if(failCount > 0) {
         Log.error("Error: Invalid user target configuration.\r\n");
@@ -540,6 +606,9 @@ static bool processGrainfatherSettings(const JsonDocument& json, bool triggerUps
             failCount++;
         i++;
     }
+
+    if(!applyPushEvery(json, GrainfatherSettings::grainfatherPushEvery, config.grainfatherPushEvery))
+        failCount++;
 
     startSendNowTimer(sendNowGrainfatherTimer, "SendGrainfather", sendNowGrainfatherCallback, 5);
 
@@ -664,9 +733,10 @@ static bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstre
  * to the appropriate process*Settings helper.
  */
 static bool processTargetSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
-    // Fermentrack — check for either legacy or FT2 key
+    // Fermentrack — legacy key, FT2 connection details, or the FT2 push interval on its own
     if (json[FermentrackSettings::legacyFermentrackPushEvery].is<uint16_t>() ||
-        json[FermentrackSettings::fermentrackHostname].is<const char*>())
+        json[FermentrackSettings::fermentrackHostname].is<const char*>() ||
+        json[FermentrackSettings::fermentrackPushEvery].is<uint16_t>())
         return processFermentrackSettings(json, triggerUpstreamUpdate);
 
     if (json[GoogleSheetsSettings::scriptsURL].is<const char*>())

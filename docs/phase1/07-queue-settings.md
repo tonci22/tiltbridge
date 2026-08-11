@@ -56,6 +56,63 @@ The lower bound of 60 s on the snapshot interval exists to protect flash (§25).
 numeric configuration is already easy to support" — it is, `updateJsonSetting(uint16_t&)` already
 exists at `http_server.cpp:184`).
 
+### The snapshot interval is not an upload interval
+
+These are three different settings and it is worth being explicit, because "how often does my
+TiltBridge send data" has three plausible answers depending on which one you mean:
+
+| Setting | Where it lives | What it controls |
+|---|---|---|
+| `queueSnapshotIntervalSec` | Queue page (device-wide) | how often a reading is **captured** — the sampling rate, and therefore the row cadence in the spreadsheet |
+| `<target>PushEvery` | each target's panel | how often captured readings are **uploaded** to that target — latency and batching only |
+| `maxQueuedRecords` | Queue page (device-wide) | how long an **outage** the queue can absorb |
+
+**The snapshot interval is not just a flash-wear knob, and the name undersells it.**
+`take_queue_snapshot()` walks every enabled Tilt, builds a `QueuedReading` and appends it to
+flash. The append is what persists the queue, which is where the name comes from — but the walk
+is what *creates the reading*. Raising this interval does not merely write to flash less often;
+it samples less often, and the spreadsheet gets proportionally fewer rows.
+
+So the row cadence you see in the sheet is the **snapshot** interval. The push interval only
+decides how long a captured row waits before it is uploaded, and it can never produce a row that
+was never captured. A device on a 15-minute snapshot and a 10-minute push writes a row every
+15 minutes, each arriving within 10 minutes of capture.
+
+Changing the snapshot interval **captures a reading immediately** and restarts the cadence from
+that moment. `http_server` sets `queue_timer_restart_rqd`, the main loop turns that into a due
+snapshot, and `take_queue_snapshot()` re-arms its own one-shot on the new interval.
+
+It used to re-arm for a full interval instead, which meant a change always *postponed* the next
+reading — so shortening the interval made the queue go quiet for longer than the old setting did.
+That is the opposite of the intent and is indistinguishable from a broken queue, which is exactly
+how it was found.
+
+Every target now has its own `PushEvery`. Google Sheets, Fermentrack 2, Brewer's Friend,
+Brewfather, Grainfather and the generic JSON target used to hold theirs as `#define`s in
+`sendData.h`. Bounds are `PUSH_EVERY_MIN_SEC` (**10 minutes**) .. `PUSH_EVERY_MAX_SEC` (12 h),
+shared by the loader and the HTTP handler so the UI can never accept a value the loader then
+discards.
+
+The 10-minute floor is policy, not a technical limit. A Tilt's gravity moves far too slowly for a
+faster cadence to carry information, and each of these targets is a remote HTTP endpoint where
+going faster costs battery, heap and — for Google Sheets, metered against a daily Apps Script
+execution-time quota — the ability to upload at all later in the day.
+
+Five of the six old `#define` values were already at or above the floor and carry over unchanged
+(Google Sheets 600 s, Brewer's Friend / Brewfather / Grainfather 900 s, generic target 600 s), so
+those devices behave exactly as before. **Fermentrack 2 is the exception**: `FERMENTRACK_DELAY`
+was 5 minutes, below the floor, so its default moves to 600 s and existing installs will upload
+half as often after this change.
+
+The floor applies only to the six targets converted from compile-time constants. The intervals
+that were already configurable — MQTT, Brewstatus, Taplist.io, InfluxDB and legacy Fermentrack —
+keep their existing bounds, because those are commonly pointed at a broker or a server on the
+local network where a 30-second cadence is free and useful.
+
+Note that on the v2 path the push interval is the *idle* cadence. `send_to_google_v2()` reschedules
+itself immediately while a backlog is draining, so a queue that built up during an outage still
+empties as fast as the endpoint allows, whatever the interval is set to.
+
 `queueBatchSize` upper bound of 50: a 50-record batch serialises to roughly 50 × ~260 B ≈ 13 KB of
 JSON, which is already a large POST body for an ESP32 heap. 20 stays the default (§14).
 

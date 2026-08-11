@@ -71,11 +71,81 @@ const AVERAGE_INSUFFICIENT_COLOR = '#f4cccc';
 const AVERAGE_COMPLETE_MAX_GAP_MINUTES = 30;
 const AVERAGE_INCOMPLETE_MAX_GAP_MINUTES = 60;
 
+/*
+ * ---------------------------------------------------------------------------
+ * Backfill repair
+ * ---------------------------------------------------------------------------
+ *
+ * Columns E..I, the new-day shading and the average-quality note are derived
+ * values: each is a pure function of columns A, B and C over a window of rows.
+ * They used to be computed once, when the row was appended, from whatever rows
+ * happened to be in the sheet at that moment - and never revisited.
+ *
+ * That is wrong the moment TiltBridge's offline queue exists. A reading that
+ * failed to upload is kept on the device and delivered later, so rows arrive
+ * for instants that are ALREADY covered by a four-hour average written earlier.
+ * The queue had done its job, the data was complete, and the sheet still said
+ * 'INCOMPLETE - 1h 30m gap' forever.
+ *
+ * So after a batch that inserted rows anywhere other than the end of the sheet,
+ * every derived value from the insertion point down is recomputed from the rows
+ * as they now stand. See rebuildDerivedColumns().
+ *
+ * Context needed above the first rebuilt row: the whole rolling window (4h)
+ * plus the whole previous calendar day. A calendar day starts at most 48h
+ * before any instant on the day after it, so 48h + the rolling window always
+ * covers both, with no timezone arithmetic.
+ */
+const REBUILD_CONTEXT_LOOKBACK_MS =
+  (48 + ROLLING_AVERAGE_HOURS) *
+  60 * 60 * 1000;
+
+/*
+ * The firmware's schemaVersion 2 HTTP timeout is 15 seconds and the rebuild
+ * runs inside the request, under the lock, so the in-request pass is capped.
+ * A 24-hour outage at the ten-minute logging interval backfills ~144 rows, so
+ * 600 covers roughly four days of catch-up without going near the timeout.
+ *
+ * Anything past the cap is queued as a pending rebuild and finished by the
+ * background trigger, which has no HTTP timeout to respect.
+ */
+const REBUILD_MAX_ROWS_PER_REQUEST = 600;
+
+/* The background pass is bounded only by the six-minute execution limit. */
+const REBUILD_MAX_ROWS_PER_BACKGROUND_PASS = 4000;
+
+/* Stop starting new rebuild work after this much of a background run. */
+const REBUILD_BACKGROUND_BUDGET_MS = 240000;
+
+/*
+ * A second guard on the background loop. Each pass advances a sheet's pending
+ * start by up to REBUILD_MAX_ROWS_PER_BACKGROUND_PASS rows, so the work always
+ * terminates; this only bounds how much of it one trigger run takes on.
+ */
+const REBUILD_MAX_BACKGROUND_PASSES = 20;
+
+/* Script Properties prefix for a sheet with a rebuild still owed to it. */
+const PENDING_REBUILD_PREFIX = 'pending-derived-rebuild-';
+
+/* Cell notes this script owns and may therefore clear on a rebuild. */
+const DATA_GAP_NOTE_PREFIX = 'DATA GAP:';
+
+/*
+ * getBackgrounds() reports an unfilled cell as '#ffffff' and never as null, so
+ * the rebuild writes that same value back rather than null. It keeps the
+ * before/after comparison honest - a rebuild that changes nothing writes
+ * nothing - and it is what sortWineSheetByCaptureTime() already round-trips.
+ */
+const NO_FILL_COLOR = '#ffffff';
+
 const SYSTEM_LOG_SHEET = 'System Log';
 const MONITORING_SHEET = 'Monitoring';
 
+/* Monitoring layout: A..H as before, plus I for the wine's current device. */
+const MONITORING_COLUMN_COUNT = 9;
+
 /*
- * Wine sheet layout, nineteen columns:
+ * Wine sheet layout, thirteen columns:
  *
  *   A  Date and time         capture time, never the upload time
  *   B  SG                    final calibrated, smoothed value
@@ -87,21 +157,40 @@ const MONITORING_SHEET = 'Monitoring';
  *   H  Previous day avg SG
  *   I  Previous day avg °C
  *   J  (blank visual separator)
- *   K  Raw SG            \
- *   L  Smoothed SG        |
- *   M  RSSI dBm           |  schemaVersion 2 only. The single-reading
- *   N  RSSI avg           |  payload does not carry any of these, so they
- *   O  RSSI min           |  stay blank on that path.
- *   P  RSSI max           |
- *   Q  RSSI samples       |
- *   R  Device (MAC)       |
- *   S  Record id         /
+ *   K  Raw SG            \  schemaVersion 2 only. The single-reading payload
+ *   L  Signal dBm         |  carries none of these, so they stay blank there.
+ *   M  Record id         /
  *
- * A..I keep the positions they had in the previous nine-column layout, so the
- * charts, the rolling averages, the daily averages, the new-day shading and
- * the gap detection all continue to address the same columns.
+ * A..I keep the positions they had in every previous layout, so the charts,
+ * the rolling averages, the daily averages, the new-day shading and the gap
+ * detection all continue to address the same columns.
+ *
+ * WHAT THE DIAGNOSTIC BLOCK DROPPED, AND WHY
+ *
+ * The nineteen-column layout wrote every field the device sends. In practice
+ * that is a wall of numbers nobody reads, so K..M now carry only what a column
+ * can answer that a note cannot:
+ *
+ * - Smoothed SG is gone. Column B already IS the smoothed value - the payload's
+ *   SG is calibrate(smooth(raw)) - so the two differ only by the calibration
+ *   polynomial, and are identical on the default identity coefficients.
+ *   Raw SG stays, because that one genuinely differs: it is pre-smoothing.
+ *
+ * - The five RSSI columns collapse to one. Column L is the average dBm, which
+ *   is the only one worth charting or scanning down; the reading's own dBm and
+ *   the min/max/sample-count live in a note on that cell, so the detail is one
+ *   hover away instead of four columns wide.
+ *
+ * - Device (MAC) is gone from the rows. Repeating an unchanging 17-character
+ *   address on every row says nothing. The current device per wine is shown on
+ *   the Monitoring tab, and a CHANGE is recorded where a change actually
+ *   matters: a note on that row's Record id cell plus a DEVICE_CHANGED entry
+ *   in System Log.
+ *
+ * Nothing here is lost to the audit trail: '_processed_ids' still records every
+ * record id with its wine, sheet, row, capture time, receipt time and outcome.
  */
-const DATA_COLUMN_COUNT = 19;
+const DATA_COLUMN_COUNT = 13;
 
 const WINE_SHEET_HEADERS = [
   'Date and time',
@@ -115,15 +204,12 @@ const WINE_SHEET_HEADERS = [
   'Previous day avg °C',
   '',
   'Raw SG',
-  'Smoothed SG',
-  'RSSI dBm',
-  'RSSI avg',
-  'RSSI min',
-  'RSSI max',
-  'RSSI samples',
-  'Device (MAC)',
+  'Signal dBm',
   'Record id'
 ];
+
+/* Script Properties prefix holding the device last seen for a wine sheet. */
+const WINE_DEVICE_PREFIX = 'wine-device-';
 
 /*
  * Chart geometry, all derived from the layout so it cannot drift out of step
@@ -166,14 +252,15 @@ const TEMP_CHART_ROW =
  * 'sheet-layout-<LAYOUT_VERSION>-<sheetId>' is '1', so a change to prepareSheet alone has
  * no effect on existing sheets - the version string is what invalidates that key.
  *
- * v14 exists because chart positioning moved inside prepareSheet(): sheets prepared under
- * v13 still had their charts anchored at the pre-widening column, sitting on top of the
- * K-S diagnostic columns. Re-preparing is non-destructive here - migrateLegacyLayoutIfNeeded
- * returns early when the headers already match, and prepareSheet only clears the D and J
- * separator columns.
+ * v15 exists because the diagnostic block narrowed from K-S to K-M. Every sheet has to be
+ * re-prepared once so the headers, the number formats, the column widths, the title merge and
+ * the chart anchor all follow the new width. Re-preparing an up-to-date sheet is
+ * non-destructive - migrateLegacyLayoutIfNeeded returns early when the headers already match,
+ * and prepareSheet only clears the D and J separator columns. A sheet on an OLDER layout is
+ * reset to its raw readings instead; there is no in-place widening or narrowing any more.
  */
 const LAYOUT_VERSION =
-  'wine-layout-v14-chart-reposition';
+  'wine-layout-v15-narrow-diagnostics';
 
 
 /*
@@ -185,7 +272,7 @@ const LAYOUT_VERSION =
  *
  * In two places, deliberately:
  *
- * - column S of the wine sheet, next to the row it identifies, so a row can
+ * - column M of the wine sheet, next to the row it identifies, so a row can
  *   be traced back to the exact device record that produced it;
  * - the hidden '_processed_ids' sheet, which remains the single source of
  *   truth for de-duplication.
@@ -199,8 +286,10 @@ const LAYOUT_VERSION =
  * row number, the capture time, the receipt time and the outcome, so ids that
  * produced no row are still accounted for.
  *
- * Of the schemaVersion 2 payload only 'mac' (a duplicate of deviceId) and
- * 'Comment' (always empty in this phase) are not written anywhere.
+ * Of the schemaVersion 2 payload, 'mac' (a duplicate of deviceId), 'Comment' (always empty
+ * in this phase) and 'SG_Smoothed' (column B already carries the smoothed value) are not
+ * written anywhere. 'deviceId' is recorded per wine rather than per row - see
+ * noteDeviceChange() - and the RSSI aggregates live in the note on column L.
  */
 const PROCESSED_IDS_SHEET = '_processed_ids';
 
@@ -236,6 +325,11 @@ const WEBAPP_BATCH_LOCK_WAIT_MS = 10000;
  * - installs the automatic missing-reading check,
  * - flags transmission gaps and average quality,
  * - runs the first status check.
+ *
+ * If you are upgrading a spreadsheet that already holds readings, run
+ * rebuildAllDerivedColumns() once as well. Earlier versions computed each
+ * four-hour average once, when its row was written, so windows the offline
+ * queue completed after the fact are still marked INCOMPLETE.
  */
 function initialSetup() {
   const lock = LockService.getScriptLock();
@@ -1305,7 +1399,7 @@ function getWineSheetState(
  * measurement: {
  *   captureDate,   Date, or null when the device had no trustworthy clock
  *   sg, tempC,     required, temperature already converted to Celsius
- *   sgRaw, sgSmoothed,
+ *   sgRaw,
  *   rssi, rssiAvg, rssiMin, rssiMax, rssiSamples,
  *   deviceId, recordId, uptimeMsAtCapture
  * }
@@ -1403,53 +1497,22 @@ function appendMeasurementRow(
       AVERAGE_OUTPUT_INTERVAL_HOURS
     )
   ) {
-    const rollingAssessment =
-      calculateRollingAverageAssessment(
-        state.sheet,
-        captureDate,
-        ROLLING_AVERAGE_HOURS,
-        measurement.sg,
-        measurement.tempC
+    const classified =
+      classifyRollingAssessment(
+        calculateRollingAverageAssessment(
+          state.sheet,
+          captureDate,
+          ROLLING_AVERAGE_HOURS,
+          measurement.sg,
+          measurement.tempC
+        )
       );
 
-    const largestGapText =
-      formatDurationMinutes(
-        rollingAssessment.maxGapMinutes
-      );
-
-    if (
-      rollingAssessment.maxGapMinutes <=
-      AVERAGE_COMPLETE_MAX_GAP_MINUTES
-    ) {
-      averages.rollingSG = rollingAssessment.sg;
-      averages.rollingTempC = rollingAssessment.tempC;
-      averages.quality = 'COMPLETE';
-      averageQualityColor = AVERAGE_COMPLETE_COLOR;
-
-    } else if (
-      rollingAssessment.maxGapMinutes <=
-      AVERAGE_INCOMPLETE_MAX_GAP_MINUTES
-    ) {
-      averages.rollingSG = rollingAssessment.sg;
-      averages.rollingTempC = rollingAssessment.tempC;
-      averages.quality =
-        'INCOMPLETE — ' + largestGapText + ' gap';
-      averageQualityColor = AVERAGE_INCOMPLETE_COLOR;
-
-    } else {
-      averages.quality =
-        'INSUFFICIENT DATA — ' + largestGapText + ' gap';
-      averageQualityColor = AVERAGE_INSUFFICIENT_COLOR;
-    }
-
-    averageQualityNote =
-      'Largest interval without a saved reading inside this ' +
-      ROLLING_AVERAGE_HOURS +
-      '-hour window: ' +
-      largestGapText +
-      '. Readings used: ' +
-      rollingAssessment.readingCount +
-      '.';
+    averages.rollingSG = classified.rollingSG;
+    averages.rollingTempC = classified.rollingTempC;
+    averages.quality = classified.quality;
+    averageQualityColor = classified.color;
+    averageQualityNote = classified.note;
 
     state.lastAverageOutputDate = captureDate;
   }
@@ -1568,6 +1631,23 @@ function appendMeasurementRow(
       .setNote(averageQualityNote);
   }
 
+  /* The RSSI detail that used to occupy four columns of its own. */
+  const signalNote = buildSignalNote(measurement);
+
+  if (signalNote) {
+    state.sheet
+      .getRange(newRow, 12)
+      .setNote(signalNote);
+  }
+
+  noteDeviceChange(
+    spreadsheet,
+    state,
+    measurement,
+    newRow,
+    captureDate
+  );
+
   state.nextRow = newRow + 1;
   state.rowsAppended++;
   state.lastSavedCaptureDate = captureDate;
@@ -1654,8 +1734,8 @@ function appendUntimestampedRow(
 
 
 /*
- * The nineteen cell values of one data row, in layout order. The single place
- * that knows the column order, so widening the layout again means editing
+ * The thirteen cell values of one data row, in layout order. The single place
+ * that knows the column order, so changing the layout again means editing
  * WINE_SHEET_HEADERS and this function together.
  */
 function buildMeasurementRowValues(
@@ -1675,15 +1755,181 @@ function buildMeasurementRowValues(
     averages.previousDayTempC,
     '',
     valueOrBlank(measurement.sgRaw),
-    valueOrBlank(measurement.sgSmoothed),
-    valueOrBlank(measurement.rssi),
-    valueOrBlank(measurement.rssiAvg),
-    valueOrBlank(measurement.rssiMin),
-    valueOrBlank(measurement.rssiMax),
-    valueOrBlank(measurement.rssiSamples),
-    valueOrBlank(measurement.deviceId),
+    signalValue(measurement),
     valueOrBlank(measurement.recordId)
   ];
+}
+
+
+/*
+ * The one number that goes in column L.
+ *
+ * The average is the honest summary of a scan window and the only one worth
+ * charting. A device that sent no aggregate at all still has its own reading's
+ * dBm, so that stands in rather than leaving the column blank.
+ */
+function signalValue(measurement) {
+  if (
+    measurement.rssiAvg !== undefined &&
+    measurement.rssiAvg !== null &&
+    measurement.rssiAvg !== ''
+  ) {
+    return measurement.rssiAvg;
+  }
+
+  return valueOrBlank(measurement.rssi);
+}
+
+
+/*
+ * The detail that used to be four extra columns, as a note on the signal cell.
+ * Returns '' when the payload carried nothing worth expanding on, in which case
+ * no note is written at all.
+ */
+function buildSignalNote(measurement) {
+  const parts = [];
+
+  if (
+    measurement.rssi !== undefined &&
+    measurement.rssi !== null &&
+    measurement.rssi !== ''
+  ) {
+    parts.push(
+      'This reading: ' + measurement.rssi + ' dBm.'
+    );
+  }
+
+  const hasRange =
+    measurement.rssiMin !== '' &&
+    measurement.rssiMin !== undefined &&
+    measurement.rssiMin !== null &&
+    measurement.rssiMax !== '' &&
+    measurement.rssiMax !== undefined &&
+    measurement.rssiMax !== null;
+
+  if (hasRange) {
+    parts.push(
+      'Range over the window: ' +
+      measurement.rssiMin +
+      ' to ' +
+      measurement.rssiMax +
+      ' dBm.'
+    );
+  }
+
+  if (
+    measurement.rssiSamples !== '' &&
+    measurement.rssiSamples !== undefined &&
+    measurement.rssiSamples !== null
+  ) {
+    parts.push(
+      'Samples: ' + measurement.rssiSamples + '.'
+    );
+  }
+
+  return parts.join(' ');
+}
+
+
+/*
+ * The MAC no longer has a column, so a CHANGE has to be recorded where a change
+ * is what matters, rather than by repeating an unchanging value on every row.
+ *
+ * Three places, each answering a different question:
+ *
+ * - a note on this row's Record id cell     "which Tilt produced this row?"
+ * - a DEVICE_CHANGED entry in System Log    "when did it change, and from what?"
+ * - the Monitoring tab's Device column      "what is on this wine right now?"
+ *
+ * The first reading a wine ever sees is recorded silently: there is no change
+ * to report, and a note on the first row of every sheet would be noise.
+ *
+ * The note goes on column M rather than column A on purpose - column A's note
+ * is owned by the data-gap marker, which rebuildDerivedColumns() clears and
+ * rewrites, and two owners of one note is how notes get lost.
+ */
+function noteDeviceChange(
+  spreadsheet,
+  state,
+  measurement,
+  rowNumber,
+  captureDate
+) {
+  const deviceId = String(
+    measurement.deviceId === undefined ||
+    measurement.deviceId === null
+      ? ''
+      : measurement.deviceId
+  ).trim();
+
+  if (!deviceId) {
+    return;
+  }
+
+  const properties =
+    PropertiesService.getScriptProperties();
+
+  const key =
+    WINE_DEVICE_PREFIX +
+    state.sheet.getSheetId();
+
+  const previousDeviceId =
+    properties.getProperty(key);
+
+  if (previousDeviceId === deviceId) {
+    return;
+  }
+
+  properties.setProperty(key, deviceId);
+
+  /* First device ever seen for this wine: nothing changed, so nothing to say. */
+  if (!previousDeviceId) {
+    return;
+  }
+
+  state.sheet
+    .getRange(rowNumber, DATA_COLUMN_COUNT)
+    .setNote(
+      'Device changed to ' +
+      deviceId +
+      ' (previously ' +
+      previousDeviceId +
+      ').'
+    );
+
+  safeLogEvent(
+    'WARNING',
+    state.wineName,
+    'DEVICE_CHANGED',
+    'Readings for this wine are now arriving from a different Tilt.',
+    {
+      previousDevice: previousDeviceId,
+      currentDevice: deviceId,
+      changedAt:
+        Utilities.formatDate(
+          captureDate,
+          TIME_ZONE,
+          'dd.MM.yyyy HH:mm:ss'
+        ),
+      row: rowNumber,
+      sheetUrl:
+        spreadsheet.getUrl() +
+        '#gid=' +
+        state.sheet.getSheetId()
+    }
+  );
+}
+
+
+/* The device currently associated with a wine sheet, or '' if none seen yet. */
+function getStoredDeviceId(sheet) {
+  return (
+    PropertiesService
+      .getScriptProperties()
+      .getProperty(
+        WINE_DEVICE_PREFIX + sheet.getSheetId()
+      ) || ''
+  );
 }
 
 
@@ -1833,28 +2079,51 @@ function shouldWriteStateAverage(
   captureDate,
   intervalHours
 ) {
+  return isAverageDue(
+    state.lastAverageOutputDate
+      ? state.lastAverageOutputDate.getTime()
+      : null,
+    state.firstMeasurementDate
+      ? state.firstMeasurementDate.getTime()
+      : null,
+    captureDate.getTime(),
+    intervalHours
+  );
+}
+
+
+/*
+ * Whether a reading at captureTime is due a four-hour average point.
+ *
+ * The spacing rule in one place, so the live append path and the rebuild pick
+ * the same rows. Both work in milliseconds because the rebuild never has Date
+ * objects to hand - it works from the raw column A times it read once.
+ *
+ * For a new wine, wait until a full window of readings exists before writing
+ * the first average.
+ */
+function isAverageDue(
+  lastAverageTime,
+  firstMeasurementTime,
+  captureTime,
+  intervalHours
+) {
   const requiredMilliseconds =
     intervalHours * 60 * 60 * 1000;
 
-  /*
-   * For a new wine, wait until four hours of readings exist before writing
-   * the first average.
-   */
-  if (!state.lastAverageOutputDate) {
-    if (!state.firstMeasurementDate) {
+  if (lastAverageTime === null) {
+    if (firstMeasurementTime === null) {
       return false;
     }
 
     return (
-      captureDate.getTime() -
-      state.firstMeasurementDate.getTime() >=
+      captureTime - firstMeasurementTime >=
       requiredMilliseconds - 5000
     );
   }
 
   return (
-    captureDate.getTime() -
-    state.lastAverageOutputDate.getTime() >=
+    captureTime - lastAverageTime >=
     requiredMilliseconds - 5000
   );
 }
@@ -1996,7 +2265,7 @@ function readProcessedIdSet(sheet) {
  * never leave more than a single row without its record id.
  *
  * The stored row number is the row AT APPEND TIME. A later backlog upload can
- * reorder the sheet, so column S of the wine sheet - not this number - is the
+ * reorder the sheet, so column M of the wine sheet - not this number - is the
  * authoritative way to locate the row a record id produced.
  */
 function recordProcessedId(
@@ -2093,6 +2362,13 @@ function checkForMissingReadings() {
     ensureMonitoringSheet(spreadsheet);
     flushPendingLogs(spreadsheet);
 
+    /*
+     * Finish any derived-value rebuild a device request had to cut short. This
+     * runs before the status pass so the Monitoring tab reports on a sheet
+     * whose averages are already current.
+     */
+    flushPendingRebuilds(spreadsheet);
+
     const now = new Date();
     const rows = [];
 
@@ -2160,7 +2436,8 @@ function checkForMissingReadings() {
         lastValues.sg,
         lastValues.tempC,
         getLastIssue(wineName),
-        now
+        now,
+        getStoredDeviceId(sheet)
       ]);
     });
 
@@ -2373,13 +2650,18 @@ function prepareSheet(
 ) {
   migrateLegacyLayoutIfNeeded(sheet);
 
-  /* Remove old title merges before applying the nineteen-column layout. */
-  sheet
-    .getRange('A1:S1')
-    .breakApart();
+  /*
+   * Remove any older title merge before applying this layout's. Widened to the
+   * sheet's own width, not the layout's, so a merge left over from a wider
+   * layout is fully broken apart before the narrower one is made.
+   */
+  const titleRange =
+    sheet.getRange(1, 1, 1, sheet.getMaxColumns());
+
+  titleRange.breakApart();
 
   sheet
-    .getRange('A1:S1')
+    .getRange(1, 1, 1, DATA_COLUMN_COUNT)
     .merge();
 
   sheet
@@ -2459,19 +2741,19 @@ function prepareSheet(
     .getRange('I:I')
     .setNumberFormat('0.0');
 
-  /* Raw and smoothed SG carry the same four decimals as column B. */
+  /* Raw SG carries the same four decimals as column B. */
   sheet
-    .getRange('K:L')
+    .getRange('K:K')
     .setNumberFormat('0.0000');
 
-  /* RSSI values are whole negative dBm; the sample count is a plain integer. */
+  /* Signal is whole negative dBm. */
   sheet
-    .getRange('M:Q')
+    .getRange('L:L')
     .setNumberFormat('0');
 
-  /* MAC and record id are text, never coerced into numbers or dates. */
+  /* Record id is text, never coerced into a number or a date. */
   sheet
-    .getRange('R:S')
+    .getRange('M:M')
     .setNumberFormat('@');
 
   sheet.setColumnWidth(1, 175);
@@ -2485,14 +2767,24 @@ function prepareSheet(
   sheet.setColumnWidth(9, 155);
   sheet.setColumnWidth(10, 28);
   sheet.setColumnWidth(11, 95);
-  sheet.setColumnWidth(12, 110);
-  sheet.setColumnWidth(13, 85);
-  sheet.setColumnWidth(14, 85);
-  sheet.setColumnWidth(15, 85);
-  sheet.setColumnWidth(16, 85);
-  sheet.setColumnWidth(17, 110);
-  sheet.setColumnWidth(18, 155);
-  sheet.setColumnWidth(19, 200);
+  sheet.setColumnWidth(12, 95);
+  sheet.setColumnWidth(13, 200);
+
+  /*
+   * The charts anchor one clear column past the data, and a sheet can have
+   * fewer columns than that anchor - a hand-trimmed sheet, or one created with
+   * a narrow grid. setPosition() on a column that does not exist throws, so
+   * make sure it exists.
+   */
+  const missingColumns =
+    CHART_COLUMN - sheet.getMaxColumns();
+
+  if (missingColumns > 0) {
+    sheet.insertColumnsAfter(
+      sheet.getMaxColumns(),
+      missingColumns
+    );
+  }
 
   /*
    * The charts are part of the layout, so they are (re)built here rather than
@@ -2661,22 +2953,25 @@ function createOrRefreshCharts(
 
 
 /*
- * Layout v13 widened the wine sheet from nine to nineteen columns.
+ * Migration from ANY layout that is not the current one.
  *
- * CHOSEN APPROACH: preserve the three raw measurement columns, clear
- * everything derived, and log loudly. Not a full in-place migration.
+ * CHOSEN APPROACH: preserve the three raw measurement columns, clear everything
+ * else, and log loudly. Lossy by design, not a faithful migration.
  *
- * Why not a faithful column-by-column migration of every historic layout:
- * columns K..S simply do not exist in any older sheet, so there is nothing to
- * migrate into them, and the derived columns E..I are recomputed from the raw
- * readings as new rows arrive anyway. Why not "detect and refuse": prepareSheet()
- * would then either leave stale headers over reinterpreted columns, or append
- * new nineteen-column rows underneath old nine-column rows. Both silently
- * misalign the sheet, which is exactly the outcome to avoid.
+ * A, B and C are the only columns every layout this script has ever written
+ * agrees on, and they are the only ones that cannot be recomputed. Everything
+ * from D rightwards either is derived - E..I are rebuilt from the raw readings
+ * as new rows arrive - or is diagnostic detail whose absence costs nothing.
+ *
+ * Why not "detect and refuse": prepareSheet() would then either leave stale
+ * headers over reinterpreted columns, or append current-layout rows underneath
+ * old ones. Both silently misalign the sheet, which is exactly the outcome to
+ * avoid. A visibly reset sheet is better than a quietly wrong one.
  *
  * So the raw readings (A date, B SG, C °C) are kept, since every layout this
- * script has ever written stores them in those positions, D..S is cleared, and
- * a WARNING records that a reset is the cleaner option.
+ * script has ever written stores them in those positions, everything from D
+ * rightwards is cleared, and a WARNING records that a reset is the cleaner
+ * option.
  */
 function migrateLegacyLayoutIfNeeded(sheet) {
   const lastRow = sheet.getLastRow();
@@ -2688,7 +2983,15 @@ function migrateLegacyLayoutIfNeeded(sheet) {
 
   const headers =
     sheet
-      .getRange(2, 1, 1, DATA_COLUMN_COUNT)
+      .getRange(
+        2,
+        1,
+        1,
+        Math.min(
+          sheet.getMaxColumns(),
+          DATA_COLUMN_COUNT
+        )
+      )
       .getDisplayValues()[0];
 
   if (isCurrentWineLayout(headers)) {
@@ -3008,7 +3311,29 @@ function getFirstMeasurementDate(sheet) {
 
 
 function getLastAverageOutputDate(sheet) {
-  const lastRow = sheet.getLastRow();
+  return getLastAverageOutputDateBefore(
+    sheet,
+    sheet.getLastRow() + 1
+  );
+}
+
+
+/*
+ * Capture time of the newest four-hour average point strictly above beforeRow.
+ *
+ * rebuildDerivedColumns() needs this to continue the average chain from where
+ * the untouched part of the sheet left off: the four-hour spacing is measured
+ * from the previous average point, so recomputing a tail without that anchor
+ * would put the whole chain in a different place.
+ */
+function getLastAverageOutputDateBefore(
+  sheet,
+  beforeRow
+) {
+  const lastRow = Math.min(
+    sheet.getLastRow(),
+    beforeRow - 1
+  );
 
   if (lastRow < 3) {
     return null;
@@ -3224,6 +3549,68 @@ function calculateRollingAverageAssessment(
       Math.max(sgCount, tempCount)
   };
 }
+
+/*
+ * Turns a rolling assessment into the five things a four-hour average point
+ * puts on a row: the two average values, the quality text, the fill colour for
+ * column G and the explanatory note.
+ *
+ * Shared by the append path and by rebuildDerivedColumns() so that a row
+ * written live and the same row recomputed after a backfill cannot disagree
+ * about anything except the readings that were actually available.
+ */
+function classifyRollingAssessment(assessment) {
+  const largestGapText =
+    formatDurationMinutes(
+      assessment.maxGapMinutes
+    );
+
+  let rollingSG = '';
+  let rollingTempC = '';
+  let quality;
+  let color;
+
+  if (
+    assessment.maxGapMinutes <=
+    AVERAGE_COMPLETE_MAX_GAP_MINUTES
+  ) {
+    rollingSG = assessment.sg;
+    rollingTempC = assessment.tempC;
+    quality = 'COMPLETE';
+    color = AVERAGE_COMPLETE_COLOR;
+
+  } else if (
+    assessment.maxGapMinutes <=
+    AVERAGE_INCOMPLETE_MAX_GAP_MINUTES
+  ) {
+    rollingSG = assessment.sg;
+    rollingTempC = assessment.tempC;
+    quality =
+      'INCOMPLETE — ' + largestGapText + ' gap';
+    color = AVERAGE_INCOMPLETE_COLOR;
+
+  } else {
+    quality =
+      'INSUFFICIENT DATA — ' + largestGapText + ' gap';
+    color = AVERAGE_INSUFFICIENT_COLOR;
+  }
+
+  return {
+    rollingSG: rollingSG,
+    rollingTempC: rollingTempC,
+    quality: quality,
+    color: color,
+    note:
+      'Largest interval without a saved reading inside this ' +
+      ROLLING_AVERAGE_HOURS +
+      '-hour window: ' +
+      largestGapText +
+      '. Readings used: ' +
+      assessment.readingCount +
+      '.'
+  };
+}
+
 
 function calculateDailyAverages(
   sheet,
@@ -3719,7 +4106,7 @@ function ensureMonitoringSheet(spreadsheet) {
   }
 
   sheet
-    .getRange('A1:H1')
+    .getRange('A1:I1')
     .setValues([[
       'Wine',
       'Status',
@@ -3728,14 +4115,19 @@ function ensureMonitoringSheet(spreadsheet) {
       'Last SG',
       'Last temperature °C',
       'Last troubleshooting issue',
-      'Last checked'
+      'Last checked',
+      /*
+       * The device column exists because the MAC left the wine sheets. This is
+       * the "mentioned once" home for it: one row per wine, always current.
+       */
+      'Device'
     ]])
     .setBackground(HEADER_COLOR)
     .setFontWeight('bold');
 
-  /* Clear the old ABV header if this sheet came from the previous version. */
+  /* Clear the old ABV header if this sheet came from an earlier version. */
   sheet
-    .getRange('I:I')
+    .getRange('J:J')
     .clearContent()
     .clearFormat();
 
@@ -3765,6 +4157,10 @@ function ensureMonitoringSheet(spreadsheet) {
       'dd.MM.yyyy HH:mm:ss'
     );
 
+  sheet
+    .getRange('I:I')
+    .setNumberFormat('@');
+
   sheet.setColumnWidth(1, 180);
   sheet.setColumnWidth(2, 100);
   sheet.setColumnWidth(3, 175);
@@ -3773,6 +4169,7 @@ function ensureMonitoringSheet(spreadsheet) {
   sheet.setColumnWidth(6, 145);
   sheet.setColumnWidth(7, 500);
   sheet.setColumnWidth(8, 175);
+  sheet.setColumnWidth(9, 155);
 
   return sheet;
 }
@@ -3794,7 +4191,7 @@ function writeMonitoringRows(
         2,
         1,
         existingRows,
-        8
+        MONITORING_COLUMN_COUNT
       )
       .clearContent()
       .clearFormat();
@@ -3811,7 +4208,7 @@ function writeMonitoringRows(
   });
 
   sheet
-    .getRange(2, 1, rows.length, 8)
+    .getRange(2, 1, rows.length, MONITORING_COLUMN_COUNT)
     .setValues(rows);
 
   sheet
@@ -4128,6 +4525,29 @@ function sortAppendedSheets(
         }
       );
 
+      /*
+       * A reorder means this batch put rows somewhere other than the end of
+       * the sheet, which is exactly the condition under which the derived
+       * values below that point were computed without them.
+       *
+       * outcome.firstRow is the first row the sort moved, so every row from
+       * there down is suspect and every row above it is not: the sheet is
+       * ascending, so no row that sorted below firstRow can fall inside the
+       * rolling window or the previous calendar day of a row above it.
+       */
+      repairDerivedColumns(
+        spreadsheet,
+        state.sheet,
+        state.wineName,
+        toSortableTime(
+          state.sheet
+            .getRange(outcome.firstRow, 1)
+            .getValue()
+        ),
+        REBUILD_MAX_ROWS_PER_REQUEST,
+        deviceName
+      );
+
     } catch (sortError) {
       /*
        * The rows are already written and their ids are already acknowledged,
@@ -4413,4 +4833,1151 @@ function toSortableTime(value) {
   return isNaN(time)
     ? null
     : time;
+}
+
+
+/*
+ * ===========================================================================
+ * Derived-column rebuild (backfill repair)
+ * ===========================================================================
+ *
+ * WHAT IS DERIVED, AND FROM WHAT
+ *
+ *   E, F  four-hour rolling average SG and °C   \
+ *   G     average quality, its fill and its note |  a function of A, B and C
+ *   H, I  previous calendar day average SG and °C|  over a window of rows
+ *   row fill   new-day shading                  /
+ *
+ * Columns A, B, C and K..S are facts the device sent and are never touched
+ * here. Everything above is recomputed from scratch.
+ *
+ * ONE EXCEPTION: the DATA GAP fill and note are only ever CLEARED, never
+ * added. The live path measures a gap between consecutive readings SEEN,
+ * including readings the logging interval declined to store, and a rebuild
+ * only sees the stored rows. Clearing a flag whose gap has since been filled
+ * is always right; adding one from a coarser view of the same history is not.
+ */
+
+
+/*
+ * Run a rebuild and settle whatever it could not finish.
+ *
+ * Never throws. By the time this runs the rows are already written and their
+ * record ids are already acknowledged, so a failed repair is a cosmetic
+ * problem; turning it into a failed batch would make the device resend rows
+ * that are already in the sheet.
+ */
+function repairDerivedColumns(
+  spreadsheet,
+  sheet,
+  wineName,
+  fromTime,
+  maxRows,
+  deviceName
+) {
+  if (
+    fromTime === null ||
+    fromTime === undefined ||
+    !Number.isFinite(Number(fromTime))
+  ) {
+    return null;
+  }
+
+  const sheetName = sheet.getName();
+
+  try {
+    const outcome =
+      rebuildDerivedColumns(
+        sheet,
+        Number(fromTime),
+        maxRows
+      );
+
+    const stillOwedFrom =
+      resolvePendingRebuild(
+        sheetName,
+        wineName,
+        Number(fromTime),
+        outcome.deferredFromTime
+      );
+
+    if (outcome.changed) {
+      safeLogEvent(
+        'INFO',
+        wineName,
+        'DERIVED_VALUES_REBUILT',
+        'The four-hour averages, their quality, the previous-day averages and the new-day shading were recomputed over rows that a late upload changed.',
+        {
+          deviceName: deviceName,
+          rebuiltRows: outcome.rebuiltRowCount,
+          averagePoints: outcome.averagePointCount,
+          firstRow: outcome.firstRow,
+          lastRow: outcome.lastRow,
+          rebuiltFrom:
+            Utilities.formatDate(
+              new Date(Number(fromTime)),
+              TIME_ZONE,
+              'dd.MM.yyyy HH:mm:ss'
+            ),
+          remainingRebuildPending:
+            stillOwedFrom === null
+              ? 'no'
+              : Utilities.formatDate(
+                  new Date(stillOwedFrom),
+                  TIME_ZONE,
+                  'dd.MM.yyyy HH:mm:ss'
+                ),
+          sheetUrl:
+            spreadsheet.getUrl() +
+            '#gid=' +
+            sheet.getSheetId()
+        }
+      );
+    }
+
+    return outcome;
+
+  } catch (rebuildError) {
+    /*
+     * Leave the work queued. The background pass retries it with a bigger
+     * budget and without an HTTP timeout waiting on the other end.
+     */
+    writePendingRebuild(
+      sheetName,
+      wineName,
+      Number(fromTime)
+    );
+
+    safeLogEvent(
+      'ERROR',
+      wineName,
+      'REBUILD_FAILED',
+      rebuildError && rebuildError.message
+        ? rebuildError.message
+        : String(rebuildError),
+      {
+        deviceName: deviceName,
+        stack:
+          rebuildError && rebuildError.stack
+            ? rebuildError.stack
+            : '',
+        sheetName: sheetName
+      }
+    );
+
+    return null;
+  }
+}
+
+
+/*
+ * Recomputes every derived value from the first row at or after fromTime down
+ * to the last timestamped row, and writes back only if something actually
+ * changed.
+ *
+ * Reads, in order: column A for the whole data area (this decides the geometry
+ * of the pass), then B and C over the rebuild window plus its context, then the
+ * existing derived values, fills and notes of the rebuild window. Five reads
+ * and at most five writes, whatever the window size.
+ *
+ * Returns
+ *   { rebuiltRowCount, averagePointCount, firstRow, lastRow, changed,
+ *     deferredFromTime }
+ * where deferredFromTime is the capture time the caller must come back for
+ * when maxRows cut the window short.
+ */
+function rebuildDerivedColumns(
+  sheet,
+  fromTime,
+  maxRows
+) {
+  const firstDataRow = 3;
+  const lastRow = sheet.getLastRow();
+
+  const nothingToDo = {
+    rebuiltRowCount: 0,
+    averagePointCount: 0,
+    firstRow: 0,
+    lastRow: 0,
+    changed: false,
+    deferredFromTime: null
+  };
+
+  if (lastRow < firstDataRow) {
+    return nothingToDo;
+  }
+
+  const totalRows =
+    lastRow - firstDataRow + 1;
+
+  const dateValues =
+    sheet
+      .getRange(
+        firstDataRow,
+        1,
+        totalRows,
+        1
+      )
+      .getValues();
+
+  const times = [];
+
+  for (let i = 0; i < totalRows; i++) {
+    times.push(
+      toSortableTime(dateValues[i][0])
+    );
+  }
+
+  let rewriteStart = -1;
+
+  for (let i = 0; i < totalRows; i++) {
+    if (
+      times[i] !== null &&
+      times[i] >= fromTime
+    ) {
+      rewriteStart = i;
+      break;
+    }
+  }
+
+  if (rewriteStart === -1) {
+    return nothingToDo;
+  }
+
+  let rewriteEnd = -1;
+
+  for (
+    let i = totalRows - 1;
+    i >= rewriteStart;
+    i--
+  ) {
+    if (times[i] !== null) {
+      rewriteEnd = i;
+      break;
+    }
+  }
+
+  if (rewriteEnd < rewriteStart) {
+    return nothingToDo;
+  }
+
+  /*
+   * Oldest rows first. The four-hour spacing chains forward from the previous
+   * average point, so a suffix cannot be rebuilt before the rows above it are
+   * right. Whatever the cap leaves over is handed back to the caller and keeps
+   * the values it already has until the background pass reaches it.
+   */
+  let deferredFromTime = null;
+
+  if (
+    rewriteEnd - rewriteStart + 1 >
+    maxRows
+  ) {
+    const cappedEnd =
+      rewriteStart + maxRows - 1;
+
+    for (
+      let i = cappedEnd + 1;
+      i <= rewriteEnd;
+      i++
+    ) {
+      if (times[i] !== null) {
+        deferredFromTime = times[i];
+        break;
+      }
+    }
+
+    rewriteEnd = cappedEnd;
+  }
+
+  /*
+   * Rows read purely as context: they feed the first rebuilt row's rolling
+   * window and previous-day average, and are never written to.
+   */
+  const contextCutoff =
+    times[rewriteStart] -
+    REBUILD_CONTEXT_LOOKBACK_MS;
+
+  let contextStart = rewriteStart;
+
+  while (contextStart > 0) {
+    const previousRowTime =
+      times[contextStart - 1];
+
+    if (
+      previousRowTime === null ||
+      previousRowTime < contextCutoff
+    ) {
+      break;
+    }
+
+    contextStart--;
+  }
+
+  const measured =
+    sheet
+      .getRange(
+        firstDataRow + contextStart,
+        2,
+        rewriteEnd - contextStart + 1,
+        2
+      )
+      .getValues();
+
+  const rewriteStartRow =
+    firstDataRow + rewriteStart;
+
+  const rewriteRowCount =
+    rewriteEnd - rewriteStart + 1;
+
+  const derivedRange =
+    sheet.getRange(
+      rewriteStartRow,
+      5,
+      rewriteRowCount,
+      5
+    );
+
+  const rowRange =
+    sheet.getRange(
+      rewriteStartRow,
+      1,
+      rewriteRowCount,
+      DATA_COLUMN_COUNT
+    );
+
+  const captureNoteRange =
+    sheet.getRange(
+      rewriteStartRow,
+      1,
+      rewriteRowCount,
+      1
+    );
+
+  const qualityRange =
+    sheet.getRange(
+      rewriteStartRow,
+      7,
+      rewriteRowCount,
+      1
+    );
+
+  const existingDerived =
+    derivedRange.getValues();
+
+  const existingBackgrounds =
+    rowRange.getBackgrounds();
+
+  const existingCaptureNotes =
+    captureNoteRange.getNotes();
+
+  const existingQualityNotes =
+    qualityRange.getNotes();
+
+  const existingQualityWeights =
+    qualityRange.getFontWeights();
+
+  /*
+   * Seed the average chain from the untouched part of the sheet, so rebuilding
+   * a tail cannot shift the average points above it.
+   */
+  const previousAverageDate =
+    getLastAverageOutputDateBefore(
+      sheet,
+      rewriteStartRow
+    );
+
+  let lastAverageTime =
+    previousAverageDate
+      ? previousAverageDate.getTime()
+      : null;
+
+  let firstMeasurementTime = null;
+
+  if (lastAverageTime === null) {
+    const firstDate =
+      getFirstMeasurementDate(sheet);
+
+    firstMeasurementTime =
+      firstDate
+        ? firstDate.getTime()
+        : null;
+  }
+
+  /* Newest timestamped row above the window, for the first day comparison. */
+  let previousTime = null;
+
+  for (
+    let i = rewriteStart - 1;
+    i >= 0;
+    i--
+  ) {
+    if (times[i] !== null) {
+      previousTime = times[i];
+      break;
+    }
+  }
+
+  const derivedValues = [];
+  const backgrounds = [];
+  const captureNotes = [];
+  const qualityNotes = [];
+  const qualityWeights = [];
+
+  let averagePointCount = 0;
+
+  for (
+    let offset = 0;
+    offset < rewriteRowCount;
+    offset++
+  ) {
+    const index = rewriteStart + offset;
+    const rowTime = times[index];
+
+    /*
+     * A row with no capture time has no position in time, so it carries no
+     * derived value and is copied through untouched.
+     */
+    if (rowTime === null) {
+      derivedValues.push(
+        existingDerived[offset].slice()
+      );
+
+      backgrounds.push(
+        existingBackgrounds[offset].slice()
+      );
+
+      captureNotes.push([
+        existingCaptureNotes[offset][0]
+      ]);
+
+      qualityNotes.push([
+        existingQualityNotes[offset][0]
+      ]);
+
+      qualityWeights.push([
+        existingQualityWeights[offset][0]
+      ]);
+
+      continue;
+    }
+
+    const averages = emptyAverageSet();
+
+    let qualityColor = null;
+    let qualityNote = '';
+
+    if (
+      isAverageDue(
+        lastAverageTime,
+        firstMeasurementTime,
+        rowTime,
+        AVERAGE_OUTPUT_INTERVAL_HOURS
+      )
+    ) {
+      const classified =
+        classifyRollingAssessment(
+          rollingAssessmentFromRows(
+            times,
+            measured,
+            contextStart,
+            index,
+            ROLLING_AVERAGE_HOURS
+          )
+        );
+
+      averages.rollingSG = classified.rollingSG;
+      averages.rollingTempC = classified.rollingTempC;
+      averages.quality = classified.quality;
+      qualityColor = classified.color;
+      qualityNote = classified.note;
+
+      lastAverageTime = rowTime;
+      averagePointCount++;
+    }
+
+    const firstReadingOfDay =
+      previousTime === null ||
+      dateKey(
+        new Date(previousTime),
+        TIME_ZONE
+      ) !==
+      dateKey(
+        new Date(rowTime),
+        TIME_ZONE
+      );
+
+    if (
+      firstReadingOfDay &&
+      previousTime !== null
+    ) {
+      const previousDayAverages =
+        dailyAveragesFromRows(
+          times,
+          measured,
+          contextStart,
+          index - 1,
+          getPreviousCalendarDateKey(
+            new Date(rowTime),
+            TIME_ZONE
+          ),
+          TIME_ZONE
+        );
+
+      averages.previousDaySG =
+        previousDayAverages.sg;
+
+      averages.previousDayTempC =
+        previousDayAverages.tempC;
+    }
+
+    derivedValues.push([
+      averages.rollingSG,
+      averages.rollingTempC,
+      averages.quality,
+      averages.previousDaySG,
+      averages.previousDayTempC
+    ]);
+
+    /* Whole-row fill first, exactly the order the append path applies it in. */
+    const rowBackground = [];
+
+    for (
+      let column = 0;
+      column < DATA_COLUMN_COUNT;
+      column++
+    ) {
+      rowBackground.push(
+        firstReadingOfDay
+          ? NEW_DAY_COLOR
+          : NO_FILL_COLOR
+      );
+    }
+
+    const existingCaptureNote =
+      existingCaptureNotes[offset][0] || '';
+
+    const ownsCaptureNote =
+      existingCaptureNote.indexOf(
+        DATA_GAP_NOTE_PREFIX
+      ) === 0;
+
+    const stillGapped =
+      ownsCaptureNote &&
+      previousTime !== null &&
+      (rowTime - previousTime) / 60000 >
+        MISSING_READING_MINUTES;
+
+    if (stillGapped) {
+      rowBackground[0] = DATA_GAP_COLOR;
+      rowBackground[1] = DATA_GAP_COLOR;
+      rowBackground[2] = DATA_GAP_COLOR;
+    }
+
+    captureNotes.push([
+      ownsCaptureNote && !stillGapped
+        ? ''
+        : existingCaptureNote
+    ]);
+
+    if (averages.quality) {
+      rowBackground[6] = qualityColor;
+    }
+
+    backgrounds.push(rowBackground);
+    qualityNotes.push([qualityNote]);
+
+    qualityWeights.push([
+      averages.quality
+        ? 'bold'
+        : 'normal'
+    ]);
+
+    previousTime = rowTime;
+  }
+
+  const changed =
+    !gridsEqual(derivedValues, existingDerived) ||
+    !gridsEqual(backgrounds, existingBackgrounds) ||
+    !gridsEqual(captureNotes, existingCaptureNotes) ||
+    !gridsEqual(qualityNotes, existingQualityNotes) ||
+    !gridsEqual(qualityWeights, existingQualityWeights);
+
+  if (changed) {
+    derivedRange.setValues(derivedValues);
+    rowRange.setBackgrounds(backgrounds);
+    captureNoteRange.setNotes(captureNotes);
+    qualityRange.setNotes(qualityNotes);
+    qualityRange.setFontWeights(qualityWeights);
+  }
+
+  return {
+    rebuiltRowCount: rewriteRowCount,
+    averagePointCount: averagePointCount,
+    firstRow: rewriteStartRow,
+    lastRow:
+      rewriteStartRow + rewriteRowCount - 1,
+    changed: changed,
+    deferredFromTime: deferredFromTime
+  };
+}
+
+
+/*
+ * calculateRollingAverageAssessment() for a row that is already in the sheet,
+ * answered from the arrays the rebuild read once instead of from the sheet.
+ *
+ * The live version adds the incoming reading separately because it is not a
+ * row yet; here it is times[index] and is picked up by the loop, so the two
+ * produce the same numbers for the same set of readings.
+ */
+function rollingAssessmentFromRows(
+  times,
+  measured,
+  contextStart,
+  index,
+  hours
+) {
+  const currentTime = times[index];
+
+  const cutoffTime =
+    currentTime -
+    hours * 60 * 60 * 1000;
+
+  let sgTotal = 0;
+  let sgCount = 0;
+  let tempTotal = 0;
+  let tempCount = 0;
+
+  const readingTimes = [];
+
+  for (let i = index; i >= contextStart; i--) {
+    const rowTime = times[i];
+
+    if (rowTime === null) {
+      continue;
+    }
+
+    if (rowTime < cutoffTime) {
+      break;
+    }
+
+    if (rowTime > currentTime) {
+      continue;
+    }
+
+    readingTimes.push(rowTime);
+
+    const rowSG =
+      measured[i - contextStart][0];
+
+    const rowTemp =
+      measured[i - contextStart][1];
+
+    const sgValue = Number(rowSG);
+    const tempValue = Number(rowTemp);
+
+    if (
+      rowSG !== '' &&
+      Number.isFinite(sgValue)
+    ) {
+      sgTotal += sgValue;
+      sgCount++;
+    }
+
+    if (
+      rowTemp !== '' &&
+      Number.isFinite(tempValue)
+    ) {
+      tempTotal += tempValue;
+      tempCount++;
+    }
+  }
+
+  readingTimes.sort(function (a, b) {
+    return a - b;
+  });
+
+  let largestGapMilliseconds =
+    readingTimes.length > 0
+      ? Math.max(
+          0,
+          readingTimes[0] - cutoffTime
+        )
+      : hours * 60 * 60 * 1000;
+
+  for (
+    let i = 1;
+    i < readingTimes.length;
+    i++
+  ) {
+    largestGapMilliseconds = Math.max(
+      largestGapMilliseconds,
+      readingTimes[i] - readingTimes[i - 1]
+    );
+  }
+
+  if (readingTimes.length > 0) {
+    largestGapMilliseconds = Math.max(
+      largestGapMilliseconds,
+      currentTime -
+        readingTimes[readingTimes.length - 1]
+    );
+  }
+
+  const averages = averageResult(
+    sgTotal,
+    sgCount,
+    tempTotal,
+    tempCount
+  );
+
+  return {
+    sg: averages.sg,
+    tempC: averages.tempC,
+    maxGapMinutes:
+      largestGapMilliseconds / 60000,
+    readingCount:
+      Math.max(sgCount, tempCount)
+  };
+}
+
+
+/*
+ * calculateDailyAverages() over the rows the rebuild already holds.
+ *
+ * The context window always reaches at least 48 hours above the first rebuilt
+ * row, and a calendar day begins at most 48 hours before any instant on the
+ * day after it, so the target day is always fully inside the arrays.
+ */
+function dailyAveragesFromRows(
+  times,
+  measured,
+  contextStart,
+  endIndex,
+  targetDateKey,
+  timezone
+) {
+  let sgTotal = 0;
+  let sgCount = 0;
+  let tempTotal = 0;
+  let tempCount = 0;
+  let foundTargetDate = false;
+
+  for (
+    let i = endIndex;
+    i >= contextStart;
+    i--
+  ) {
+    const rowTime = times[i];
+
+    if (rowTime === null) {
+      continue;
+    }
+
+    const rowDateKey =
+      dateKey(
+        new Date(rowTime),
+        timezone
+      );
+
+    if (rowDateKey === targetDateKey) {
+      foundTargetDate = true;
+
+      const rowSG =
+        measured[i - contextStart][0];
+
+      const rowTemp =
+        measured[i - contextStart][1];
+
+      const sgValue = Number(rowSG);
+      const tempValue = Number(rowTemp);
+
+      if (
+        rowSG !== '' &&
+        Number.isFinite(sgValue)
+      ) {
+        sgTotal += sgValue;
+        sgCount++;
+      }
+
+      if (
+        rowTemp !== '' &&
+        Number.isFinite(tempValue)
+      ) {
+        tempTotal += tempValue;
+        tempCount++;
+      }
+
+    } else if (
+      foundTargetDate &&
+      rowDateKey < targetDateKey
+    ) {
+      break;
+    }
+  }
+
+  return averageResult(
+    sgTotal,
+    sgCount,
+    tempTotal,
+    tempCount
+  );
+}
+
+
+/*
+ * Cell-by-cell comparison of two same-shaped grids. This is what keeps a
+ * rebuild that changes nothing from writing anything at all - which is the
+ * normal case for the rows below a small backfill.
+ */
+function gridsEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (
+    let row = 0;
+    row < left.length;
+    row++
+  ) {
+    if (
+      left[row].length !== right[row].length
+    ) {
+      return false;
+    }
+
+    for (
+      let column = 0;
+      column < left[row].length;
+      column++
+    ) {
+      if (
+        left[row][column] !==
+        right[row][column]
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+
+/*
+ * ---------------------------------------------------------------------------
+ * Rebuild work owed to a sheet
+ * ---------------------------------------------------------------------------
+ *
+ * One Script Property per sheet holding the oldest capture time still to be
+ * rebuilt. Written when a device request runs out of its row budget, or when a
+ * rebuild throws, and cleared by whichever pass finally covers it.
+ */
+function getPendingRebuildKey(sheetName) {
+  return (
+    PENDING_REBUILD_PREFIX + sheetName
+  );
+}
+
+
+function readPendingRebuild(sheetName) {
+  const stored =
+    PropertiesService
+      .getScriptProperties()
+      .getProperty(
+        getPendingRebuildKey(sheetName)
+      );
+
+  const parsed =
+    parseJsonSafely(stored, null);
+
+  if (
+    !parsed ||
+    !Number.isFinite(Number(parsed.fromTime))
+  ) {
+    return null;
+  }
+
+  return {
+    sheetName: sheetName,
+    wineName:
+      parsed.wineName || sheetName,
+    fromTime: Number(parsed.fromTime)
+  };
+}
+
+
+function writePendingRebuild(
+  sheetName,
+  wineName,
+  fromTime
+) {
+  PropertiesService
+    .getScriptProperties()
+    .setProperty(
+      getPendingRebuildKey(sheetName),
+      JSON.stringify({
+        sheetName: sheetName,
+        wineName: wineName,
+        fromTime: Number(fromTime)
+      })
+    );
+}
+
+
+function deletePendingRebuild(sheetName) {
+  PropertiesService
+    .getScriptProperties()
+    .deleteProperty(
+      getPendingRebuildKey(sheetName)
+    );
+}
+
+
+/*
+ * Records what a finished pass still leaves owed, and returns it.
+ *
+ * Two things can be outstanding: the tail this pass could not reach, and an
+ * older starting point queued earlier that this pass started below. The oldest
+ * of the two wins, because a rebuild always works downwards from its start.
+ */
+function resolvePendingRebuild(
+  sheetName,
+  wineName,
+  coveredFromTime,
+  deferredFromTime
+) {
+  const existing =
+    readPendingRebuild(sheetName);
+
+  const candidates = [];
+
+  if (
+    existing &&
+    existing.fromTime < coveredFromTime
+  ) {
+    candidates.push(existing.fromTime);
+  }
+
+  if (deferredFromTime !== null) {
+    candidates.push(deferredFromTime);
+  }
+
+  if (candidates.length === 0) {
+    if (existing) {
+      deletePendingRebuild(sheetName);
+    }
+
+    return null;
+  }
+
+  const next = Math.min.apply(
+    null,
+    candidates
+  );
+
+  writePendingRebuild(
+    sheetName,
+    wineName,
+    next
+  );
+
+  return next;
+}
+
+
+/*
+ * Finishes the rebuilds device requests could not afford to finish inline.
+ *
+ * Called from checkForMissingReadings(), which already holds the spreadsheet
+ * lock and, unlike a device request, has no fifteen-second HTTP timeout on the
+ * other end. Bounded by wall-clock time so it can never approach the
+ * six-minute execution limit.
+ *
+ * Returns the number of rebuild passes it ran.
+ */
+function flushPendingRebuilds(spreadsheet) {
+  const properties =
+    PropertiesService.getScriptProperties();
+
+  const startedAt = Date.now();
+
+  let passCount = 0;
+
+  for (
+    let round = 0;
+    round < REBUILD_MAX_BACKGROUND_PASSES;
+    round++
+  ) {
+    const keys =
+      properties
+        .getKeys()
+        .filter(function (key) {
+          return (
+            key.indexOf(
+              PENDING_REBUILD_PREFIX
+            ) === 0
+          );
+        });
+
+    if (keys.length === 0) {
+      return passCount;
+    }
+
+    let workedThisRound = false;
+
+    for (let i = 0; i < keys.length; i++) {
+      if (
+        Date.now() - startedAt >
+        REBUILD_BACKGROUND_BUDGET_MS
+      ) {
+        return passCount;
+      }
+
+      const sheetName =
+        keys[i].substring(
+          PENDING_REBUILD_PREFIX.length
+        );
+
+      const pending =
+        readPendingRebuild(sheetName);
+
+      if (!pending) {
+        properties.deleteProperty(keys[i]);
+        continue;
+      }
+
+      const sheet =
+        spreadsheet.getSheetByName(sheetName);
+
+      if (!sheet) {
+        deletePendingRebuild(sheetName);
+
+        safeLogEvent(
+          'WARNING',
+          pending.wineName,
+          'REBUILD_SHEET_MISSING',
+          'A pending derived-value rebuild was dropped because its sheet no longer exists.',
+          {
+            sheetName: sheetName
+          }
+        );
+
+        continue;
+      }
+
+      repairDerivedColumns(
+        spreadsheet,
+        sheet,
+        pending.wineName,
+        pending.fromTime,
+        REBUILD_MAX_ROWS_PER_BACKGROUND_PASS,
+        'Background rebuild'
+      );
+
+      workedThisRound = true;
+      passCount++;
+    }
+
+    if (!workedThisRound) {
+      return passCount;
+    }
+  }
+
+  return passCount;
+}
+
+
+/*
+ * Optional manual tool: recompute every derived value on every wine sheet,
+ * from its first reading onwards.
+ *
+ * Run this once after pasting this version of the script. Sheets written by
+ * the previous version still carry four-hour averages and quality marks that
+ * were computed before the offline queue delivered the readings they were
+ * missing - an 'INCOMPLETE — 1h 30m gap' over a window that is now complete.
+ * Nothing else clears those, because nothing else revisits a row once it is
+ * written.
+ *
+ * Safe to run at any time and safe to run twice: it only ever rewrites derived
+ * values, and only when recomputing them produces something different.
+ *
+ * A long history may need more than one run. Whatever a run cannot finish
+ * inside its budget stays queued and the fifteen-minute background check
+ * carries on with it, so a second run is a convenience, not a requirement.
+ */
+function rebuildAllDerivedColumns() {
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(BACKGROUND_LOCK_WAIT_MS)) {
+    throw new Error(
+      'Could not acquire the spreadsheet lock to rebuild derived columns.'
+    );
+  }
+
+  try {
+    const spreadsheet =
+      SpreadsheetApp.openById(SPREADSHEET_ID);
+
+    ensureSpreadsheetTimeZone(spreadsheet);
+    ensureSystemLogSheet(spreadsheet);
+    flushPendingLogs(spreadsheet);
+
+    let queuedSheets = 0;
+
+    spreadsheet.getSheets().forEach(function (sheet) {
+      if (!isWineSheet(sheet)) {
+        return;
+      }
+
+      const firstDate =
+        getFirstMeasurementDate(sheet);
+
+      if (!firstDate) {
+        return;
+      }
+
+      writePendingRebuild(
+        sheet.getName(),
+        getWineNameFromSheet(sheet),
+        firstDate.getTime()
+      );
+
+      queuedSheets++;
+    });
+
+    const passCount =
+      flushPendingRebuilds(spreadsheet);
+
+    const remaining =
+      PropertiesService
+        .getScriptProperties()
+        .getKeys()
+        .filter(function (key) {
+          return (
+            key.indexOf(
+              PENDING_REBUILD_PREFIX
+            ) === 0
+          );
+        })
+        .length;
+
+    safeLogEvent(
+      'INFO',
+      'System',
+      'FULL_REBUILD_RUN',
+      'A full rebuild of the derived columns was run manually.',
+      {
+        sheetsQueued: queuedSheets,
+        rebuildPasses: passCount,
+        sheetsStillPending: remaining,
+        rowsPerPass:
+          REBUILD_MAX_ROWS_PER_BACKGROUND_PASS
+      }
+    );
+
+  } finally {
+    lock.releaseLock();
+  }
 }

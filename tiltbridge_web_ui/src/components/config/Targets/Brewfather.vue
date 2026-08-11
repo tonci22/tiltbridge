@@ -30,6 +30,11 @@
               <template #FieldDescription>{{ $t('cloud_config.brewfather.api_key_desc') }}</template>
             </TextField>
 
+            <PushIntervalField v-model="pushEvery">
+              <template #FieldName>{{ $t('cloud_config.brewfather.push_frequency') }}</template>
+              <template #FieldDescription>{{ $t('cloud_config.brewfather.push_frequency_desc') }}</template>
+            </PushIntervalField>
+
             <FormErrorMsg :form-error-message="form_error_message" v-if="form_error_message.length > 0" />
           </div>
 
@@ -52,6 +57,7 @@
 import { ref } from "vue";
 import { useConfigStore } from "@/stores/ConfigStore";
 import TextField from "@/components/config/form_elements/TextField.vue";
+import PushIntervalField from "@/components/config/form_elements/PushIntervalField.vue";
 import FormErrorMsg from "@/components/generic/FormErrorMsg.vue";
 import SendTargetErrorMsg from "@/components/generic/SendTargetErrorMsg.vue";
 import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue";
@@ -60,6 +66,7 @@ import {i18n} from "@/main";
 
 const configStore = useConfigStore();
 const brewfatherKey = ref(configStore.brewfatherKey);
+const pushEvery = ref(configStore.brewfatherPushEvery);
 let form_error_message = ref("");
 
 const updateSuccessful = ref(false);
@@ -99,7 +106,7 @@ async function submitForm() {
 
   let loader = $loading.show({});
 
-  configStore.updateBrewfatherConfig(brewfatherKey.value).then(() => {
+  configStore.updateBrewfatherConfig(brewfatherKey.value, pushEvery.value).then(() => {
     // updateCachedSettings();
     loader.hide();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here

@@ -292,6 +292,7 @@ JsonDocument Config::to_json() {
     obj[FermentrackSettings::fermentrackUsername] = fermentrackUsername;
     obj[FermentrackSettings::fermentrackDeviceID] = fermentrackDeviceID;
     obj[FermentrackSettings::fermentrackAPIKey] = fermentrackAPIKey;
+    obj[FermentrackSettings::fermentrackPushEvery] = fermentrackPushEvery;
 
     obj[BrewstatusSettings::brewstatusURL] = brewstatusURL;
     obj[BrewstatusSettings::brewstatusPushEvery] = brewstatusPushEvery;
@@ -300,9 +301,14 @@ JsonDocument Config::to_json() {
     obj[GoogleSheetsSettings::scriptsURL] = scriptsURL;
     obj[GoogleSheetsSettings::scriptsEmail] = scriptsEmail;
     obj[GoogleSheetsSettings::gsheetsV2Enabled] = gsheetsV2Enabled;
+    obj[GoogleSheetsSettings::gsheetsPushEvery] = gsheetsPushEvery;
     obj[BrewersFriendSettings::brewersFriendKey] = brewersFriendKey;
+    obj[BrewersFriendSettings::brewersFriendPushEvery] = brewersFriendPushEvery;
     obj[BrewfatherSettings::brewfatherKey] = brewfatherKey;
+    obj[BrewfatherSettings::brewfatherPushEvery] = brewfatherPushEvery;
     obj[UserTargetSettings::userTargetURL] = userTargetURL;
+    obj[UserTargetSettings::userTargetPushEvery] = userTargetPushEvery;
+    obj[GrainfatherSettings::grainfatherPushEvery] = grainfatherPushEvery;
     obj[MQTTSettings::mqttBrokerHost] = mqttBrokerHost;
     obj[MQTTSettings::mqttBrokerPort] = mqttBrokerPort;
     obj[MQTTSettings::mqttUsername] = mqttUsername;
@@ -318,6 +324,32 @@ JsonDocument Config::to_json() {
     obj[InfluxDBSettings::influxdbPushEvery] = influxdbPushEvery;
 
     return obj;
+}
+
+/**
+ * @brief Load one target's push interval, clamping anything out of range back to its default.
+ *
+ * A push interval says how often a reading is UPLOADED to one target. It is unrelated to
+ * queueSnapshotIntervalSec, which says how often the offline queue is written to flash - see
+ * the block comment on those fields in jsonconfig.h.
+ *
+ * An absent key leaves the field alone, so a partial config never resets an interval, and an
+ * out-of-range one falls back to the default rather than to the previous value: a config file
+ * that has been hand-edited into nonsense should land somewhere predictable.
+ */
+static void loadPushEvery(const JsonDocument& obj, const char* key, uint16_t& field,
+                          uint16_t minSeconds, uint16_t maxSeconds, uint16_t defaultSeconds) {
+    if (obj[key].isNull())
+        return;
+
+    const int value = obj[key].as<int>();
+
+    if (value < minSeconds || value > maxSeconds) {
+        field = defaultSeconds;
+        return;
+    }
+
+    field = static_cast<uint16_t>(value);
 }
 
 void Config::load_from_json(JsonDocument obj) {
@@ -507,6 +539,8 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(fermentrackAPIKey, tu, sizeof(fermentrackAPIKey));
     }
 
+    loadPushEvery(obj, FermentrackSettings::fermentrackPushEvery, fermentrackPushEvery,
+                  PUSH_EVERY_MIN_SEC, PUSH_EVERY_MAX_SEC, 600);
 
 
     // BrewStatus Settings
@@ -545,11 +579,17 @@ void Config::load_from_json(JsonDocument obj) {
         gsheetsV2Enabled = obj[GoogleSheetsSettings::gsheetsV2Enabled];
     }
 
+    loadPushEvery(obj, GoogleSheetsSettings::gsheetsPushEvery, gsheetsPushEvery,
+                  PUSH_EVERY_MIN_SEC, PUSH_EVERY_MAX_SEC, 600);
+
     // Brewers Friend
     if (!obj[BrewersFriendSettings::brewersFriendKey].isNull()) {
         const char *bf = obj[BrewersFriendSettings::brewersFriendKey];
         strlcpy(brewersFriendKey, bf, 65);
     }
+
+    loadPushEvery(obj, BrewersFriendSettings::brewersFriendPushEvery, brewersFriendPushEvery,
+                  PUSH_EVERY_MIN_SEC, PUSH_EVERY_MAX_SEC, 900);
 
     // Brewfather
     if (!obj[BrewfatherSettings::brewfatherKey].isNull()) {
@@ -557,11 +597,20 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(brewfatherKey, bk, 65);
     }
 
+    loadPushEvery(obj, BrewfatherSettings::brewfatherPushEvery, brewfatherPushEvery,
+                  PUSH_EVERY_MIN_SEC, PUSH_EVERY_MAX_SEC, 900);
+
+    loadPushEvery(obj, GrainfatherSettings::grainfatherPushEvery, grainfatherPushEvery,
+                  PUSH_EVERY_MIN_SEC, PUSH_EVERY_MAX_SEC, 900);
+
     // User-defined Target Settings
     if (!obj[UserTargetSettings::userTargetURL].isNull()) {
         const char *uturl = obj[UserTargetSettings::userTargetURL];
         strlcpy(userTargetURL, uturl, 128);
     }
+
+    loadPushEvery(obj, UserTargetSettings::userTargetPushEvery, userTargetPushEvery,
+                  PUSH_EVERY_MIN_SEC, PUSH_EVERY_MAX_SEC, 600);
 
     // MQTT Settings
     if (!obj[MQTTSettings::mqttBrokerHost].isNull()) {

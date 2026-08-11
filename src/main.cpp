@@ -209,9 +209,17 @@ void loop() {
     }
 
     if (http_server.queue_timer_restart_rqd) {
-        Log.verbose("Re-arming queue snapshot timer.\r\n");
+        Log.verbose("Snapshot interval changed - capturing a reading now.\r\n");
         http_server.queue_timer_restart_rqd = false;
-        data_sender.startTimer(data_sender.queueSnapshotTimer, config.queueSnapshotIntervalSec);
+
+        // Capture immediately rather than re-arming for a full interval. Re-arming meant a
+        // change always postponed the next reading, so shortening the interval made the queue
+        // go quiet for longer than the OLD setting - the opposite of what was asked for, and
+        // indistinguishable from a broken queue.
+        //
+        // take_queue_snapshot() re-arms the one-shot itself, on the new interval, so this both
+        // gives immediate feedback that the setting took and restarts the cadence from now.
+        data_sender.snapshot_due = true;
     }
 
     if (http_server.lcd_reinit_rqd) {

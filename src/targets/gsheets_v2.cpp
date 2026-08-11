@@ -60,13 +60,13 @@ bool dataSendHandler::send_to_google_v2()
     if (strlen(config.scriptsURL) < GSCRIPTS_MIN_URL_LENGTH ||
         strlen(config.scriptsEmail) < GSCRIPTS_MIN_EMAIL_LENGTH) {
         queueUploadState = QueueUploadState::DISABLED;
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY);
+        startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return true;
     }
 
     if (!reading_queue.isHealthy()) {
         queueUploadState = QueueUploadState::DISABLED;
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY);
+        startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return false;
     }
 
@@ -78,7 +78,7 @@ bool dataSendHandler::send_to_google_v2()
     QueuedReading *batch = (QueuedReading *)malloc(batchSize * sizeof(QueuedReading));
     if (batch == nullptr) {
         Log.error("GSheets v2: unable to allocate a %u-record batch buffer.\r\n", (unsigned)batchSize);
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY);
+        startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return false;
     }
 
@@ -86,7 +86,7 @@ bool dataSendHandler::send_to_google_v2()
     if (count == 0) {
         free(batch);
         queueUploadState = QueueUploadState::IDLE;
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY);
+        startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return true;
     }
 
@@ -145,7 +145,7 @@ bool dataSendHandler::send_to_google_v2()
         Log.error("GSheets v2: unable to allocate a %u-byte payload buffer.\r\n", (unsigned)(payloadLen + 1));
         free(batch);
         queueUploadState = QueueUploadState::RETRYING;
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY);
+        startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return false;
     }
     serializeJson(payload, payloadStr, payloadLen + 1);
@@ -170,7 +170,7 @@ bool dataSendHandler::send_to_google_v2()
     if (response == nullptr) {
         free(payloadStr);
         queueUploadState = QueueUploadState::RETRYING;
-        startTimer(gSheetsTimer, GSCRIPTS_DELAY);
+        startTimer(gSheetsTimer, config.gsheetsPushEvery);
         return false;
     }
     response[0] = '\0';
@@ -266,9 +266,9 @@ bool dataSendHandler::send_to_google_v2()
         startTimer(gSheetsTimer, GSHEETS_V2_DRAIN_DELAY_SEC);
     else
         // Backoff applies only here: a run of failures (a stale Apps Script, a dead
-        // endpoint) should stop claiming the sender every 10 minutes. The drain path above
-        // is only reached on success, so it is never throttled.
-        startTimer(gSheetsTimer, backoffDelay(TARGET_GOOGLE_SHEETS, GSCRIPTS_DELAY));
+        // endpoint) should stop claiming the sender on its configured interval. The drain
+        // path above is only reached on success, so it is never throttled.
+        startTimer(gSheetsTimer, backoffDelay(TARGET_GOOGLE_SHEETS, config.gsheetsPushEvery));
 
     return result;
 }

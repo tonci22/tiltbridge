@@ -34,8 +34,12 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     const taplistioPushEvery = ref(0);
 
     // Google Sheets (Google Scripts)
+    // gsheetsPushEvery is how often a reading is UPLOADED to the spreadsheet. It is not the
+    // offline queue's snapshot interval (QueueStore.snapshotIntervalSeconds), which controls
+    // how often the queue is written to flash and affects no upload schedule.
     const scriptsURL = ref("");
     const scriptsEmail = ref("");
+    const gsheetsPushEvery = ref(600);
     const scriptsRedSheetName = ref("");
     const scriptsGreenSheetName = ref("");
     const scriptsBlackSheetName = ref("");
@@ -57,8 +61,12 @@ export const useConfigStore = defineStore("ConfigStore", () => {
 
 
     const brewersFriendKey = ref("");
+    const brewersFriendPushEvery = ref(900);
     const brewfatherKey = ref("");
+    const brewfatherPushEvery = ref(900);
     const userTargetURL = ref("");
+    const userTargetPushEvery = ref(600);
+    const grainfatherPushEvery = ref(900);
     const mqttBrokerHost = ref("");
     const mqttBrokerPort = ref(0);
     const mqttUsername = ref("");
@@ -86,6 +94,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     const fermentrackDeviceID = ref("");
     const fermentrackAPIKey = ref("");
     const fermentrackRegistrationError = ref(8);  // "Not attempted registration"
+    const fermentrackPushEvery = ref(300);
 
 
     const genericTargetURL = ref("");
@@ -129,6 +138,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             fermentrackDeviceID.value = response.fermentrackDeviceID;
             fermentrackAPIKey.value = response.fermentrackAPIKey;
             fermentrackRegistrationError.value = response.fermentrackRegistrationError;
+            fermentrackPushEvery.value = response.fermentrackPushEvery || 300;
             // Others
             genericTargetURL.value = response.userTargetURL;
             brewstatusURL.value = response.brewstatusURL;
@@ -139,6 +149,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             // Google Sheets Values
             scriptsURL.value = response.scriptsURL;
             scriptsEmail.value = response.scriptsEmail;
+            gsheetsPushEvery.value = response.gsheetsPushEvery || 600;
             scriptsRedSheetName.value = response.Red.name;
             scriptsGreenSheetName.value = response.Green.name;
             scriptsBlackSheetName.value = response.Black.name;
@@ -157,10 +168,14 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             grainfatherBlueURL.value = response.Blue.grainfatherURL;
             grainfatherYellowURL.value = response.Yellow.grainfatherURL;
             grainfatherPinkURL.value = response.Pink.grainfatherURL;
-            
+            grainfatherPushEvery.value = response.grainfatherPushEvery || 900;
+
             brewersFriendKey.value = response.brewersFriendKey;
+            brewersFriendPushEvery.value = response.brewersFriendPushEvery || 900;
             brewfatherKey.value = response.brewfatherKey;
+            brewfatherPushEvery.value = response.brewfatherPushEvery || 900;
             userTargetURL.value = response.userTargetURL;
+            userTargetPushEvery.value = response.userTargetPushEvery || 600;
             mqttBrokerHost.value = response.mqttBrokerHost;
             mqttBrokerPort.value = response.mqttBrokerPort;
             mqttUsername.value = response.mqttUsername;
@@ -223,6 +238,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         taplistioPushEvery.value = 0;
         scriptsURL.value = "";
         scriptsEmail.value = "";
+        gsheetsPushEvery.value = 600;
         scriptsRedSheetName.value = "";
         scriptsGreenSheetName.value = "";
         scriptsBlackSheetName.value = "";
@@ -240,10 +256,14 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         grainfatherBlueURL.value = "";
         grainfatherYellowURL.value = "";
         grainfatherPinkURL.value = "";
+        grainfatherPushEvery.value = 900;
 
         brewersFriendKey.value = "";
+        brewersFriendPushEvery.value = 900;
         brewfatherKey.value = "";
+        brewfatherPushEvery.value = 900;
         userTargetURL.value = "";
+        userTargetPushEvery.value = 600;
         mqttBrokerHost.value = "";
         mqttBrokerPort.value = 0;
         mqttUsername.value = "";
@@ -271,6 +291,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         fermentrackDeviceID.value = "";
         fermentrackAPIKey.value = "";
         fermentrackRegistrationError.value = 8; // "Not attempted registration" - not sure whether to do 8 or 9 here
+        fermentrackPushEvery.value = 300;
 
         genericTargetURL.value = "";
 
@@ -354,25 +375,41 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         });
     }
 
-    async function updateFermentrackConfig(ftHostname, ftPort, ftUser) {
+    async function updateFermentrackConfig(ftHostname, ftPort, ftUser, pushEvery) {
         await updateTargetConfig({
             fermentrackHostname: ftHostname,
             fermentrackPort: ftPort,
-            fermentrackUsername: ftUser
+            fermentrackUsername: ftUser,
+            fermentrackPushEvery: pushEvery
         }, () => {
             fermentrackHostname.value = ftHostname;
             fermentrackPort.value = ftPort;
             fermentrackUser.value = ftUser;
+            fermentrackPushEvery.value = pushEvery;
             fermentrackRegistrationError.value = 8; // "Not attempted registration"
         });
     }
 
+    /*
+     * Changing only how often readings are uploaded must not re-register the device, so it goes
+     * up on its own rather than through updateFermentrackConfig() - the firmware treats a
+     * payload carrying the FT2 connection details as a request to register again.
+     */
+    async function updateFermentrackPushEvery(pushEvery) {
+        await updateTargetConfig({
+            fermentrackPushEvery: pushEvery
+        }, () => {
+            fermentrackPushEvery.value = pushEvery;
+        });
+    }
 
-    async function updateGoogleSheetsConfig(gs_url, gs_email, red_name, green_name, black_name, purple_name, orange_name, blue_name, yellow_name, pink_name, v2Enabled) {
+
+    async function updateGoogleSheetsConfig(gs_url, gs_email, red_name, green_name, black_name, purple_name, orange_name, blue_name, yellow_name, pink_name, v2Enabled, pushEvery) {
         await updateTargetConfig({
             scriptsURL: gs_url,
             scriptsEmail: gs_email,
             gsheetsV2Enabled: v2Enabled,
+            gsheetsPushEvery: pushEvery,
             sheetName_red: red_name,
             sheetName_green: green_name,
             sheetName_black: black_name,
@@ -385,6 +422,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             scriptsURL.value = gs_url;
             scriptsEmail.value = gs_email;
             gsheetsV2Enabled.value = v2Enabled;
+            gsheetsPushEvery.value = pushEvery;
             scriptsRedSheetName.value = red_name;
             scriptsGreenSheetName.value = green_name;
             scriptsBlackSheetName.value = black_name;
@@ -396,24 +434,29 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         });
     }
 
-    async function updateBrewersFriendConfig(brewersFriendApiKey) {
+    async function updateBrewersFriendConfig(brewersFriendApiKey, pushEvery) {
         await updateTargetConfig({
             brewersFriendKey: brewersFriendApiKey,
+            brewersFriendPushEvery: pushEvery,
         }, () => {
             brewersFriendKey.value = brewersFriendApiKey;
+            brewersFriendPushEvery.value = pushEvery;
         });
     }
 
-    async function updateBrewfatherConfig(brewfather_key) {
+    async function updateBrewfatherConfig(brewfather_key, pushEvery) {
         await updateTargetConfig({
             brewfatherKey: brewfather_key,
+            brewfatherPushEvery: pushEvery,
         }, () => {
             brewfatherKey.value = brewfather_key;
+            brewfatherPushEvery.value = pushEvery;
         });
     }
 
-    async function updateGrainfatherUrls(grainfatherUrls) {
+    async function updateGrainfatherUrls(grainfatherUrls, pushEvery) {
         await updateTargetConfig({
+            grainfatherPushEvery: pushEvery,
             grainfatherURL_red: grainfatherUrls.Red,
             grainfatherURL_green: grainfatherUrls.Green,
             grainfatherURL_black: grainfatherUrls.Black,
@@ -431,6 +474,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             grainfatherBlueURL.value = grainfatherUrls.Blue;
             grainfatherYellowURL.value = grainfatherUrls.Yellow;
             grainfatherPinkURL.value = grainfatherUrls.Pink;
+            grainfatherPushEvery.value = pushEvery;
         });
     }
 
@@ -472,11 +516,13 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         });
     }
 
-    async function updateGenericTargetConfig(target_url) {
+    async function updateGenericTargetConfig(target_url, pushEvery) {
         await updateTargetConfig({
             userTargetURL: target_url,
+            userTargetPushEvery: pushEvery,
         }, () => {
             genericTargetURL.value = target_url;
+            userTargetPushEvery.value = pushEvery;
         });
     }
 
@@ -555,9 +601,14 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         grainfatherBlueURL,
         grainfatherYellowURL,
         grainfatherPinkURL,
+        grainfatherPushEvery,
+        gsheetsPushEvery,
         brewersFriendKey,
+        brewersFriendPushEvery,
         brewfatherKey,
+        brewfatherPushEvery,
         userTargetURL,
+        userTargetPushEvery,
         mqttBrokerHost,
         mqttBrokerPort,
         mqttUsername,
@@ -578,6 +629,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         fermentrackUser,
         fermentrackDeviceID,
         fermentrackAPIKey,
+        fermentrackPushEvery,
         fermentrackRegistrationError,
         genericTargetURL,
         tiltConfig,
@@ -591,6 +643,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         updateSenderRecoveryConfig,
         updateLegacyFermentrackConfig,
         updateFermentrackConfig,
+        updateFermentrackPushEvery,
         updateGoogleSheetsConfig,
         updateBrewersFriendConfig,
         updateBrewfatherConfig,

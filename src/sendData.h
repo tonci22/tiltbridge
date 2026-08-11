@@ -61,13 +61,13 @@ struct SendTargetStatus {
 // the /api/errors/ and /api/sender/ endpoints, so the two always agree.
 extern const char* const sendTargetNames[TARGET_COUNT];
 
-#define GSCRIPTS_DELAY (10 * 60)       // 10 minute delay between pushes to Google Sheets directly
-#define BREWERS_FRIEND_DELAY (15 * 60) // 15 minute delay between pushes to Brewer's Friend
-#define BREWFATHER_DELAY (15 * 60)     // 15 minute delay between pushes to Brewfather
-#define GRAINFATHER_DELAY (15 * 60)    // 15 minute delay between pushes to Grainfather
-#define USER_TARGET_DELAY (10 * 60)    // 10 minute delay between pushes to user specified send target
-
-#define FERMENTRACK_DELAY (5 * 60)    // 5 minute delay between pushes to Fermentrack
+// Push intervals used to live here as compile-time constants. They are now per-target settings
+// on Config (config.gsheetsPushEvery and friends) so they can be changed from the web UI, which
+// is also what makes them visibly distinct from config.queueSnapshotIntervalSec - how often the
+// offline queue is written to flash, a device-wide setting that no push interval affects.
+//
+// The old values survive as the defaults in jsonconfig.h; nothing changes for a device that
+// never touches the new fields.
 
 // Per-target HTTP time budgets, handed to SenderLock so the health monitor knows how long a
 // given target is legitimately allowed to hold the sender. These must track the timeoutMs

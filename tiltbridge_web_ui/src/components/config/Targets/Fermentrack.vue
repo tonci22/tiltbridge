@@ -103,11 +103,11 @@ async function submitForm() {
   } else {
     // We have a valid URL, so we need to make sure that the pushFrequency is set to a valid value.
     if (!pushFrequency.value || isNaN(parseInt(pushFrequency.value))) {
-      form_error_message.value = i18n.global.t('cloud_config.fermentrack.push_frequency_invalid');
+      form_error_message.value = i18n.global.t('cloud_config.fermentrack.push_frequency_invalid', { min: 30, max: 43200 });
       return;
     }
     if(parseInt(pushFrequency.value) > 43200 || parseInt(pushFrequency.value) < 30) {
-      form_error_message.value = i18n.global.t('cloud_config.fermentrack.push_frequency_out_of_range');
+      form_error_message.value = i18n.global.t('cloud_config.fermentrack.push_frequency_out_of_range', { min: 30, max: 43200 });
       return;
     }
   }

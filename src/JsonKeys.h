@@ -32,6 +32,7 @@ constexpr auto fermentrackPort = "fermentrackPort";
 constexpr auto fermentrackUsername = "fermentrackUsername";
 constexpr auto fermentrackDeviceID = "fermentrackDeviceID";
 constexpr auto fermentrackAPIKey = "fermentrackAPIKey";
+constexpr auto fermentrackPushEvery = "fermentrackPushEvery";
 }; // namespace FermentrackSettings
 
 namespace GoogleSheetsSettings {
@@ -39,6 +40,7 @@ constexpr auto scriptsURL = "scriptsURL";
 constexpr auto scriptsEmail = "scriptsEmail";
 constexpr auto gsheetsPrefix = "sheetName";
 constexpr auto gsheetsV2Enabled = "gsheetsV2Enabled";
+constexpr auto gsheetsPushEvery = "gsheetsPushEvery";
 }
 
 namespace QueueSettings {
@@ -51,18 +53,22 @@ constexpr auto queueBatchSize = "queueBatchSize";
 
 namespace BrewersFriendSettings {
 constexpr auto brewersFriendKey = "brewersFriendKey";
+constexpr auto brewersFriendPushEvery = "brewersFriendPushEvery";
 }
 
 namespace BrewfatherSettings {
 constexpr auto brewfatherKey = "brewfatherKey";
+constexpr auto brewfatherPushEvery = "brewfatherPushEvery";
 }
 
 namespace UserTargetSettings {
 constexpr auto userTargetURL = "userTargetURL";
+constexpr auto userTargetPushEvery = "userTargetPushEvery";
 }
 
 namespace GrainfatherSettings {
 constexpr auto grainfatherURLPrefix = "grainfatherURL";
+constexpr auto grainfatherPushEvery = "grainfatherPushEvery";
 }
 
 namespace BrewstatusSettings {

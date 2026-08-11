@@ -125,7 +125,7 @@
       "url_desc": "URL des Zielsystems",
       "push_frequency": "Push-Frequenz",
       "push_frequency_desc": "Häufigkeit, in der Daten gesendet werden (in Sekunden)",
-      "push_frequency_out_of_range": "Die Push-Frequenz muss eine Zahl zwischen 30 und 43200 sein",
+      "push_frequency_out_of_range": "Die Push-Frequenz muss eine Zahl zwischen {min} und {max} sein",
       "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
       "url_invalid": "URLs müssen entweder mit http:// oder https:// beginnen",
       "fermentrack_settings_set_sr": "Wählen Sie einen Fermentrack 2 Zieltyp aus",
@@ -160,8 +160,10 @@
         "waiting_to_register_error": "Das Gerät wartet auf die Registrierung bei Fermentrack. Bitte warten Sie bis zu 3 Minuten und aktualisieren Sie diese Seite.",
         "unable_to_reach_fermentrack_error": "TiltBridge kann Fermentrack nicht erreichen. Bitte überprüfen Sie, ob Fermentrack unter dem angegebenen Hostnamen/Port erreichbar ist.",
         "successful_registration_msg": "TiltBridge ist erfolgreich bei Fermentrack registriert",
-        "unknown error": "Ein unbekannter Fehler wurde von Fermentrack gesendet. Dies bedeutet höchstwahrscheinlich, dass entweder die TiltBridge-Firmware oder die Version von Fermentrack veraltet ist. Bitte aktualisieren Sie die TiltBridge-Firmware und/oder Fermentrack und versuchen Sie es erneut."
-      }
+        "unknown_error": "Ein unbekannter Fehler wurde von Fermentrack gesendet. Dies bedeutet höchstwahrscheinlich, dass entweder die TiltBridge-Firmware oder die Version von Fermentrack veraltet ist. Bitte aktualisieren Sie die TiltBridge-Firmware und/oder Fermentrack und versuchen Sie es erneut."
+      },
+      "ft2_push_frequency": "@:cloud_config.push_interval.label",
+      "ft2_push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "google_sheets": {
       "header": "Google Sheets konfigurieren",
@@ -170,7 +172,9 @@
       "email": "E-Mail-Adresse des Google-Skripts",
       "email_desc": "E-Mail-Adresse, die zur Erstellung des Zielskripts verwendet wurde",
       "color_sheet_tilt_name": "{color} Tilt-Tabellenname",
-      "color_sheet_tilt_name_desc": "Der Name der Tabelle, in die Daten für den {color} Tilt eingetragen werden sollen"
+      "color_sheet_tilt_name_desc": "Der Name der Tabelle, in die Daten für den {color} Tilt eingetragen werden sollen",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewers_friend": {
       "header": "Brewers Friend konfigurieren",
@@ -178,7 +182,9 @@
       "about_text": "Diese Einstellungen bestimmen, wie TiltBridge mit Brewer's Friend kommuniziert. Mit einem Premium-Konto unterstützt Brewer's Friend das Erfassen von Messwerten von Gravimetriesensoren wie dem Tilt Hydrometer. Um Ihren API-Schlüssel zu finden, melden Sie sich bei Ihrem Brewers Friend-Konto an und gehen Sie zu Profil > Konto. Ihr API-Schlüssel ist eine Zeichenfolge aus Buchstaben und Zahlen (keine URL).",
       "api_key": "API-Schlüssel",
       "api_key_desc": "API-Schlüssel aus den Kontoeinstellungen Ihres Brewers Friend",
-      "error_missing_api_key": "API-Schlüssel darf nicht leer sein"
+      "error_missing_api_key": "API-Schlüssel darf nicht leer sein",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewfather": {
       "header": "Brewfather konfigurieren",
@@ -187,13 +193,17 @@
       "api_key": "Stream-Schlüssel",
       "api_key_desc": "Stream-Schlüssel aus den Kontoeinstellungen Ihres Brewfather",
       "error_missing_api_key": "Stream-Schlüssel darf nicht leer sein",
-      "error_invalid_stream_key": "Der Stream-Schlüssel besteht aus Buchstaben und Zahlen – keine URL. Bitte überprüfen Sie den Schlüssel und versuchen Sie es erneut."
+      "error_invalid_stream_key": "Der Stream-Schlüssel besteht aus Buchstaben und Zahlen – keine URL. Bitte überprüfen Sie den Schlüssel und versuchen Sie es erneut.",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "grainfather": {
       "header": "Grainfather konfigurieren",
       "about_header": "Über Grainfather",
       "about_text": "Diese Einstellungen bestimmen, wie TiltBridge mit Grainfather kommuniziert. Grainfather unterstützt das Erfassen von Messwerten von Gravimetriesensoren wie dem Tilt Hydrometer mit einem Konto. Um Ihre API-URL zu finden, melden Sie sich bei Ihrem Grainfather-Konto an und gehen Sie zu Ausrüstung > Fermentationseinheiten. Fügen Sie ein \"Tilt\"-Fermentationgerät für jedes farbige Tilt hinzu, das Sie protokollieren möchten. Nachdem Sie den Tilt hinzugefügt haben, finden Sie die erforderliche URL in den Einrichtungsanweisungen (zugänglich über das umrandete \"i\" neben dem Tilt in Grainfather).",
-      "grainfather_url_desc": "Geben Sie die Grainfather-URL für Ihr {color} Tilt-Hydrometer ein"
+      "grainfather_url_desc": "Geben Sie die Grainfather-URL für Ihr {color} Tilt-Hydrometer ein",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewstatus": {
       "header": "Brewstatus konfigurieren",
@@ -241,8 +251,8 @@
       "about_text": "Mit diesem Ziel können Sie eine generische JSON-Payload mit Ihren Tilt-Daten an einen Dienst senden, den TiltBridge sonst nicht unterstützt.",
       "generic_target_url": "Generische Ziel-URL",
       "generic_target_url_desc": "Die URL, an die eine Payload mit JSON-Daten gesendet werden soll, die Ihre Tilts abdeckt",
-      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
-      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "influxdb": {
       "header": "InfluxDB konfigurieren",
@@ -264,6 +274,16 @@
       "error_missing_bucket": "Bucket ist erforderlich",
       "error_invalid_url": "Bitte geben Sie eine gültige URL an, die mit http:// oder https:// beginnt",
       "error_invalid_push_frequency": "Die Push-Frequenz muss zwischen 60 und 86400 Sekunden liegen (1 Minute bis 24 Stunden)"
+    },
+    "push_interval": {
+      "label": "Push Frequency",
+      "label_desc": "How often a reading is uploaded to this target.",
+      "minutes_option": "{minutes} Minuten",
+      "one_hour_option": "1 Stunde",
+      "hours_option": "{hours} Stunden",
+      "custom_option": "Benutzerdefiniert...",
+      "custom_interval": "Benutzerdefiniertes Intervall (Minuten)",
+      "custom_interval_desc": "Gültiger Bereich ist {min} bis {max} Minuten."
     }
   },
   "tilt_list": {

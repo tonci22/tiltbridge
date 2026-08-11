@@ -41,16 +41,16 @@
     "general_settings": "General Settings",
     "offline_queue": "Offline Queue"
   },
-  "about":{
-    "uptime":{
-      "version_and_uptime":"Version & Uptime Information",
-      "firmware_version":"Firmware Version",
-      "uptime_header":"Uptime",
-      "uptime_print":"Days: {days}, Hours: {hours}, Minutes: {minutes}, Seconds: {seconds}",
-      "reset_header":"Reset Information",
-      "reset_print":"Reason: {reason}, Description: {description}",
-      "heap_header":"Heap Information",
-      "heap_print":"Free Heap: {free_heap}, Max: {max_heap}, Frags: {frags}"
+  "about": {
+    "uptime": {
+      "version_and_uptime": "Version & Uptime Information",
+      "firmware_version": "Firmware Version",
+      "uptime_header": "Uptime",
+      "uptime_print": "Days: {days}, Hours: {hours}, Minutes: {minutes}, Seconds: {seconds}",
+      "reset_header": "Reset Information",
+      "reset_print": "Reason: {reason}, Description: {description}",
+      "heap_header": "Heap Information",
+      "heap_print": "Free Heap: {free_heap}, Max: {max_heap}, Frags: {frags}"
     },
     "version": {
       "loading_version": "Loading build/version information...",
@@ -176,7 +176,7 @@
       "url_desc": "URL of the target system",
       "push_frequency": "Push Frequency",
       "push_frequency_desc": "Frequency to send data (in seconds)",
-      "push_frequency_out_of_range": "Push frequency must be a number between 30 and 43200",
+      "push_frequency_out_of_range": "Push frequency must be a number between {min} and {max}",
       "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
       "url_invalid": "URLs must start with either http:// or https://",
       "fermentrack_settings_set_sr": "Select a Fermentrack 2 target type",
@@ -193,7 +193,6 @@
       "reset_registration": "Reset Registration",
       "hostname_too_long_error": "Hostname is invalid. Must be less than 127 characters.",
       "port_out_of_range_error": "Port number must be between 10 and 65535 (but is typically 80)",
-
       "presets": {
         "no_fermentrack": "None",
         "no_fermentrack_desc": "Do not use TiltBridge with Fermentrack 2",
@@ -212,8 +211,10 @@
         "waiting_to_register_error": "Device is waiting to register with Fermentrack. Please wait up to 3 minutes and refresh this page.",
         "unable_to_reach_fermentrack_error": "TiltBridge is unable to reach Fermentrack. Please check that Fermentrack is accessible at the specified hostname/port.",
         "successful_registration_msg": "TiltBridge is successfully registered with Fermentrack",
-        "unknown error": "An unknown error was sent by Fermentrack. This most likely means that either the TiltBridge firmware or the version of Fermentrack is out of date. Please update the TiltBridge firmware and/or Fermentrack and try again."
-      }
+        "unknown_error": "An unknown error was sent by Fermentrack. This most likely means that either the TiltBridge firmware or the version of Fermentrack is out of date. Please update the TiltBridge firmware and/or Fermentrack and try again."
+      },
+      "ft2_push_frequency": "@:cloud_config.push_interval.label",
+      "ft2_push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "google_sheets": {
       "header": "Configure Google Sheets",
@@ -224,7 +225,9 @@
       "color_sheet_tilt_name": "{color} Tilt Sheet Name",
       "color_sheet_tilt_name_desc": "The spreadsheet name to place data for the {color} tilt on",
       "v2_enabled": "Use the v2 Google Sheets protocol",
-      "v2_enabled_desc": "Sends the capture time with each reading so backlogged readings land under the time they were taken rather than the time they were uploaded. Requires an updated Apps Script."
+      "v2_enabled_desc": "Sends the capture time with each reading so backlogged readings land under the time they were taken rather than the time they were uploaded. Requires an updated Apps Script.",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "How often a reading is uploaded to the spreadsheet. Not the offline queue's snapshot interval, which is set on the Queue page. Google's Apps Script quotas make anything under 10 minutes unusable."
     },
     "brewers_friend": {
       "header": "Configure Brewers Friend",
@@ -233,7 +236,9 @@
       "api_key": "API Key",
       "api_key_desc": "API key from your Brewers Friend account settings",
       "error_missing_api_key": "API key cannot be empty",
-      "error_api_key_too_short": "API key must be greater than 12 characters"
+      "error_api_key_too_short": "API key must be greater than 12 characters",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewfather": {
       "header": "Configure Brewfather",
@@ -243,13 +248,17 @@
       "api_key_desc": "Stream key from your Brewfather account settings",
       "error_missing_api_key": "Stream key cannot be empty",
       "error_invalid_stream_key": "Stream key is a series of letters and numbers - not a URL. Please check the key and try again.",
-      "error_api_key_too_short": "Stream key must be greater than 5 characters"
+      "error_api_key_too_short": "Stream key must be greater than 5 characters",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "grainfather": {
       "header": "Configure Grainfather",
       "about_header": "About Grainfather",
       "about_text": "These settings control how TiltBridge talks to Grainfather. Grainfather supports logging from gravity sensors such as the Tilt Hydrometer with an account. To find your API url, log into your Grainfather account and go to Equipment > Fermentation Devices. Add a \"Tilt\" fermentation device for each color Tilt you want to log. After adding the Tilt, the URL required below can be found under setup instructions (accessible by clicking the circled \"i\" next to the Tilt in Grainfather).",
-      "grainfather_url_desc": "Enter the Grainfather URL for your {color} Tilt Hydrometer"
+      "grainfather_url_desc": "Enter the Grainfather URL for your {color} Tilt Hydrometer",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewstatus": {
       "header": "Configure Brewstatus",
@@ -297,8 +306,8 @@
       "about_text": "This target allows you to send a generic JSON payload containing your Tilt data to a service that TiltBridge otherwise does not support",
       "generic_target_url": "Generic Target URL",
       "generic_target_url_desc": "The URL to which to push a payload containing JSON data covering your Tilts",
-      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
-      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "influxdb": {
       "header": "Configure InfluxDB",
@@ -320,6 +329,16 @@
       "error_missing_bucket": "Bucket is required",
       "error_invalid_url": "Please enter a valid URL starting with http:// or https://",
       "error_invalid_push_frequency": "Push frequency must be between 60 and 86400 seconds (1 minute to 24 hours)"
+    },
+    "push_interval": {
+      "label": "Push Frequency",
+      "label_desc": "How often a reading is uploaded to this target.",
+      "minutes_option": "{minutes} minutes",
+      "one_hour_option": "1 hour",
+      "hours_option": "{hours} hours",
+      "custom_option": "Custom...",
+      "custom_interval": "Custom Interval (minutes)",
+      "custom_interval_desc": "Valid range is {min} to {max} minutes."
     }
   },
   "tilt_list": {
@@ -333,7 +352,7 @@
     "battery_age_column": "Battery Age",
     "gravity_column": "Gravity",
     "temperature_column": "Temperature",
-    "battery_age_week_count":"{weeks} weeks",
+    "battery_age_week_count": "{weeks} weeks",
     "no_tilts_detected": "No Tilts have been detected",
     "last_received_column": "Last Received",
     "last_received_ago": "{seconds}s ago",
@@ -423,10 +442,10 @@
     "settings": {
       "header": "Offline Queue Settings",
       "description": "Two independent knobs: how often the queue is written to flash, and how much it can hold.",
-      "interval_group": "Flash-write frequency",
-      "interval_group_desc": "How often queued readings are committed to flash. Writing more often loses less data on a sudden power cut, but consumes flash write cycles faster.",
-      "snapshot_interval": "Offline Queue Snapshot Interval",
-      "snapshot_interval_desc": "How often the queue is written to flash storage.",
+      "interval_group": "Reading frequency",
+      "interval_group_desc": "How often TiltBridge captures a reading from each Tilt and writes it to flash. This is the sampling rate: it decides how many rows reach your spreadsheet, and how much a sudden power cut can lose. Sampling more often also consumes flash write cycles faster.",
+      "snapshot_interval": "Reading / Snapshot Interval",
+      "snapshot_interval_desc": "How often a reading is captured and stored. Not the same as a target's push frequency, which only decides how long a captured reading waits before being uploaded.",
       "minutes_option": "{minutes} minutes",
       "custom_option": "Custom...",
       "custom_interval": "Custom Interval (minutes)",

@@ -262,6 +262,14 @@
                   </div>
 
 
+                  <div class="col-span-6 lg:col-span-4">
+                    <PushIntervalField v-model="fermentrackPushEvery">
+                      <template #FieldName>{{ $t("cloud_config.fermentrack.ft2_push_frequency") }}</template>
+                      <template #FieldDescription>{{ $t("cloud_config.fermentrack.ft2_push_frequency_desc") }}</template>
+                    </PushIntervalField>
+                  </div>
+
+
                   <div class="col-span-6 lg:col-span-4" v-if="configStore.fermentrackHostname !== ''">
                     <label for="deviceid" class="block text-sm font-medium text-gray-700">{{ $t("cloud_config.fermentrack.device_id") }}</label>
                     <div class="mt-1">
@@ -309,6 +317,7 @@ import SendTargetErrorMsg from "@/components/generic/SendTargetErrorMsg.vue";
 import { useConfigStore } from "@/stores/ConfigStore";
 import { useLoading } from 'vue-loading-overlay'
 import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue";
+import PushIntervalField from "@/components/config/form_elements/PushIntervalField.vue";
 import {onMounted, ref} from "vue";
 import { i18n } from "@/main.js";
 import { Listbox, ListboxButton, ListboxLabel, ListboxOption, ListboxOptions } from "@headlessui/vue";
@@ -345,6 +354,7 @@ const fermentrackHostname = ref(configStore.fermentrackHostname);
 const fermentrackPort = ref(configStore.fermentrackPort);
 const fermentrackUser = ref(configStore.fermentrackUser);
 const fermentrackDeviceID = ref(configStore.fermentrackDeviceID);
+const fermentrackPushEvery = ref(configStore.fermentrackPushEvery);
 
 // Hardcoded Fermentrack.net values
 const ft_net_host = "www.fermentrack.net";
@@ -356,6 +366,7 @@ function updateCachedSettings() {
   fermentrackPort.value = configStore.fermentrackPort;
   fermentrackUser.value = configStore.fermentrackUser;
   fermentrackDeviceID.value = configStore.fermentrackDeviceID;
+  fermentrackPushEvery.value = configStore.fermentrackPushEvery;
 }
 
 
@@ -415,13 +426,36 @@ async function submitForm() {
     return;
   }
 
+  const pushEvery = parseInt(fermentrackPushEvery.value);
+
+  if(!Number.isFinite(pushEvery) || pushEvery > 43200 || pushEvery < 600) {
+    form_error_message.value = i18n.global.t('cloud_config.fermentrack.push_frequency_out_of_range', { min: 600, max: 43200 });
+    return;
+  }
+
+  /*
+   * Posting the connection details is what makes the firmware forget its device id and API key
+   * and register again. Changing only how often readings are uploaded is no reason to do that,
+   * so when the connection is untouched the interval goes up on its own.
+   */
+  const connectionUnchanged =
+      fermentrackHostname.value === configStore.fermentrackHostname &&
+      parseInt(fermentrackPort.value) === configStore.fermentrackPort &&
+      fermentrackUser.value === configStore.fermentrackUser;
+
   // If there isn't a validation error, submit the form
   loader = $loading.show({});
-  configStore.updateFermentrackConfig(
-      fermentrackHostname.value,
-      parseInt(fermentrackPort.value),
-      fermentrackUser.value
-  ).then(() => {
+
+  const saved = connectionUnchanged
+      ? configStore.updateFermentrackPushEvery(pushEvery)
+      : configStore.updateFermentrackConfig(
+          fermentrackHostname.value,
+          parseInt(fermentrackPort.value),
+          fermentrackUser.value,
+          pushEvery
+        );
+
+  saved.then(() => {
     updateCachedSettings();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here
     alertOpen.value = true;

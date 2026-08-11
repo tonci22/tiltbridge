@@ -36,6 +36,11 @@
               </TextField>
             </div>
 
+            <PushIntervalField v-model="pushEvery">
+              <template #FieldName>{{ $t('cloud_config.grainfather.push_frequency') }}</template>
+              <template #FieldDescription>{{ $t('cloud_config.grainfather.push_frequency_desc') }}</template>
+            </PushIntervalField>
+
             <FormErrorMsg :form-error-message="formErrorMessage" v-if="formErrorMessage.length > 0" />
           </div>
 
@@ -56,6 +61,7 @@
 <script setup>
 import { ref } from 'vue';
 import TextField from '@/components/config/form_elements/TextField.vue';
+import PushIntervalField from '@/components/config/form_elements/PushIntervalField.vue';
 import FormErrorMsg from '@/components/generic/FormErrorMsg.vue';
 import SendTargetErrorMsg from "@/components/generic/SendTargetErrorMsg.vue";
 import { useConfigStore } from '@/stores/ConfigStore';
@@ -95,6 +101,8 @@ const grainfatherUrls = ref({
   Pink: configStore.grainfatherPinkURL,
 });
 
+const pushEvery = ref(configStore.grainfatherPushEvery);
+
 
 async function submitForm() {
   formErrorMessage.value = '';
@@ -107,7 +115,7 @@ async function submitForm() {
   });
 
 
-  configStore.updateGrainfatherUrls(grainfatherUrls.value).then(() => {
+  configStore.updateGrainfatherUrls(grainfatherUrls.value, pushEvery.value).then(() => {
     // updateCachedSettings();
     loader.hide();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here

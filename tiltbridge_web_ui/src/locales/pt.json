@@ -125,7 +125,7 @@
       "url_desc": "URL do sistema de destino",
       "push_frequency": "Frequência de Envio",
       "push_frequency_desc": "Frequência para enviar dados (em segundos)",
-      "push_frequency_out_of_range": "A frequência de envio deve ser um número entre 30 e 43200",
+      "push_frequency_out_of_range": "A frequência de envio deve ser um número entre {min} e {max}",
       "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
       "url_invalid": "As URLs devem iniciar com http:// ou https://",
       "fermentrack_settings_set_sr": "Selecione um tipo de alvo do Fermentrack 2",
@@ -160,8 +160,10 @@
         "waiting_to_register_error": "O dispositivo está aguardando para se registrar no Fermentrack. Por favor, aguarde até 3 minutos e atualize esta página.",
         "unable_to_reach_fermentrack_error": "O TiltBridge não consegue acessar o Fermentrack. Por favor, verifique se o Fermentrack é acessível no nome do host/porta especificados.",
         "successful_registration_msg": "TiltBridge registrado com sucesso no Fermentrack",
-        "unknown error": "Um erro desconhecido foi enviado pelo Fermentrack. Isso provavelmente significa que o firmware do TiltBridge ou a versão do Fermentrack estão desatualizados. Por favor, atualize o firmware do TiltBridge e/ou Fermentrack e tente novamente."
-      }
+        "unknown_error": "Um erro desconhecido foi enviado pelo Fermentrack. Isso provavelmente significa que o firmware do TiltBridge ou a versão do Fermentrack estão desatualizados. Por favor, atualize o firmware do TiltBridge e/ou Fermentrack e tente novamente."
+      },
+      "ft2_push_frequency": "@:cloud_config.push_interval.label",
+      "ft2_push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "google_sheets": {
       "header": "Configurar Google Sheets",
@@ -170,7 +172,9 @@
       "email": "Endereço de Email do Google Script",
       "email_desc": "Endereço de email usado para criar o script alvo",
       "color_sheet_tilt_name": "{color} Nome da Planilha do Tilt",
-      "color_sheet_tilt_name_desc": "O nome da planilha onde serão colocados os dados do Tilt {color}"
+      "color_sheet_tilt_name_desc": "O nome da planilha onde serão colocados os dados do Tilt {color}",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewers_friend": {
       "header": "Configurar Brewers Friend",
@@ -178,7 +182,9 @@
       "about_text": "Essas configurações controlam como o TiltBridge se comunica com o Brewers Friend. Com uma conta premium, o Brewers Friend suporta registro a partir de sensores de gravidade, como o Tilt Hydrometer. Para encontrar sua chave API, faça login na sua conta do Brewers Friend e vá para Perfil > Conta. Sua chave API será uma sequência de letras e números (não uma URL).",
       "api_key": "Chave API",
       "api_key_desc": "Chave API das configurações da sua conta do Brewers Friend",
-      "error_missing_api_key": "A chave API não pode estar vazia"
+      "error_missing_api_key": "A chave API não pode estar vazia",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewfather": {
       "header": "Configurar Brewfather",
@@ -187,13 +193,17 @@
       "api_key": "Chave de Stream",
       "api_key_desc": "Chave de stream das configurações da sua conta do Brewfather",
       "error_missing_api_key": "A chave de stream não pode estar vazia",
-      "error_invalid_stream_key": "A chave de stream é uma sequência de letras e números - não uma URL. Por favor, verifique a chave e tente novamente."
+      "error_invalid_stream_key": "A chave de stream é uma sequência de letras e números - não uma URL. Por favor, verifique a chave e tente novamente.",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "grainfather": {
       "header": "Configurar Grainfather",
       "about_header": "Sobre o Grainfather",
       "about_text": "Essas configurações controlam como o TiltBridge se comunica com o Grainfather. O Grainfather suporta registro a partir de sensores de gravidade, como o Tilt Hydrometer, com uma conta. Para encontrar sua URL do Grainfather, faça login na sua conta do Grainfather e vá para Equipamento > Dispositivos de Fermentação. Adicione um dispositivo de fermentação \"Tilt\" para cada Tilt colorido que você deseja registrar. Após adicionar o Tilt, a URL necessária abaixo pode ser encontrada nas instruções de configuração (acessível clicando no \"i\" circulado ao lado do Tilt no Grainfather).",
-      "grainfather_url_desc": "Insira a URL do Grainfather para o seu Tilt Hydrometer {color}"
+      "grainfather_url_desc": "Insira a URL do Grainfather para o seu Tilt Hydrometer {color}",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewstatus": {
       "header": "Configurar Brewstatus",
@@ -241,8 +251,8 @@
       "about_text": "Este alvo permite que você envie uma carga JSON genérica contendo seus dados do Tilt para um serviço que o TiltBridge não suporta de outra forma",
       "generic_target_url": "URL do Alvo Genérico",
       "generic_target_url_desc": "A URL para a qual enviar uma carga contendo dados JSON cobrindo seus Tilts",
-      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
-      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "influxdb": {
       "header": "Configurar InfluxDB",
@@ -264,6 +274,16 @@
       "error_missing_bucket": "O bucket é obrigatório",
       "error_invalid_url": "Por favor, insira uma URL válida começando com http:// ou https://",
       "error_invalid_push_frequency": "A frequência de envio deve estar entre 60 e 86400 segundos (1 minuto a 24 horas)"
+    },
+    "push_interval": {
+      "label": "Push Frequency",
+      "label_desc": "How often a reading is uploaded to this target.",
+      "minutes_option": "{minutes} minutos",
+      "one_hour_option": "1 hora",
+      "hours_option": "{hours} horas",
+      "custom_option": "Personalizado...",
+      "custom_interval": "Intervalo personalizado (minutos)",
+      "custom_interval_desc": "O intervalo válido é de {min} a {max} minutos."
     }
   },
   "tilt_list": {

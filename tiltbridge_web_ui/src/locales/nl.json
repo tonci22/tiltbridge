@@ -125,7 +125,7 @@
       "url_desc": "URL van het doelsysteem",
       "push_frequency": "Verzendfrequentie",
       "push_frequency_desc": "Frequentie om gegevens te verzenden (in seconden)",
-      "push_frequency_out_of_range": "Verzendfrequentie moet een getal zijn tussen 30 en 43200",
+      "push_frequency_out_of_range": "Verzendfrequentie moet een getal zijn tussen {min} en {max}",
       "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
       "url_invalid": "URLs moeten beginnen met http:// of https://",
       "fermentrack_settings_set_sr": "Selecteer een Fermentrack 2 doeltype",
@@ -160,8 +160,10 @@
         "waiting_to_register_error": "Apparaat wacht om zich te registreren bij Fermentrack. Wacht tot 3 minuten en vernieuw deze pagina.",
         "unable_to_reach_fermentrack_error": "TiltBridge kan Fermentrack niet bereiken. Controleer of Fermentrack toegankelijk is op de gespecificeerde hostnaam/poort.",
         "successful_registration_msg": "TiltBridge is succesvol geregistreerd bij Fermentrack",
-        "unknown error": "Een onbekende fout werd verzonden door Fermentrack. Dit betekent waarschijnlijk dat ofwel de TiltBridge-firmware of de versie van Fermentrack verouderd is. Gelieve de TiltBridge-firmware en/of Fermentrack bij te werken en het opnieuw te proberen."
-      }
+        "unknown_error": "Een onbekende fout werd verzonden door Fermentrack. Dit betekent waarschijnlijk dat ofwel de TiltBridge-firmware of de versie van Fermentrack verouderd is. Gelieve de TiltBridge-firmware en/of Fermentrack bij te werken en het opnieuw te proberen."
+      },
+      "ft2_push_frequency": "@:cloud_config.push_interval.label",
+      "ft2_push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "google_sheets": {
       "header": "Configureer Google Sheets",
@@ -170,7 +172,9 @@
       "email": "Google Script E-mailadres",
       "email_desc": "E-mailadres dat werd gebruikt om het gerichte script te maken",
       "color_sheet_tilt_name": "{color} Tilt Sheet Naam",
-      "color_sheet_tilt_name_desc": "De naam van het spreadsheet om gegevens voor de {color} tilt op te plaatsen"
+      "color_sheet_tilt_name_desc": "De naam van het spreadsheet om gegevens voor de {color} tilt op te plaatsen",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewers_friend": {
       "header": "Configureer Brewers Friend",
@@ -178,7 +182,9 @@
       "about_text": "Deze instellingen regelen hoe TiltBridge communiceert met Brewer's Friend. Met een premiumaccount ondersteunt Brewer's Friend logging van graviteitssensoren zoals de Tilt Hydrometer. Om je API-sleutel te vinden, log in op je Brewer's Friend-account en ga naar Profiel > Account. Je API-sleutel is een reeks letters en cijfers (geen URL).",
       "api_key": "API-sleutel",
       "api_key_desc": "API-sleutel uit je Brewers Friend accountinstellingen",
-      "error_missing_api_key": "API-sleutel mag niet leeg zijn"
+      "error_missing_api_key": "API-sleutel mag niet leeg zijn",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewfather": {
       "header": "Configureer Brewfather",
@@ -187,13 +193,17 @@
       "api_key": "Stream Sleutel",
       "api_key_desc": "Streamsleutel uit je Brewfather accountinstellingen",
       "error_missing_api_key": "Streamsleutel mag niet leeg zijn",
-      "error_invalid_stream_key": "Streamsleutel is een reeks letters en cijfers - geen URL. Controleer de sleutel en probeer het opnieuw."
+      "error_invalid_stream_key": "Streamsleutel is een reeks letters en cijfers - geen URL. Controleer de sleutel en probeer het opnieuw.",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "grainfather": {
       "header": "Configureer Grainfather",
       "about_header": "Over Grainfather",
       "about_text": "Deze instellingen regelen hoe TiltBridge communiceert met Grainfather. Grainfather ondersteunt logging van graviteitssensoren zoals de Tilt Hydrometer met een account. Om je API-URL te vinden, log in op je Grainfather-account en ga naar Apparatuur > Fermentatieapparaten. Voeg een \"Tilt\" fermentatieapparaat toe voor elke kleur Tilt die je wilt loggen. Na het toevoegen van de Tilt kan de benodigde URL hieronder gevonden worden onder de setup-instructies (toegankelijk door op de omcirkelde \"i\" naast de Tilt in Grainfather te klikken).",
-      "grainfather_url_desc": "Voer de Grainfather-URL in voor je {color} Tilt Hydrometer"
+      "grainfather_url_desc": "Voer de Grainfather-URL in voor je {color} Tilt Hydrometer",
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "brewstatus": {
       "header": "Configureer Brewstatus",
@@ -241,8 +251,8 @@
       "about_text": "Dit doel stelt je in staat om een generieke JSON-payload met je Tilt-gegevens naar een dienst te verzenden die TiltBridge anders niet ondersteunt.",
       "generic_target_url": "Generiek Doel URL",
       "generic_target_url_desc": "De URL waarheen een payload met JSON-gegevens van je Tilts moet worden gepusht",
-      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
-      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "influxdb": {
       "header": "Configureer InfluxDB",
@@ -264,6 +274,16 @@
       "error_missing_bucket": "Bucket is vereist",
       "error_invalid_url": "Voer een geldige URL in die begint met http:// of https://",
       "error_invalid_push_frequency": "Verzendfrequentie moet tussen 60 en 86400 seconden (1 minuut tot 24 uur) liggen"
+    },
+    "push_interval": {
+      "label": "Push Frequency",
+      "label_desc": "How often a reading is uploaded to this target.",
+      "minutes_option": "{minutes} minuten",
+      "one_hour_option": "1 uur",
+      "hours_option": "{hours} uur",
+      "custom_option": "Aangepast...",
+      "custom_interval": "Aangepast interval (minuten)",
+      "custom_interval_desc": "Geldig bereik is {min} tot {max} minuten."
     }
   },
   "tilt_list": {

@@ -31,10 +31,10 @@
             </TextField>
 
             <!-- Generic Target Push Frequency Field -->
-<!--            <TextField v-model="genericTargetPushEvery" placeholder="60">-->
-<!--              <template #FieldName>{{ $t('cloud_config.generic_target.push_frequency') }}</template>-->
-<!--              <template #FieldDescription>{{ $t('cloud_config.generic_target.push_frequency_desc') }}</template>-->
-<!--            </TextField>-->
+            <PushIntervalField v-model="genericTargetPushEvery">
+              <template #FieldName>{{ $t('cloud_config.generic_target.push_frequency') }}</template>
+              <template #FieldDescription>{{ $t('cloud_config.generic_target.push_frequency_desc') }}</template>
+            </PushIntervalField>
 
             <FormErrorMsg :form-error-message="formErrorMessage" v-if="formErrorMessage.length > 0" />
           </div>
@@ -55,6 +55,7 @@
 <script setup>
 import { ref } from 'vue';
 import TextField from '@/components/config/form_elements/TextField.vue';
+import PushIntervalField from '@/components/config/form_elements/PushIntervalField.vue';
 import FormErrorMsg from '@/components/generic/FormErrorMsg.vue';
 import SendTargetErrorMsg from "@/components/generic/SendTargetErrorMsg.vue";
 import { useConfigStore } from '@/stores/ConfigStore';
@@ -63,7 +64,7 @@ import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue
 
 const configStore = useConfigStore();
 const genericTargetURL = ref(configStore.genericTargetURL);
-// const genericTargetPushEvery = ref(configStore.genericTargetPushEvery);
+const genericTargetPushEvery = ref(configStore.userTargetPushEvery);
 const formErrorMessage = ref('');
 
 const updateSuccessful = ref(false);
@@ -75,6 +76,7 @@ const $loading = useLoading({
 
 function updateCachedSettings() {
   genericTargetURL.value = configStore.genericTargetURL;
+  genericTargetPushEvery.value = configStore.userTargetPushEvery;
 }
 
 async function submitForm() {
@@ -82,7 +84,7 @@ async function submitForm() {
 
   let loader = $loading.show({});
 
-  configStore.updateGenericTargetConfig(genericTargetURL.value).then(() => {
+  configStore.updateGenericTargetConfig(genericTargetURL.value, genericTargetPushEvery.value).then(() => {
     updateCachedSettings();
     loader.hide();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here

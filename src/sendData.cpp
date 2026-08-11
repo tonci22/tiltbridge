@@ -362,7 +362,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to Brewer's Friend.\r\n");
             }
         }
-        startTimer(brewersFriendTimer, backoffDelay(TARGET_BREWERS_FRIEND, BREWERS_FRIEND_DELAY)); // Set up subsequent send to Brewer's Friend
+        startTimer(brewersFriendTimer, backoffDelay(TARGET_BREWERS_FRIEND, config.brewersFriendPushEvery)); // Set up subsequent send to Brewer's Friend
     }
 
     if (data_sender.send_brewfather)
@@ -385,7 +385,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to Brewfather.\r\n");
             }
         }
-        startTimer(brewfatherTimer, backoffDelay(TARGET_BREWFATHER, BREWFATHER_DELAY)); // Set up subsequent send to Brewfather
+        startTimer(brewfatherTimer, backoffDelay(TARGET_BREWFATHER, config.brewfatherPushEvery)); // Set up subsequent send to Brewfather
     }
 
 
@@ -410,7 +410,7 @@ bool dataSendHandler::send_to_bf_and_bf()
                 Log.verbose("Error sending to User Target.\r\n");
             }
         }
-        startTimer(userTargetTimer, backoffDelay(TARGET_USER_TARGET, USER_TARGET_DELAY)); // Set up subsequent send to User Target
+        startTimer(userTargetTimer, backoffDelay(TARGET_USER_TARGET, config.userTargetPushEvery)); // Set up subsequent send to User Target
     }
     return retval;
 }
@@ -551,7 +551,7 @@ bool dataSendHandler::send_to_grainfather()
         }
         if (attempted)
             setTargetStatus(TARGET_GRAINFATHER, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
-        startTimer(grainfatherTimer, backoffDelay(TARGET_GRAINFATHER, GRAINFATHER_DELAY)); // Set up subsequent send to Grainfather
+        startTimer(grainfatherTimer, backoffDelay(TARGET_GRAINFATHER, config.grainfatherPushEvery)); // Set up subsequent send to Grainfather
     }
     return result;
 }
@@ -784,7 +784,7 @@ bool dataSendHandler::send_to_google()
             if (attempted)
                 setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         }
-        startTimer(gSheetsTimer, backoffDelay(TARGET_GOOGLE_SHEETS, GSCRIPTS_DELAY)); // Set up subsequent send to Google Sheets
+        startTimer(gSheetsTimer, backoffDelay(TARGET_GOOGLE_SHEETS, config.gsheetsPushEvery)); // Set up subsequent send to Google Sheets
     }
     return result;
 }

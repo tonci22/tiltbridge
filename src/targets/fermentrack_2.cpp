@@ -147,7 +147,7 @@ bool dataSendHandler::send_to_fermentrack()
         }
 
         // Set up for the next send
-        data_sender.startTimer(data_sender.fermentrackTimer, data_sender.backoffDelay(TARGET_FERMENTRACK, FERMENTRACK_DELAY)); // Set up subsequent send to Fermentrack
+        data_sender.startTimer(data_sender.fermentrackTimer, data_sender.backoffDelay(TARGET_FERMENTRACK, config.fermentrackPushEvery)); // Set up subsequent send to Fermentrack
 //        tilt_scanner.init();
     }
     return result;
