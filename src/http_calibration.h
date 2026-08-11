@@ -15,4 +15,14 @@ bool getCalibrationPoints(uint8_t color, JsonDocument& doc, const char* deviceId
 bool clearCalibrationPoints(uint8_t color, const char* deviceId = nullptr);
 bool deleteCalibrationPoint(uint8_t color, double rawGravity, const char* deviceId = nullptr);
 
+
+/**
+ * @brief Delete every calibration point file, per-device and per-colour.
+ *
+ * Part of a factory reset. The derived coefficients live in tiltbridgeConfig.json and
+ * devices.json, but the raw points are separate files that nothing else removes - so a
+ * "reset" that promises calibration data is erased was leaving all of it behind.
+ */
+void deleteAllCalibrationFiles();
+
 #endif // TILTBRIDGE_CALIBRATION_H

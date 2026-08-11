@@ -20,6 +20,7 @@
 #include "tilt/tiltScanner.h"
 #include "http_server.h"
 #include "wifi_setup.h"
+#include "http_calibration.h"   // deleteAllCalibrationFiles() for the factory reset
 #include "mdns_setup.h"
 #include "sendData.h"
 #include "sender_health.h"
@@ -89,6 +90,24 @@ void setup() {
     config.load();
     device_config.load();   // per-device Tilt settings; absent file falls back to colour config
 
+    /*
+     * NVS before the queue, not after. reading_queue.init() reads its boot counter from NVS,
+     * and nvs_open() fails outright until nvs_flash_init() has run - so with this after the
+     * queue the counter silently stayed 0 and the derived bootId was IDENTICAL on every boot.
+     * That was invisible while the queue always held records, because the sequence number
+     * resumed from flash; once readings began being sent live the queue is empty at boot, the
+     * sequence restarts at 1, and every boot replayed the same record ids. The server then
+     * treats them as duplicates and drops the readings without writing a row.
+     */
+    // Initialize NVS (required for esp_wifi_config)
+    esp_err_t nvs_ret = nvs_flash_init();
+    if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        Log.warning("NVS partition was truncated, erasing and reinitializing.\r\n");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs_ret);
+
     // Needs config.maxQueuedRecords, so it must follow config.load(). A failure here
     // disables queueing in RAM only - the rest of the firmware runs normally on a broken
     // filesystem, and the user's saved setting is left untouched.
@@ -101,14 +120,6 @@ void setup() {
     lcd.init();
     lcd.display_logo();
 
-    // Initialize NVS (required for esp_wifi_config)
-    esp_err_t nvs_ret = nvs_flash_init();
-    if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        Log.warning("NVS partition was truncated, erasing and reinitializing.\r\n");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        nvs_ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(nvs_ret);
 
     // Read (and consume) any recovery record left behind by a sender-health restart.
     // Must run after nvs_flash_init() for the power-loss-durable copy to be readable.
@@ -207,7 +218,8 @@ void loop() {
          */
         config.deleteFile();                        // tiltbridgeConfig.json
         device_config.eraseAll();                   // devices.json - per-Tilt identity and calibration
-        reading_queue.eraseAll();                   // queued readings, journal, state, NVS counters
+        reading_queue.eraseAll();                   // queued readings, journal, state, overflow tally
+        deleteAllCalibrationFiles();                // dev-*-cal.json and <colour>-cal.json
 
         // Also drops the live scan results, so nothing lingers in RAM until the restart.
         tilt_scanner.m_tilt_devices.clear();

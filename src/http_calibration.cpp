@@ -3,7 +3,10 @@
 #include <thorlog.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>   // fabs - without this abs() resolves to the integer overload
 #include <sys/stat.h>
+#include <string.h>
+#include <dirent.h>
 #include "filesystem.h"
 #include "jsonconfig.h"
 #include "device_config.h"
@@ -341,6 +344,39 @@ bool clearCalibrationPoints(uint8_t color, const char* deviceId) {
     return true;
 }
 
+void deleteAllCalibrationFiles() {
+    DIR *dir = opendir(CONFIG_DIR);
+    if (dir == nullptr)
+        return;
+
+    // Collect first, delete after closing: removing entries while walking a directory is not
+    // guaranteed to be safe on LittleFS.
+    // sizeof(CONFIG_DIR) + '/' + the longest name LittleFS will hand back.
+    char victims[MAX_DEVICE_CONFIGS + TILT_COLORS][sizeof(CONFIG_DIR) + 1 + 256];
+    size_t count = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr && count < (sizeof(victims) / sizeof(victims[0]))) {
+        const char *name = entry->d_name;
+        const size_t len = strlen(name);
+
+        // "dev-<MAC>-cal.json" and "<colour index>-cal.json"
+        if (len < 9 || strcmp(name + len - 9, "-cal.json") != 0)
+            continue;
+
+        snprintf(victims[count], sizeof(victims[0]), "%s/%s", CONFIG_DIR, name);
+        count++;
+    }
+    closedir(dir);
+
+    for (size_t i = 0; i < count; i++)
+        remove(victims[i]);
+
+    if (count > 0)
+        Log.warning("Deleted %u calibration point file%s.\r\n",
+                    (unsigned)count, (count == 1) ? "" : "s");
+}
+
 // Function to delete individual calibration data point by raw gravity
 bool deleteCalibrationPoint(uint8_t color, double rawGravity, const char* deviceId) {
     if (color >= TILT_COLORS) {
@@ -367,17 +403,42 @@ bool deleteCalibrationPoint(uint8_t color, double rawGravity, const char* device
 
     JsonArray dataPoints = calDoc.as<JsonArray>();
 
-    // Find and remove the point with matching raw gravity
-    bool found = false;
-    for (int i = dataPoints.size() - 1; i >= 0; i--) {
+    /*
+     * Delete the CLOSEST point, not the first one inside a tolerance.
+     *
+     * This previously used abs() with only <stdlib.h> in scope, so it resolved to the integer
+     * abs(int): the double difference truncated to 0, `0 < 0.001` was true for any two points
+     * less than 1.0 apart, and the loop - running backwards and breaking on first match -
+     * always deleted the LAST point whatever was asked for. It still answered {"status":"ok"},
+     * so the row the user clicked stayed and a different one silently disappeared.
+     *
+     * fabs() alone would not be enough. Gravity points are four decimals and are routinely
+     * closer together than the old 0.001 tolerance - two points at 1.0024 and 1.0026 are
+     * 0.0002 apart - so any "first within tolerance" rule stays ambiguous. Picking the nearest
+     * is unambiguous whenever the values differ at all, and the tolerance then only guards
+     * against deleting something unrelated when the requested value is not present.
+     */
+    int bestIndex = -1;
+    double bestDelta = 0.0;
+
+    for (int i = 0; i < (int)dataPoints.size(); i++) {
         JsonArray point = dataPoints[i];
-        if (point.size() >= 2 && point[0].is<double>() &&
-            abs(point[0].as<double>() - rawGravity) < 0.001) {
-            dataPoints.remove(i);
-            found = true;
-            break;
+        if (point.size() < 2 || !point[0].is<double>())
+            continue;
+
+        const double delta = fabs(point[0].as<double>() - rawGravity);
+        if (bestIndex < 0 || delta < bestDelta) {
+            bestIndex = i;
+            bestDelta = delta;
         }
     }
+
+    // Half a step of the fourth decimal the UI stores, so an exact value always matches and a
+    // value that is simply absent never does.
+    const bool found = (bestIndex >= 0 && bestDelta < 0.00005);
+
+    if (found)
+        dataPoints.remove(bestIndex);
 
     if (!found) {
         Log.error("Error: Calibration point with raw gravity %.3f not found.\r\n", rawGravity);

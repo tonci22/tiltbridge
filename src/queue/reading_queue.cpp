@@ -10,6 +10,7 @@
 #include <nvs.h>
 #include <thorlog.h>
 
+#include <esp_random.h>
 #include "reading_queue.h"
 #include "../jsonconfig.h"
 #include "../sender_health.h"   // sh_millis()
@@ -141,7 +142,23 @@ bool ReadingQueue::init() {
 
     uint8_t mac[6] = {0};
     esp_efuse_mac_get_default(mac);
-    m_bootId = qr_crc32(mac, sizeof(mac)) ^ (bootCounter * 0x9E3779B9u);
+
+    /*
+     * Three ingredients, because a record id that repeats is silently destructive: the server
+     * suppresses it as a duplicate, acknowledges it, and the reading is gone without an error
+     * anywhere.
+     *
+     *   MAC          distinguishes devices sharing a spreadsheet
+     *   bootCounter  monotonic across the device's life, so boots never collide
+     *   esp_random   makes a replay impossible even if NVS is unavailable or was erased,
+     *                which is exactly what a counter alone cannot survive
+     *
+     * The sequence number restarts at 1 whenever the queue is empty, which is now the normal
+     * state, so uniqueness rests entirely on this value differing every boot.
+     */
+    m_bootId = qr_crc32(mac, sizeof(mac))
+             ^ (bootCounter * 0x9E3779B9u)
+             ^ esp_random();
 
     scanSegments();
     loadJournal();
@@ -630,11 +647,18 @@ void ReadingQueue::eraseAll() {
 
     ::remove(QUEUE_STATE_PATH);     // clear() keeps this; a factory reset must not
 
-    // The boot counter and the overflow tally live in NVS, so deleting files alone would
-    // carry a "dropped N readings" figure across a reset that claims to erase everything.
+    /*
+     * Clear the overflow tally, but NEVER the boot counter.
+     *
+     * The counter is what keeps record ids unique across the device's whole life. Erasing it
+     * restarts bootId at a value already used, and since the sequence also restarts at 1 the
+     * device then re-emits ids the server has already seen - which it suppresses as
+     * duplicates, so the readings vanish silently. A factory reset must not be able to cause
+     * that, so the counter survives it deliberately.
+     */
     nvs_handle_t h;
     if (nvs_open(NVS_QUEUE_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_erase_all(h);
+        nvs_erase_key(h, NVS_DROPPED_KEY);
         nvs_commit(h);
         nvs_close(h);
     }
