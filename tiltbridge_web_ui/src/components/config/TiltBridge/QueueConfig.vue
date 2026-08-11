@@ -27,7 +27,7 @@
 
               <SelectField v-model="intervalSelection">
                 <template #FieldName>{{ $t('queue.settings.snapshot_interval') }}</template>
-                <template #FieldDescription>{{ $t('queue.settings.snapshot_interval_desc') }}</template>
+                <template #FieldDescription>{{ $t('queue.settings.snapshot_interval_desc') }}<br /><span v-if="persistFasterHint" class="text-amber-700">{{ persistFasterHint }}</span></template>
                 <template #FieldOptions>
                   <option value="10">{{ $t('queue.settings.minutes_option', { minutes: 10 }) }}</option>
                   <option value="15">{{ $t('queue.settings.minutes_option', { minutes: 15 }) }}</option>
@@ -175,14 +175,56 @@ const recordCeiling = computed(() => {
  * The number that actually matters: how long a total outage takes to fill the queue, and so
  * how long there is to notice before the oldest readings start being dropped.
  */
+/*
+ * Computed from the form rather than from queueStore.estimatedRunwayHours, which the device
+ * derives from the SAVED config. Reading the fields directly makes the estimate move as the
+ * interval or the record cap is changed, which is when it is actually wanted - the device's
+ * own figure only catches up after Update. The Tilt count still comes from the device, and
+ * refreshes on the fifteen-second poll, so plugging in or removing a Tilt updates this too.
+ */
+const runwayHours = computed(() => {
+  const tilts = queueStore.activeTilts;
+  const minutes = selectedIntervalMinutes();
+  const records = parseInt(maxRecords.value, 10);
+
+  if (!tilts || tilts <= 0) return null;
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  if (!Number.isFinite(records) || records <= 0) return null;
+
+  // records ÷ (tilts × 60/minutes) readings per hour
+  return (records * minutes) / (tilts * 60);
+});
+
 const runwayText = computed(() => {
-  const hours = queueStore.estimatedRunwayHours;
-  if (hours === null || hours === undefined || !Number.isFinite(hours)) return "";
+  const hours = runwayHours.value;
+  if (hours === null) return "";
   const duration = hours >= 48
     ? i18n.global.t('queue.settings.runway_days', { days: (hours / 24).toFixed(1) })
     : i18n.global.t('queue.settings.runway_hours', { hours: hours.toFixed(1) });
   return i18n.global.t('queue.settings.runway', {
     duration: duration, tilts: queueStore.activeTilts,
+  });
+});
+
+/*
+ * Persisting more often than sending is legal but rarely intended: while healthy nothing is
+ * written at all, so the only effect is that an outage is recorded FINER than normal
+ * operation - and the queue fills proportionally faster for resolution the sheet never shows
+ * otherwise. Worth pointing out rather than forbidding.
+ */
+const persistFasterThanPush = computed(() => {
+  const persistSec = selectedIntervalMinutes() * 60;
+  const pushSec = configStore.gsheetsPushEvery;
+  if (!Number.isFinite(persistSec) || persistSec <= 0) return false;
+  if (!pushSec || pushSec <= 0) return false;
+  return persistSec < pushSec;
+});
+
+const persistFasterHint = computed(() => {
+  if (!persistFasterThanPush.value) return "";
+  return i18n.global.t('queue.settings.persist_faster_than_push', {
+    persist: selectedIntervalMinutes(),
+    push: Math.round(configStore.gsheetsPushEvery / 60),
   });
 });
 

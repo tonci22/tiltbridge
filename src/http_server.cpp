@@ -551,13 +551,24 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
     if(strlen(config.scriptsURL) > 26 && strlen(config.scriptsEmail) > 5)
         startSendNowTimer(sendNowGSheetsTimer, "SendGSheets", sendNowGSheetsCallback, 5);
 
+    /*
+     * Per-colour sheet names are OPTIONAL in the payload.
+     *
+     * They are no longer edited here - a sheet name belongs to a Tilt, set per device on the
+     * Tilts page, and device_config.sheetName() prefers that. These remain only as the
+     * fallback for a Tilt that has no device config yet, so a client that does not send them
+     * must not have its whole update rejected. Requiring them is what made a partial payload
+     * to this endpoint fail.
+     */
     uint8_t i = 0;
     for(const char* sheetKey : tiltColorSuffixes) {
         char full_key[30];
         snprintf(full_key, 30, "%s%s", GoogleSheetsSettings::gsheetsPrefix, sheetKey);
 
-        if(!updateJsonSetting(json, full_key, config.gsheets_config[i].name, 25))
-            failCount++;
+        if(json[full_key].is<const char*>()) {
+            if(!updateJsonSetting(json, full_key, config.gsheets_config[i].name, 25))
+                failCount++;
+        }
         i++;
     }
 

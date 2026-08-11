@@ -40,14 +40,6 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     const scriptsURL = ref("");
     const scriptsEmail = ref("");
     const gsheetsPushEvery = ref(600);
-    const scriptsRedSheetName = ref("");
-    const scriptsGreenSheetName = ref("");
-    const scriptsBlackSheetName = ref("");
-    const scriptsPurpleSheetName = ref("");
-    const scriptsOrangeSheetName = ref("");
-    const scriptsBlueSheetName = ref("");
-    const scriptsYellowSheetName = ref("");
-    const scriptsPinkSheetName = ref("");
     
     // Grainfather URLs
     const grainfatherRedURL = ref("");
@@ -150,14 +142,6 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             scriptsURL.value = response.scriptsURL;
             scriptsEmail.value = response.scriptsEmail;
             gsheetsPushEvery.value = response.gsheetsPushEvery || 600;
-            scriptsRedSheetName.value = response.Red.name;
-            scriptsGreenSheetName.value = response.Green.name;
-            scriptsBlackSheetName.value = response.Black.name;
-            scriptsPurpleSheetName.value = response.Purple.name;
-            scriptsOrangeSheetName.value = response.Orange.name;
-            scriptsBlueSheetName.value = response.Blue.name;
-            scriptsYellowSheetName.value = response.Yellow.name;
-            scriptsPinkSheetName.value = response.Pink.name;
             
             // Grainfather URL Values
             grainfatherRedURL.value = response.Red.grainfatherURL;
@@ -239,14 +223,6 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         scriptsURL.value = "";
         scriptsEmail.value = "";
         gsheetsPushEvery.value = 600;
-        scriptsRedSheetName.value = "";
-        scriptsGreenSheetName.value = "";
-        scriptsBlackSheetName.value = "";
-        scriptsPurpleSheetName.value = "";
-        scriptsOrangeSheetName.value = "";
-        scriptsBlueSheetName.value = "";
-        scriptsYellowSheetName.value = "";
-        scriptsPinkSheetName.value = "";
 
         grainfatherRedURL.value = "";
         grainfatherGreenURL.value = "";
@@ -404,33 +380,17 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     }
 
 
-    async function updateGoogleSheetsConfig(gs_url, gs_email, red_name, green_name, black_name, purple_name, orange_name, blue_name, yellow_name, pink_name, v2Enabled, pushEvery) {
+    async function updateGoogleSheetsConfig(gs_url, gs_email, v2Enabled, pushEvery) {
         await updateTargetConfig({
             scriptsURL: gs_url,
             scriptsEmail: gs_email,
             gsheetsV2Enabled: v2Enabled,
             gsheetsPushEvery: pushEvery,
-            sheetName_red: red_name,
-            sheetName_green: green_name,
-            sheetName_black: black_name,
-            sheetName_purple: purple_name,
-            sheetName_orange: orange_name,
-            sheetName_blue: blue_name,
-            sheetName_yellow: yellow_name,
-            sheetName_pink: pink_name,
         }, () => {
             scriptsURL.value = gs_url;
             scriptsEmail.value = gs_email;
             gsheetsV2Enabled.value = v2Enabled;
             gsheetsPushEvery.value = pushEvery;
-            scriptsRedSheetName.value = red_name;
-            scriptsGreenSheetName.value = green_name;
-            scriptsBlackSheetName.value = black_name;
-            scriptsPurpleSheetName.value = purple_name;
-            scriptsOrangeSheetName.value = orange_name;
-            scriptsBlueSheetName.value = blue_name;
-            scriptsYellowSheetName.value = yellow_name;
-            scriptsPinkSheetName.value = pink_name;
         });
     }
 
@@ -585,14 +545,6 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         taplistioPushEvery,
         scriptsURL,
         scriptsEmail,
-        scriptsRedSheetName,
-        scriptsGreenSheetName,
-        scriptsBlackSheetName,
-        scriptsPurpleSheetName,
-        scriptsOrangeSheetName,
-        scriptsBlueSheetName,
-        scriptsYellowSheetName,
-        scriptsPinkSheetName,
         grainfatherRedURL,
         grainfatherGreenURL,
         grainfatherBlackURL,

@@ -460,7 +460,8 @@
       "enable_queue_desc": "When unchecked, readings taken while offline are discarded instead of being stored.",
       "runway": "With {tilts} Tilt(s) reporting, a total outage would fill the queue in about {duration}.",
       "runway_hours": "{hours} hours",
-      "runway_days": "{days} days"
+      "runway_days": "{days} days",
+      "persist_faster_than_push": "Note: you are persisting every {persist} min but only sending every {push} min. While sending works nothing is stored, so this only makes an outage record finer than normal operation, and fills the queue faster."
     },
     "recovery": {
       "header": "Sender Recovery",

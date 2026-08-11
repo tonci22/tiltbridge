@@ -28,59 +28,21 @@
               <template #FieldDescription>{{ $t('cloud_config.google_sheets.email_desc') }}</template>
             </TextField>
 
+            <!-- Sheet names are per Tilt now, set from the Tilts page. -->
+
             <!-- Upload interval. Not the queue snapshot interval, which lives on the Queue page. -->
             <PushIntervalField v-model="gsPushEvery">
               <template #FieldName>{{ $t('cloud_config.google_sheets.push_frequency') }}</template>
               <template #FieldDescription>{{ $t('cloud_config.google_sheets.push_frequency_desc') }}</template>
             </PushIntervalField>
 
-            <!-- Red Beer Name Field -->
-            <TextField v-model="redName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.red')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.red')}) }}</template>
-            </TextField>
 
-            <!-- Green Beer Name Field -->
-            <TextField v-model="greenName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.green')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.green')}) }}</template>
-            </TextField>
 
-            <!-- Black Beer Name Field -->
-            <TextField v-model="blackName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.black')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.black')}) }}</template>
-            </TextField>
 
-            <!-- Purple Beer Name Field -->
-            <TextField v-model="purpleName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.purple')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.purple')}) }}</template>
-            </TextField>
 
-            <!-- Orange Beer Name Field -->
-            <TextField v-model="orangeName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.orange')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.orange')}) }}</template>
-            </TextField>
 
-            <!-- Blue Beer Name Field -->
-            <TextField v-model="blueName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.blue')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.blue')}) }}</template>
-            </TextField>
 
-            <!-- Yellow Beer Name Field -->
-            <TextField v-model="yellowName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.yellow')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.yellow')}) }}</template>
-            </TextField>
 
-            <!-- Pink Beer Name Field -->
-            <TextField v-model="pinkName" placeholder="BeerName">
-              <template #FieldName>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name', { color: $t('sitewide.tilt_colors.pink')}) }}</template>
-              <template #FieldDescription>{{ $t('cloud_config.google_sheets.color_sheet_tilt_name_desc', { color: $t('sitewide.tilt_colors.pink')}) }}</template>
-            </TextField>
 
             <!-- v2 protocol opt-in (CapturedAtUtc / TimestampValid payload) -->
             <fieldset class="space-y-5 mt-2">
@@ -136,28 +98,12 @@ let form_error_message = ref("");
 
 const gs_url = ref(configStore.scriptsURL);
 const gs_email = ref(configStore.scriptsEmail);
-const redName = ref(configStore.scriptsRedSheetName);
-const greenName = ref(configStore.scriptsGreenSheetName);
-const blackName = ref(configStore.scriptsBlackSheetName);
-const purpleName = ref(configStore.scriptsPurpleSheetName);
-const orangeName = ref(configStore.scriptsOrangeSheetName);
-const blueName = ref(configStore.scriptsBlueSheetName);
-const yellowName = ref(configStore.scriptsYellowSheetName);
-const pinkName = ref(configStore.scriptsPinkSheetName);
 const v2Enabled = ref(configStore.gsheetsV2Enabled);
 const gsPushEvery = ref(configStore.gsheetsPushEvery);
 
 function updateCachedSettings() {
   gs_url.value = configStore.scriptsURL;
   gs_email.value = configStore.scriptsEmail;
-  redName.value = configStore.scriptsRedSheetName;
-  greenName.value = configStore.scriptsGreenSheetName;
-  blackName.value = configStore.scriptsBlackSheetName;
-  purpleName.value = configStore.scriptsPurpleSheetName;
-  orangeName.value = configStore.scriptsOrangeSheetName;
-  blueName.value = configStore.scriptsBlueSheetName;
-  yellowName.value = configStore.scriptsYellowSheetName;
-  pinkName.value = configStore.scriptsPinkSheetName;
   v2Enabled.value = configStore.gsheetsV2Enabled;
   gsPushEvery.value = configStore.gsheetsPushEvery;
 }
@@ -173,14 +119,6 @@ async function submitForm() {
   configStore.updateGoogleSheetsConfig(
       gs_url.value,
       gs_email.value,
-      redName.value,
-      greenName.value,
-      blackName.value,
-      purpleName.value,
-      orangeName.value,
-      blueName.value,
-      yellowName.value,
-      pinkName.value,
       v2Enabled.value,
       gsPushEvery.value
   ).then(() => {
