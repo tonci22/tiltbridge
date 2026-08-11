@@ -134,6 +134,9 @@ public:
     // True when readings must be written to flash rather than simply sent and dropped.
     bool queuePersistenceNeeded() const;
 
+    // Throttles the "seen but not configured" warning so it cannot flood the log.
+    uint32_t m_lastUnconfiguredWarnMs = 0;
+
     // Error tracking
     SendTargetStatus targetStatus[TARGET_COUNT];
     void setTargetStatus(SendTargetID target, SendError error);

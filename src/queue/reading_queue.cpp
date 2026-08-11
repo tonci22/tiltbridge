@@ -174,11 +174,28 @@ bool ReadingQueue::init() {
     return true;
 }
 
+void ReadingQueue::noteRetainedBootId(uint32_t bootId) {
+    if (isRetainedBootId(bootId))
+        return;
+
+    if (m_retainedBootIdCount < MAX_RETAINED_BOOT_IDS)
+        m_retainedBootIds[m_retainedBootIdCount++] = bootId;
+}
+
+bool ReadingQueue::isRetainedBootId(uint32_t bootId) const {
+    for (uint8_t i = 0; i < m_retainedBootIdCount; i++) {
+        if (m_retainedBootIds[i] == bootId)
+            return true;
+    }
+    return false;
+}
+
 void ReadingQueue::scanSegments() {
     m_firstSegment = 0;
     m_lastSegment = 0;
     m_lastSegmentCount = 0;
     m_nextSequence = 1;
+    m_retainedBootIdCount = 0;
 
     DIR *dir = opendir(QUEUE_DIR);
     if (dir == nullptr)
@@ -238,6 +255,11 @@ void ReadingQueue::scanSegments() {
 
             if (rec.sequence > maxSequence)
                 maxSequence = rec.sequence;
+
+            // Remember which session wrote this, so its acknowledgement is still accepted
+            // after a reboot has moved the current bootId on.
+            noteRetainedBootId(rec.bootId & 0x00FFFFFFu);
+
             valid++;
         }
         fclose(f);
@@ -442,6 +464,7 @@ bool ReadingQueue::append(QueuedReading &rec) {
 
     m_lastSegmentCount++;
     m_pendingCount++;
+    noteRetainedBootId(rec.bootId & 0x00FFFFFFu);
 
     char id[QR_RECORD_ID_LEN];
     qr_format_record_id(rec, id, sizeof(id));
@@ -539,9 +562,25 @@ bool ReadingQueue::acknowledgeId(const char *recordId) {
     if (sscanf(recordId, "%06lX-%04X-%08lX", &bootId, &deviceHash, &sequence) != 3)
         return false;
 
-    if ((uint32_t)bootId != (m_bootId & 0x00FFFFFFu)) {
-        // From an earlier boot: the record is already gone, so treat it as a no-op rather
-        // than an error. The server is allowed to re-acknowledge ids it has seen before.
+    /*
+     * The id may name an earlier session, and that is NOT proof the record is gone: queued
+     * records survive reboots by design, still carrying the bootId that wrote them. Treating
+     * a mismatch as a no-op meant such a record was never terminated, pendingCount never
+     * fell, and the same records were re-sent forever while every upload reported success.
+     *
+     * That stayed hidden while bootId was effectively constant, and became a permanently
+     * stuck queue the moment it started differing per boot.
+     *
+     * Accepting only bootIds actually present on flash keeps the original guarantee - a stale
+     * acknowledgement from a session whose records are all gone cannot retire an unrelated
+     * current record. Sequence numbers continue monotonically for as long as any record is
+     * retained, so among retained records the sequence alone is unambiguous.
+     */
+    const uint32_t ackBootId = (uint32_t)bootId;
+
+    if (ackBootId != (m_bootId & 0x00FFFFFFu) && !isRetainedBootId(ackBootId)) {
+        // No record from that session is still held, so it really has gone. The server is
+        // allowed to re-acknowledge ids it has seen before, so this is a no-op, not an error.
         return true;
     }
 

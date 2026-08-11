@@ -286,12 +286,33 @@ uint16_t dataSendHandler::collectCurrentReadings(QueuedReading *out, uint16_t ma
     tilt_scanner.drop_expired_tilts();
 
     uint16_t collected = 0;
+    uint16_t unconfigured = 0;
+
     for (tiltHydrometer &th : tilt_scanner.m_tilt_devices) {
         if (collected >= maxRecords)
             break;
 
         if (!device_config.isEnabled(th.deviceId()))
             continue;
+
+        /*
+         * Never send a Tilt that has not been configured yet.
+         *
+         * Without this, a Tilt seen before its configuration exists is filed under a derived
+         * placeholder ("Red-8C1C"), and because the sheet name is snapshotted into the record
+         * at capture time, configuring it later does not correct the readings already taken -
+         * they still arrive and create a junk sheet. Setting up a device then became a race
+         * against the upload interval.
+         *
+         * Skipping instead means setup order does not matter: nothing is written for a Tilt
+         * until it has a home, and it starts flowing the moment one is saved. A device that
+         * HAS a config but no sheet name is untouched here - that is a deliberate choice made
+         * in front of the field, and it falls back to the colour as before.
+         */
+        if (device_config.find(th.deviceId()) == nullptr) {
+            unconfigured++;
+            continue;
+        }
 
         // Never queue a Tilt that has not actually reported a gravity yet - that would
         // persist a zero and pollute the sheet.
@@ -338,6 +359,21 @@ uint16_t dataSendHandler::collectCurrentReadings(QueuedReading *out, uint16_t ma
         rec.capturedAtUptimeMs = sh_millis();
 
         collected++;
+    }
+
+    /*
+     * Say so, but not every cycle. Silence would be worse than the junk sheets: a Tilt that
+     * is being seen and deliberately not sent must be visible somewhere. The Tilts page also
+     * shows hasDeviceConfig=false for these.
+     */
+    if (unconfigured > 0) {
+        const uint32_t now = sh_millis();
+        if (m_lastUnconfiguredWarnMs == 0 || (now - m_lastUnconfiguredWarnMs) > 300000) {
+            m_lastUnconfiguredWarnMs = now;
+            Log.warning("%u Tilt%s seen but not configured; nothing is sent for them until you "
+                        "set them up on the Tilts page.\r\n",
+                        (unsigned)unconfigured, (unconfigured == 1) ? " is" : "s are");
+        }
     }
 
     return collected;

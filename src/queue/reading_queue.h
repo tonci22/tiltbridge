@@ -101,6 +101,19 @@ private:
     bool  recomputePending();
 
     uint32_t m_bootId = 0;
+
+    /*
+     * Truncated bootIds of the records actually on flash. Records outlive the session that
+     * wrote them - that is the point of the queue - so an acknowledgement can legitimately
+     * name a bootId that is not the current one, and it must still retire the record.
+     * Realistically this holds one or two entries; the cap only bounds the memory.
+     */
+    static const uint8_t MAX_RETAINED_BOOT_IDS = 4;
+    uint32_t m_retainedBootIds[MAX_RETAINED_BOOT_IDS] = {};
+    uint8_t  m_retainedBootIdCount = 0;
+
+    void noteRetainedBootId(uint32_t bootId);
+    bool isRetainedBootId(uint32_t bootId) const;
     uint32_t m_nextSequence = 1;
     uint32_t m_headSequence = 0;        // every sequence <= this is terminated
     uint32_t m_droppedOverflow = 0;
