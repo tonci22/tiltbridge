@@ -161,6 +161,40 @@ static void queue_json(JsonDocument &doc) {
 
     doc["uploadStatus"] = queueUploadStateName(data_sender.queueUploadState);
 
+    /*
+     * What the flash can actually hold, so the UI stops offering a maxQueuedRecords the
+     * device cannot honour. 0 means the filesystem could not be queried; the UI should fall
+     * back to the static ceiling rather than showing "0 supported".
+     */
+    const uint16_t supported = reading_queue.storageCapacityRecords();
+    doc["maxRecordsSupported"] = supported;
+
+    /*
+     * How long a total outage would take to fill the queue, which is the number that actually
+     * matters: it is how long you have to notice before the oldest readings start being
+     * dropped. Depends on the Tilt count and the persistence interval, neither of which the
+     * queue itself knows about.
+     */
+    uint16_t activeTilts = 0;
+    for (tiltHydrometer &th : tilt_scanner.m_tilt_devices) {
+        if (device_config.isEnabled(th.deviceId()) && th.latest_gravity_value() != 0)
+            activeTilts++;
+    }
+
+    doc["activeTilts"] = activeTilts;
+
+    uint16_t cap = config.maxQueuedRecords;
+    if (supported > 0 && supported < cap)
+        cap = supported;
+
+    if (activeTilts > 0 && config.queueSnapshotIntervalSec > 0) {
+        const float recordsPerHour = (float)activeTilts * 3600.0f / (float)config.queueSnapshotIntervalSec;
+        doc["estimatedRunwayHours"] = (float)cap / recordsPerHour;
+    } else {
+        doc["estimatedRunwayHours"] = nullptr;
+    }
+
+
     if (data_sender.lastQueueUploadSuccessMs != 0)
         doc["lastUploadSuccessAgeSec"] = (sh_millis() - data_sender.lastQueueUploadSuccessMs) / 1000;
     else
@@ -355,8 +389,19 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
     // maxQueuedRecords
     if(json[QueueSettings::maxQueuedRecords].is<uint16_t>()) {
         uint16_t maxRecords = json[QueueSettings::maxQueuedRecords].as<uint16_t>();
-        if(maxRecords < 100 || maxRecords > 3000) {  // 3000 * 128 B = 384 KB of filesystem
-            Log.warning("Settings update error, [maxQueuedRecords]:(%d) not valid.\r\n", maxRecords);
+
+        // The static ceiling is 3000 (384 KB), but the LittleFS partition is shared with the
+        // web UI and rarely has that spare. Refuse what the flash cannot hold rather than
+        // accepting it and letting the queue shed records it was told to keep.
+        uint16_t ceiling = QUEUE_MAX_RECORDS_CEILING;
+        const uint16_t supported = reading_queue.storageCapacityRecords();
+        if(supported > 0 && supported < ceiling)
+            ceiling = supported;
+
+        if(maxRecords < 100 || maxRecords > ceiling) {
+            Log.warning("Settings update error, [maxQueuedRecords]:(%d) outside 100..%d "
+                        "(this filesystem supports %d).\r\n",
+                        maxRecords, ceiling, supported);
             failCount++;
         } else {
             config.maxQueuedRecords = maxRecords;

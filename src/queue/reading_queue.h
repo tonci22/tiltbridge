@@ -16,6 +16,9 @@
 // starve config saves or make the device unflashable.
 #define QUEUE_MIN_FREE_BYTES 32768
 
+// Upper bound on maxQueuedRecords regardless of free space, matching the config validator.
+#define QUEUE_MAX_RECORDS_CEILING 3000
+
 // Terminal outcomes recorded in the journal.
 #define QUEUE_JOURNAL_ACK  1
 #define QUEUE_JOURNAL_DROP 2
@@ -67,6 +70,10 @@ public:
     size_t   bytesUsed() const { return m_pendingCount * QUEUE_RECORD_SIZE; }
     uint8_t  storagePercent() const;
     bool     isHealthy() const { return m_healthy; }
+
+    // Records this filesystem can actually hold, or 0 if it cannot be queried. The
+    // configured maxQueuedRecords is capped by this at append time.
+    uint16_t storageCapacityRecords() const;
     void     to_json(JsonDocument &doc);
 
     uint32_t bootId() const { return m_bootId; }

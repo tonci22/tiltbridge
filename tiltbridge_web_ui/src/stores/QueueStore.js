@@ -24,6 +24,11 @@ export const useQueueStore = defineStore("QueueStore", () => {
 
     // Settings, as currently applied on the device
     const maxRecords = ref(1500);
+    // What the flash can actually hold, and how long a total outage would take to fill it.
+    // 0 / null mean the device could not work them out; fall back to the static ceiling.
+    const maxRecordsSupported = ref(0);
+    const activeTilts = ref(0);
+    const estimatedRunwayHours = ref(null);
     const snapshotIntervalSec = ref(1800);
     const batchSize = ref(20);
     const enabled = ref(false);
@@ -43,6 +48,9 @@ export const useQueueStore = defineStore("QueueStore", () => {
                 storagePercent.value = response.storagePercent ?? 0;
                 bytesUsed.value = response.bytesUsed ?? 0;
                 maxRecords.value = response.maxRecords ?? 1500;
+                maxRecordsSupported.value = response.maxRecordsSupported ?? 0;
+                activeTilts.value = response.activeTilts ?? 0;
+                estimatedRunwayHours.value = response.estimatedRunwayHours ?? null;
                 snapshotIntervalSec.value = response.snapshotIntervalSec ?? 1800;
                 droppedOverflow.value = response.droppedOverflow ?? 0;
                 timeValid.value = response.timeValid ?? false;
@@ -155,6 +163,9 @@ export const useQueueStore = defineStore("QueueStore", () => {
         uploadStatus,
         lastUploadSuccessAgeSec,
         maxRecords,
+        maxRecordsSupported,
+        activeTilts,
+        estimatedRunwayHours,
         snapshotIntervalSec,
         batchSize,
         enabled,

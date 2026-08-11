@@ -296,6 +296,40 @@ bool ReadingQueue::recomputePending() {
     return true;
 }
 
+/**
+ * @brief How many records this filesystem can actually hold for the queue.
+ *
+ * maxQueuedRecords is configurable up to 3000, which is 384 KB - more than the LittleFS
+ * partition has spare once the web UI is on it. Reporting the real ceiling lets the UI stop
+ * offering values the flash cannot honour, and lets append() shed rather than wedge.
+ *
+ * Space the queue already occupies counts as available: it comes back as the queue drains,
+ * so the answer stays stable instead of shrinking as the backlog grows.
+ *
+ * @return records, or 0 when the filesystem cannot be queried.
+ */
+uint16_t ReadingQueue::storageCapacityRecords() const {
+    size_t total = 0, used = 0;
+    if (esp_littlefs_info(FILESYSTEM_PARTITION, &total, &used) != ESP_OK)
+        return 0;
+
+    const size_t freeNow = (total > used) ? (total - used) : 0;
+    const size_t ownBytes = (size_t)m_pendingCount * QUEUE_RECORD_SIZE;
+    const size_t claimable = freeNow + ownBytes;
+
+    if (claimable <= QUEUE_MIN_FREE_BYTES)
+        return 0;
+
+    // LittleFS allocates in blocks and the journal grows alongside the segments, so promise
+    // four fifths of the arithmetic maximum rather than every last byte.
+    size_t records = ((claimable - QUEUE_MIN_FREE_BYTES) / QUEUE_RECORD_SIZE) * 4 / 5;
+
+    if (records > QUEUE_MAX_RECORDS_CEILING)
+        records = QUEUE_MAX_RECORDS_CEILING;
+
+    return (uint16_t)records;
+}
+
 //=============================================================================
 // Append
 //=============================================================================
@@ -310,14 +344,49 @@ bool ReadingQueue::append(QueuedReading &rec) {
     if (!m_healthy)
         return false;
 
+    /*
+     * Space, not the record cap, is usually the binding limit on a filesystem shared with the
+     * web UI - maxQueuedRecords can be set higher than the flash can actually hold. Treat it
+     * exactly like the record cap does: shed the OLDEST records until there is room, rather
+     * than refusing and throwing away the newest reading while the queue stays wedged.
+     *
+     * Shedding is bounded. A segment is only reclaimed once every record in it is terminated,
+     * so freeing space takes a segment's worth of drops; if two segments' worth does not help,
+     * the space is being consumed by something other than the queue and dropping more would
+     * destroy the backlog for nothing.
+     */
     if (!queue_fs_has_room()) {
-        Log.error("QUEUE_FS_FULL: refusing to append, filesystem free space below %u bytes.\r\n",
-                  (unsigned)QUEUE_MIN_FREE_BYTES);
-        return false;
+        uint16_t shed = 0;
+        const uint16_t shedLimit = QUEUE_RECORDS_PER_SEGMENT * 2;
+
+        while (!queue_fs_has_room() && shed < shedLimit) {
+            if (!dropOldest())
+                break;
+            compact();
+            shed++;
+        }
+
+        if (!queue_fs_has_room()) {
+            Log.error("QUEUE_FS_FULL: refusing to append, filesystem free space below %u bytes "
+                      "after shedding %u record%s.\r\n",
+                      (unsigned)QUEUE_MIN_FREE_BYTES, (unsigned)shed, (shed == 1) ? "" : "s");
+            return false;
+        }
+
+        Log.warning("Queue: shed %u oldest record%s to stay within the filesystem reserve. "
+                    "maxQueuedRecords (%u) is above what this flash can hold.\r\n",
+                    (unsigned)shed, (shed == 1) ? "" : "s", (unsigned)config.maxQueuedRecords);
     }
 
-    // Enforce the record cap before adding, dropping the oldest un-terminated record.
-    while (m_pendingCount >= config.maxQueuedRecords) {
+    // Enforce the record cap before adding, dropping the oldest un-terminated record. The
+    // effective cap is the lower of what was configured and what the flash can hold, so a
+    // setting the storage cannot honour degrades to dropping rather than to failing.
+    uint16_t cap = config.maxQueuedRecords;
+    const uint16_t storageCap = storageCapacityRecords();
+    if (storageCap > 0 && storageCap < cap)
+        cap = storageCap;
+
+    while (m_pendingCount >= cap) {
         if (!dropOldest())
             break;
     }

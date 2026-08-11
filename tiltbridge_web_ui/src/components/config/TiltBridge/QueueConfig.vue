@@ -50,7 +50,7 @@
 
               <TextField v-model="maxRecords" placeholder="1500">
                 <template #FieldName>{{ $t('queue.settings.max_records') }}</template>
-                <template #FieldDescription>{{ $t('queue.settings.max_records_desc', { bytes: estimatedBytes }) }}</template>
+                <template #FieldDescription>{{ $t('queue.settings.max_records_desc', { bytes: estimatedBytes, max: recordCeiling }) }}<br />{{ runwayText }}</template>
               </TextField>
 
               <TextField v-model="batchSize" placeholder="20">
@@ -162,6 +162,30 @@ const recovery_error_message = ref("");
 const alertOpen = ref(false);
 const updateSuccessful = ref(false);
 
+/*
+ * The device reports what its flash can really hold, which is well under the static 3000
+ * once the web UI is on the same partition. Offering more than that would just be rejected.
+ */
+const recordCeiling = computed(() => {
+  const supported = queueStore.maxRecordsSupported;
+  return (supported && supported > 0) ? supported : 3000;
+});
+
+/*
+ * The number that actually matters: how long a total outage takes to fill the queue, and so
+ * how long there is to notice before the oldest readings start being dropped.
+ */
+const runwayText = computed(() => {
+  const hours = queueStore.estimatedRunwayHours;
+  if (hours === null || hours === undefined || !Number.isFinite(hours)) return "";
+  const duration = hours >= 48
+    ? i18n.global.t('queue.settings.runway_days', { days: (hours / 24).toFixed(1) })
+    : i18n.global.t('queue.settings.runway_hours', { hours: hours.toFixed(1) });
+  return i18n.global.t('queue.settings.runway', {
+    duration: duration, tilts: queueStore.activeTilts,
+  });
+});
+
 const estimatedBytes = computed(() => {
   const records = parseInt(maxRecords.value, 10);
   const size = queueStore.recordSize || 0;
@@ -208,8 +232,8 @@ async function submitForm() {
   }
 
   const records = parseInt(maxRecords.value, 10);
-  if (!Number.isFinite(records) || records < 100 || records > 3000) {
-    form_error_message.value = i18n.global.t('queue.errors.invalid_max_records');
+  if (!Number.isFinite(records) || records < 100 || records > recordCeiling.value) {
+    form_error_message.value = i18n.global.t('queue.errors.invalid_max_records', { max: recordCeiling.value });
     return;
   }
 

@@ -453,11 +453,14 @@
       "capacity_group": "Storage capacity",
       "capacity_group_desc": "How many readings can be held before the oldest are dropped. This sets how long an outage can last without losing data.",
       "max_records": "Maximum queued records",
-      "max_records_desc": "Valid range is 100 to 3000. At the current record size this reserves roughly {bytes} bytes of flash.",
+      "max_records_desc": "Valid range is 100 to {max}, which is what this device's flash can actually hold. At the current record size this reserves roughly {bytes} bytes.",
       "batch_size": "Batch size (advanced)",
       "batch_size_desc": "How many queued readings are uploaded per attempt. Valid range is 1 to 50. Lower this if uploads time out.",
       "enable_queue": "Enable offline queue",
-      "enable_queue_desc": "When unchecked, readings taken while offline are discarded instead of being stored."
+      "enable_queue_desc": "When unchecked, readings taken while offline are discarded instead of being stored.",
+      "runway": "With {tilts} Tilt(s) reporting, a total outage would fill the queue in about {duration}.",
+      "runway_hours": "{hours} hours",
+      "runway_days": "{days} days"
     },
     "recovery": {
       "header": "Sender Recovery",
@@ -469,7 +472,7 @@
     },
     "errors": {
       "invalid_interval": "Snapshot interval must be between 1 and 360 minutes",
-      "invalid_max_records": "Maximum queued records must be between 100 and 3000",
+      "invalid_max_records": "Maximum queued records must be between 100 and {max}",
       "invalid_batch_size": "Batch size must be between 1 and 50",
       "invalid_stale_reboot": "Stale sender timeout must be between 60 and 600 seconds"
     }
