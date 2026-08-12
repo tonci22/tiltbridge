@@ -584,11 +584,14 @@ bool ft2_get_calibration_coefficients(uint8_t color) {
             config.tilt_calibration[color].x2 = coefficients["grav_x2"].as<double>();
         }
 
-        Log.notice("Updated calibration coefficients for %s Tilt: x0=%.3f, x1=%.7f, x2=%.7f\r\n", 
-                   tilt_color_names[color], 
-                   config.tilt_calibration[color].x0,
-                   config.tilt_calibration[color].x1,
-                   config.tilt_calibration[color].x2);
+        // Pre-formatted: ThorLog has no %f, and its %F is fixed at 2 decimals.
+        char coeffStr[64];
+        snprintf(coeffStr, sizeof(coeffStr), "x0=%.3f, x1=%.7f, x2=%.7f",
+                 config.tilt_calibration[color].x0,
+                 config.tilt_calibration[color].x1,
+                 config.tilt_calibration[color].x2);
+        Log.notice("Updated calibration coefficients for %s Tilt: %s\r\n",
+                   tilt_color_names[color], coeffStr);
     } else {
         Log.warning("Failed to retrieve calibration coefficients for %s Tilt\r\n", tilt_color_names[color]);
         return false;
@@ -714,8 +717,11 @@ bool ft2_get_calibration_points(uint8_t color) {
                     newPoint.add(sensorGravity);
                     newPoint.add(measuredGravity);
                     
-                    Log.verbose("Added calibration point: sensor=%.3f, measured=%.3f\r\n", 
-                               sensorGravity, measuredGravity);
+                    // Pre-formatted: ThorLog has no %f.
+                    char ptStr[48];
+                    snprintf(ptStr, sizeof(ptStr), "sensor=%.3f, measured=%.3f",
+                             sensorGravity, measuredGravity);
+                    Log.verbose("Added calibration point: %s\r\n", ptStr);
                 }
             }
             

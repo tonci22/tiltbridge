@@ -208,10 +208,19 @@ bool processCalibrationDataPoint(const JsonDocument& json, bool triggerUpstreamU
         return false;
     }
 
-    Log.notice("Calibration point saved: %s=%s, raw=%.3f, actual=%.3f\r\n",
+    /*
+     * ThorLog has no %f - its format parser does not recognise '.', so "%.3f" consumed
+     * no vararg and printed literally as "3f", which also desynchronised every later
+     * specifier in the same message. Its %F is fixed at 2 decimals, too coarse for
+     * gravity. Pre-format with snprintf and log the strings.
+     */
+    char rawStr[16], actualStr[16];
+    snprintf(rawStr, sizeof(rawStr), "%.3f", rawGravity);
+    snprintf(actualStr, sizeof(actualStr), "%.3f", actualGravity);
+    Log.notice("Calibration point saved: %s=%s, raw=%s, actual=%s\r\n",
                deviceId ? "device" : "color",
                deviceId ? deviceId : tilt_color_names[color],
-               rawGravity, actualGravity);
+               rawStr, actualStr);
 
     return true;
 }
@@ -275,6 +284,11 @@ bool processCalibrationCoefficients(const JsonDocument& json, bool triggerUpstre
     }
 
     if (updated) {
+        // Pre-formatted for the same reason as above: ThorLog cannot render %f.
+        char coeffStr[80];
+        snprintf(coeffStr, sizeof(coeffStr), "%.6f, %.6f, %.6f, %.6f",
+                 target->x0, target->x1, target->x2, target->x3);
+
         if (dev != nullptr) {
             // Flipping this is what makes the device stop falling back to its colour.
             dev->hasCalibration = true;
@@ -282,15 +296,15 @@ bool processCalibrationCoefficients(const JsonDocument& json, bool triggerUpstre
                 Log.error("Error: Unable to save device calibration coefficients.\r\n");
                 return false;
             }
-            Log.notice("Calibration coefficients saved for device %s (%.6f, %.6f, %.6f, %.6f)\r\n",
-                       deviceId, target->x0, target->x1, target->x2, target->x3);
+            Log.notice("Calibration coefficients saved for device %s (%s)\r\n",
+                       deviceId, coeffStr);
         } else {
             if (!config.save()) {
                 Log.error("Error: Unable to save calibration coefficients.\r\n");
                 return false;
             }
-            Log.notice("Calibration coefficients saved for color %d (%.6f, %.6f, %.6f, %.6f)\r\n",
-                       color, target->x0, target->x1, target->x2, target->x3);
+            Log.notice("Calibration coefficients saved for color %d (%s)\r\n",
+                       color, coeffStr);
         }
     }
 
@@ -440,8 +454,12 @@ bool deleteCalibrationPoint(uint8_t color, double rawGravity, const char* device
     if (found)
         dataPoints.remove(bestIndex);
 
+    // Pre-formatted: ThorLog cannot render %f (see processCalibrationDataPoint).
+    char rawStr[16];
+    snprintf(rawStr, sizeof(rawStr), "%.3f", rawGravity);
+
     if (!found) {
-        Log.error("Error: Calibration point with raw gravity %.3f not found.\r\n", rawGravity);
+        Log.error("Error: Calibration point with raw gravity %s not found.\r\n", rawStr);
         return false;
     }
 
@@ -451,7 +469,7 @@ bool deleteCalibrationPoint(uint8_t color, double rawGravity, const char* device
         return false;
     }
 
-    Log.notice("Calibration point deleted: color=%d, raw=%.3f\r\n", color, rawGravity);
+    Log.notice("Calibration point deleted: color=%d, raw=%s\r\n", color, rawStr);
     return true;
 }
 
