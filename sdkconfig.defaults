@@ -48,3 +48,16 @@ CONFIG_LWIP_IPV6=n
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
+
+# Do not retain the peer's certificate chain after the handshake. mbedTLS otherwise keeps the
+# whole parsed chain in the session for the life of the connection; ESP-IDF documents ~4 kB of
+# heap saved by dropping it. Measured on hardware, the largest contiguous block bottoms out at
+# 13,312 bytes during the second handshake (script.googleusercontent.com, 12,695-byte chain),
+# so the retained copy is a meaningful share of a ~600-byte margin.
+#
+# Safe here: verification still happens during the handshake via crt_bundle_attach, nothing in
+# this firmware reads the peer certificate, and the single consumer in esp-tls
+# (esp_tls_mbedtls.c, handshake-failure path) already NULL-checks and logs "Skipping
+# certificate verification - no peer certificate received". The only loss is one diagnostic
+# detail when a handshake fails.
+CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=n
