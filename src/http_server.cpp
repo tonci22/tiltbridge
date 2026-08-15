@@ -244,6 +244,12 @@ static bool updateJsonSetting(const JsonDocument& json, const char* key, uint16_
     return false;
 }
 
+/*
+ * Delay used when a shortened push interval is already overdue at the moment it is saved.
+ * Short enough to feel immediate, long enough that the upload cannot race config.save().
+ */
+#define PUSH_INTERVAL_DUE_NOW_SEC 5
+
 /**
  * @brief Apply an optional per-target push interval - how often a reading is UPLOADED there.
  *
@@ -612,11 +618,34 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
      * the previous countdown simply kept running. backoffDelay() is applied for the same
      * reason the send path applies it: changing an interval must not reset a target that is
      * deliberately backing off from a failing endpoint.
+     *
+     * The new period is measured from the LAST UPLOAD, not from this request, so consecutive
+     * rows really are the configured interval apart. Re-arming with the full period here
+     * instead would add however long ago the last upload was: changing 10 -> 15 shortly after
+     * an upload produced a 15-minute wait on top of that, so the first gap in the sheet was
+     * longer than 15 minutes and only later ones were right.
+     *
+     * If the new interval has already elapsed - shortening 15 -> 5 twelve minutes in - the
+     * send is due now, and goes out on a short delay rather than instantly so it cannot race
+     * the config.save() below.
      */
-    if(config.gsheetsPushEvery != previousPushEvery)
-        data_sender.startTimer(data_sender.gSheetsTimer,
-                               data_sender.backoffDelay(TARGET_GOOGLE_SHEETS,
-                                                        config.gsheetsPushEvery));
+    if(config.gsheetsPushEvery != previousPushEvery) {
+        const uint32_t period = data_sender.backoffDelay(TARGET_GOOGLE_SHEETS,
+                                                         config.gsheetsPushEvery);
+        const uint32_t lastAttempt = data_sender.targetStatus[TARGET_GOOGLE_SHEETS].lastAttemptTime;
+        const uint32_t now = (uint32_t)uptimeSeconds(true);
+
+        uint32_t remaining = period;
+        if(lastAttempt > 0 && now >= lastAttempt) {
+            const uint32_t elapsed = now - lastAttempt;
+            remaining = (elapsed >= period) ? PUSH_INTERVAL_DUE_NOW_SEC : (period - elapsed);
+        }
+
+        data_sender.startTimer(data_sender.gSheetsTimer, remaining);
+        Log.notice("Google Sheets interval %u -> %us; next upload in %us.\r\n",
+                   (unsigned)previousPushEvery, (unsigned)config.gsheetsPushEvery,
+                   (unsigned)remaining);
+    }
 
     if(failCount > 0) {
         Log.error("Error: Invalid Google Sheets configuration.\r\n");
