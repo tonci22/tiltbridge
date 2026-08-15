@@ -544,11 +544,37 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
 static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    /*
+     * Whether the credentials actually changed must be decided BEFORE they are overwritten.
+     *
+     * The immediate send below used to fire on every write to this endpoint, so changing
+     * only the push interval queued one too - and because the previous interval's timer was
+     * still counting down, that produced two uploads seconds apart followed by a gap.
+     * A new URL or email is the only thing worth confirming straight away.
+     */
+    const bool urlChanged =
+        json[GoogleSheetsSettings::scriptsURL].is<const char*>() &&
+        strcmp(json[GoogleSheetsSettings::scriptsURL].as<const char*>(), config.scriptsURL) != 0;
+
+    const bool emailChanged =
+        json[GoogleSheetsSettings::scriptsEmail].is<const char*>() &&
+        strcmp(json[GoogleSheetsSettings::scriptsEmail].as<const char*>(), config.scriptsEmail) != 0;
+
+    const uint16_t previousPushEvery = config.gsheetsPushEvery;
+
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsURL, config.scriptsURL, 256))
         failCount++;
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsEmail, config.scriptsEmail, 256))
         failCount++;
-    if(strlen(config.scriptsURL) > 26 && strlen(config.scriptsEmail) > 5)
+
+    /*
+     * Gated on the sender's own minimums rather than the 26/5 that used to be here, which
+     * disagreed with them: a 6-character email passed this check and was then rejected by
+     * send_to_google_v2(), queueing a send that could only mark the target DISABLED.
+     */
+    if((urlChanged || emailChanged) &&
+       strlen(config.scriptsURL) >= GSCRIPTS_MIN_URL_LENGTH &&
+       strlen(config.scriptsEmail) >= GSCRIPTS_MIN_EMAIL_LENGTH)
         startSendNowTimer(sendNowGSheetsTimer, "SendGSheets", sendNowGSheetsCallback, 5);
 
     /*
@@ -577,6 +603,20 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
 
     if(!applyPushEvery(json, GoogleSheetsSettings::gsheetsPushEvery, config.gsheetsPushEvery))
         failCount++;
+
+    /*
+     * Re-arm against the new interval now.
+     *
+     * startTimer() is otherwise reached only at the end of a completed send, so a changed
+     * interval did not take effect until one more upload had gone out on the OLD schedule -
+     * the previous countdown simply kept running. backoffDelay() is applied for the same
+     * reason the send path applies it: changing an interval must not reset a target that is
+     * deliberately backing off from a failing endpoint.
+     */
+    if(config.gsheetsPushEvery != previousPushEvery)
+        data_sender.startTimer(data_sender.gSheetsTimer,
+                               data_sender.backoffDelay(TARGET_GOOGLE_SHEETS,
+                                                        config.gsheetsPushEvery));
 
     if(failCount > 0) {
         Log.error("Error: Invalid Google Sheets configuration.\r\n");
