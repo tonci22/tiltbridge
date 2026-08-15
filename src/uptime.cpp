@@ -2,108 +2,58 @@
 // Created by Lee Bussy on 12/31/20
 //
 
-#include <cmath>
 #include <esp_timer.h>
 
 #include "uptime.h"
 
-// TODO - Come back and just fully convert to esp_timer_get_time() calls
-// instead of using Arduino millis() function
-static inline unsigned long millis() {
-    return (unsigned long)(esp_timer_get_time() / 1000);
+/*
+ * esp_timer_get_time() is a 64-bit microsecond counter, so this does not wrap in any
+ * practical service life. The previous implementation went through a 32-bit millis()
+ * shim, which wraps at ~49.7 days.
+ */
+static inline uint64_t uptimeMillisTotal() {
+    return (uint64_t)esp_timer_get_time() / 1000ULL;
 }
 
-static int refresh = UPTIME_REFRESH * 1000;
-static unsigned long uptimeNow;
-static int days;
-static int hours;
-static int minutes;
-static int seconds;
-static int mills;
-
-void getNow()
+/*
+ * The previous version cached the five components in statics and refreshed them through
+ * getNow()/setValues(). Two things were wrong with it:
+ *
+ *   - getNow() reassigned the cached timestamp on EVERY call, so the "refresh once a
+ *     second" test could never expire and setValues() effectively never ran. Callers using
+ *     the default refr = false therefore received stale values.
+ *   - Each accessor re-sampled the clock before computing its own component, so a set of
+ *     them was not one point in time. /api/uptime/ was seen reporting 2m59s then 2m0s -
+ *     seconds past a rollover, minutes before it.
+ *
+ * Deriving everything from a single read is cheaper than the cache it replaces, so there
+ * is nothing to gain by keeping one.
+ */
+UptimeParts uptimeSnapshot()
 {
-    // Set the uptime values if refresh time is expired
-    if ((int)(millis() - uptimeNow) > refresh)
-    {
-        setValues();
-    }
-    // Reset timer for another period to avoid a really unlikely situation
-    // where the timer expires in between grabbing two parts
-    uptimeNow = millis();
+    const uint64_t now = uptimeMillisTotal();   // one read; every field below derives from it
+
+    UptimeParts p;
+    p.totalSeconds = (uint32_t)(now / SEC_MILLIS);
+    p.days    = (int)(now / DAY_MILLIS);
+    p.hours   = (int)((now % DAY_MILLIS) / HOUR_MILLIS);
+    p.minutes = (int)((now % HOUR_MILLIS) / MIN_MILLIS);
+    p.seconds = (int)((now % MIN_MILLIS) / SEC_MILLIS);
+    p.millis  = (int)(now % SEC_MILLIS);
+    return p;
 }
 
-void setValues()
+uint32_t uptimeTotalSeconds()
 {
-    // Call this only by getNow()
-    // Using refr = true forces recalculation
-    uptimeNow = millis();
-    days = uptimeDays(true);
-    hours = uptimeHours(true);
-    minutes = uptimeMinutes(true);
-    seconds = uptimeSeconds(true);
-    mills = uptimeMillis(true);
+    return uptimeSnapshot().totalSeconds;
 }
 
-int uptimeDays(bool refr)
-{
-    getNow(); // Make sure we are current
-    if (refr)
-    {
-        // Calculate full days from uptime
-        days = (int)floor(uptimeNow / DAY_MILLIS);
-    }
-    return days;
-}
-
-int uptimeHours(bool refr)
-{
-    getNow(); // Make sure we are current
-    if (refr)
-    {
-        // Refresh values:
-        // Subtract millis value for any full days via modulo
-        // Calculate full hours from remainder
-        hours = (int)floor((uptimeNow % DAY_MILLIS) / HOUR_MILLIS);
-    }
-    return hours;
-}
-
-int uptimeMinutes(bool refr)
-{
-    getNow(); // Make sure we are current
-    if (refr)
-    {
-        // Refresh values:
-        // Subtract millis value for any full hours via modulo
-        // Calculate full minutes from remainder
-        minutes = (int)floor((uptimeNow % HOUR_MILLIS) / MIN_MILLIS);
-    }
-    return minutes;
-}
-
-int uptimeSeconds(bool refr)
-{
-    getNow(); // Make sure we are current
-    if (refr)
-    {
-        // Refresh values:
-        // Subtract millis value for any full minutes via modulo
-        // Calculate full seconds from remainder
-        seconds = (int)floor((uptimeNow % MIN_MILLIS) / SEC_MILLIS);
-    }
-    return seconds;
-}
-
-int uptimeMillis(bool refr)
-{
-    getNow(); // Make sure we are current
-    if (refr)
-    {
-        // Refresh values:
-        // Subtract millis value for any full seconds via modulo
-        // Return remainder millis
-        mills = (int)floor((uptimeNow % SEC_MILLIS));
-    }
-    return mills;
-}
+/*
+ * The refr parameter is retained so existing call sites still compile. It no longer does
+ * anything: every accessor is now always current, because there is no cache to refresh.
+ */
+int uptimeDays(bool)    { return uptimeSnapshot().days; }
+int uptimeHours(bool)   { return uptimeSnapshot().hours; }
+int uptimeMinutes(bool) { return uptimeSnapshot().minutes; }
+int uptimeSeconds(bool) { return uptimeSnapshot().seconds; }
+int uptimeMillis(bool)  { return uptimeSnapshot().millis; }

@@ -101,17 +101,22 @@ static void this_version(JsonDocument &doc) {
 }
 
 static void uptime_json(JsonDocument &doc) {
-    const int days = uptimeDays();
-    const int hours = uptimeHours();
-    const int minutes = uptimeMinutes();
-    const int seconds = uptimeSeconds();
-    const int millis = uptimeMillis();
+    /*
+     * One snapshot, not five accessor calls. Calling them separately re-sampled the clock
+     * each time, so the fields could straddle a rollover - this endpoint was seen reporting
+     * 2m59s and then 2m0s, which makes any client differencing it against itself go
+     * backwards.
+     */
+    const UptimeParts up = uptimeSnapshot();
 
-    doc["days"] = days;
-    doc["hours"] = hours;
-    doc["minutes"] = minutes;
-    doc["seconds"] = seconds;
-    doc["millis"] = millis;
+    doc["days"] = up.days;
+    doc["hours"] = up.hours;
+    doc["minutes"] = up.minutes;
+    doc["seconds"] = up.seconds;
+    doc["millis"] = up.millis;
+
+    // The whole uptime, so a client does not have to reassemble it from the components.
+    doc["totalSeconds"] = up.totalSeconds;
 }
 
 static void heap_json(JsonDocument &doc) {

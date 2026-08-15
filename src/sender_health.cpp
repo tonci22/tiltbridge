@@ -244,7 +244,8 @@ void SenderHealthMonitor::persistRecoveryRecord(RecoveryReason reason) {
     rec.heartbeatAgeMs = heartbeatAgeMs();
     rec.lockAgeMs = lockAgeMs();
     rec.currentTarget = m_h.currentTarget;
-    rec.uptimeSecAtReboot = (uint32_t)uptimeSeconds(true);
+    // Total uptime, not the 0..59 seconds component this used to record.
+    rec.uptimeSecAtReboot = uptimeTotalSeconds();
 
     rtc_recovery_record = rec;
 
@@ -304,8 +305,15 @@ void SenderHealthMonitor::checkForRebootCondition() {
     if (!config.senderRecoveryEnabled)
         return;
 
-    // Never during boot: association, the first scan and staggered first sends live here.
-    if ((uint32_t)uptimeSeconds(true) < RECOVERY_GRACE_SEC)
+    /*
+     * Never during boot: association, the first scan and staggered first sends live here.
+     *
+     * This used uptimeSeconds(), which returns the SECONDS COMPONENT (0..59) rather than
+     * total uptime - so it could never reach RECOVERY_GRACE_SEC (180) and this function
+     * returned early on every call. The recovery reboot, the whole point of this monitor,
+     * has never been able to fire.
+     */
+    if (uptimeTotalSeconds() < RECOVERY_GRACE_SEC)
         return;
 
     // Condition 1: the outbound loop has stopped being serviced.

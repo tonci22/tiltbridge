@@ -78,25 +78,39 @@ before `httpd_resp_sendstr()` reads it. **Currently unreachable** — the only c
 (`http_server.cpp:850`) always uses the default 200. The sibling `idf_json_send_error` gets
 this right. Landmine for the next caller.
 
-### 8. `uptime.cpp` accessors are components, not totals — and are not sampled atomically
+### 8. FIXED — `uptimeSeconds()` returned 0..59, which silently disabled the recovery reboot
 
-`src/uptime.cpp`. `uptimeSeconds()` returns the **seconds component of a d/h/m/s breakdown
-(0..59)**, not total uptime:
+Kept here because of what it broke and how long it hid.
 
-```c
-seconds = (int)floor((uptimeNow % MIN_MILLIS) / SEC_MILLIS);
-```
+`uptimeSeconds()` returned the **seconds component of a d/h/m/s breakdown (0..59)**, not total
+uptime, while reading like the latter. Three consumers used it as a total:
 
-The name reads like total uptime and it was used that way. `SendTargetStatus::lastAttemptTime`
-stored it for the life of the project, so `/api/errors/`'s `last_attempt_at` — documented as
-"uptime seconds when last attempted" — held a value that wrapped every minute. Fixed by
-storing `sh_millis() / 1000`; **there is no total-uptime accessor in `uptime.h`**, every
-function returns a component.
+1. **`sender_health.cpp:308` — the worst one.** The recovery reboot's boot-grace guard was
+   `if (uptimeSeconds(true) < RECOVERY_GRACE_SEC) return;` with `RECOVERY_GRACE_SEC` = 180.
+   A value capped at 59 can never reach 180, so `checkForRebootCondition()` returned early on
+   **every call** and the recovery reboot could never fire. That watchdog is the whole reason
+   Phase 1 exists — it was built to fix a field failure whose symptom was "a reset fixes it" —
+   and it had never been able to act. It also explains `staleEvents: 0` and
+   `lastRecovery: null` across ~25 hours of soaking: healthy, but the mechanism could not have
+   reported otherwise.
+2. `sender_health.cpp:247` — `uptimeSecAtReboot` in the recovery record, reported through
+   `/api/sender/`, was meaningless.
+3. `sendData.cpp` — `SendTargetStatus::lastAttemptTime`, published as `/api/errors/`'s
+   `last_attempt_at` and documented as "uptime seconds when last attempted", held a value that
+   wrapped every minute.
 
-Separately, `/api/uptime/` does not sample the components atomically: it was observed
-reporting `2m59s` and then `2m0s` — seconds rolled over while minutes did not advance.
-Consecutive reads are usually monotonic, so this is intermittent. Anything differencing
-`/api/uptime/` against itself can therefore go backwards.
+Separately, `/api/uptime/` built its response from five separate accessor calls, each
+re-sampling the clock, so the fields could straddle a rollover — observed reporting `2m59s`
+and then `2m0s`, which makes a client differencing it against itself go backwards.
+
+Fixed by deriving every field from one clock read (`uptimeSnapshot()`), adding
+`uptimeTotalSeconds()` for elapsed-time arithmetic, and moving all three consumers onto it.
+`/api/uptime/` now also returns `totalSeconds`.
+
+**Still unverified:** that the recovery reboot now actually fires. Proving it needs the sender
+deliberately wedged (`-D TB_DEBUG_FREEZE=1` plus the `debugFreezeSender` action), which was not
+done on a device logging a live fermentation. The grace guard is correct by inspection and
+`totalSeconds` demonstrably passes 180.
 
 ### 9. `sprintf` into a tight buffer in MQTT
 
