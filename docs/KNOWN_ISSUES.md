@@ -107,10 +107,31 @@ Fixed by deriving every field from one clock read (`uptimeSnapshot()`), adding
 `uptimeTotalSeconds()` for elapsed-time arithmetic, and moving all three consumers onto it.
 `/api/uptime/` now also returns `totalSeconds`.
 
-**Still unverified:** that the recovery reboot now actually fires. Proving it needs the sender
-deliberately wedged (`-D TB_DEBUG_FREEZE=1` plus the `debugFreezeSender` action), which was not
-done on a device logging a live fermentation. The grace guard is correct by inspection and
-`totalSeconds` demonstrably passes 180.
+**Verified on hardware.** Built with `-D TB_DEBUG_FREEZE=1`, waited past the grace period, and
+triggered `debugFreezeSender`:
+
+```
+freeze at uptime 194 s
+22:46:39  E: Sender recovery: restarting. reason=1 heartbeatAge=90668 ms lockAge=0 ms target=-1
+22:46:40  rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+```
+
+and after the restart, `/api/sender/`:
+
+```json
+"lastRecovery": { "reason": "sender_heartbeat_stale", "heartbeatAgeMs": 90662,
+                  "uptimeSecAtReboot": 285, "bootCount": 1 }
+```
+
+90,668 ms is `senderStaleRebootSec` (90) exactly; 285 s is 194 + 90; `rst:0xc (SW_CPU_RESET)` is
+a deliberate software reset rather than a crash or hardware watchdog; and the record survived
+the restart. `uptimeSecAtReboot: 285` doubles as proof of the fix, since that field could
+previously only have held 0..59.
+
+Reproducing it: `PLATFORMIO_BUILD_FLAGS="-D TB_DEBUG_FREEZE=1" pio run -e esp32_headless
+--target upload` (an env override, so `platformio.ini` stays clean), then
+`POST /api/actions/ {"action":"debugFreezeSender"}`. **Reflash the normal build afterwards** and
+confirm the hook is gone — that action must return HTTP 400 in a production build.
 
 ### 9. `sprintf` into a tight buffer in MQTT
 
