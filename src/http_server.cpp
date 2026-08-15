@@ -632,8 +632,11 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
     if(config.gsheetsPushEvery != previousPushEvery) {
         const uint32_t period = data_sender.backoffDelay(TARGET_GOOGLE_SHEETS,
                                                          config.gsheetsPushEvery);
+        // sh_millis()/1000, matching what setTargetStatus() stores. NOT uptimeSeconds(), which
+        // returns the 0..59 seconds component and made this silently fall back to the full
+        // period whenever the two readings straddled a minute boundary.
         const uint32_t lastAttempt = data_sender.targetStatus[TARGET_GOOGLE_SHEETS].lastAttemptTime;
-        const uint32_t now = (uint32_t)uptimeSeconds(true);
+        const uint32_t now = sh_millis() / 1000;
 
         uint32_t remaining = period;
         if(lastAttempt > 0 && now >= lastAttempt) {

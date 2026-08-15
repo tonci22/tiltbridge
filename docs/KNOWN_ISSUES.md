@@ -78,12 +78,32 @@ before `httpd_resp_sendstr()` reads it. **Currently unreachable** — the only c
 (`http_server.cpp:850`) always uses the default 200. The sibling `idf_json_send_error` gets
 this right. Landmine for the next caller.
 
-### 8. `sprintf` into a tight buffer in MQTT
+### 8. `uptime.cpp` accessors are components, not totals — and are not sampled atomically
+
+`src/uptime.cpp`. `uptimeSeconds()` returns the **seconds component of a d/h/m/s breakdown
+(0..59)**, not total uptime:
+
+```c
+seconds = (int)floor((uptimeNow % MIN_MILLIS) / SEC_MILLIS);
+```
+
+The name reads like total uptime and it was used that way. `SendTargetStatus::lastAttemptTime`
+stored it for the life of the project, so `/api/errors/`'s `last_attempt_at` — documented as
+"uptime seconds when last attempted" — held a value that wrapped every minute. Fixed by
+storing `sh_millis() / 1000`; **there is no total-uptime accessor in `uptime.h`**, every
+function returns a component.
+
+Separately, `/api/uptime/` does not sample the components atomically: it was observed
+reporting `2m59s` and then `2m0s` — seconds rolled over while minutes did not advance.
+Consecutive reads are usually monotonic, so this is intermittent. Anything differencing
+`/api/uptime/` against itself can therefore go backwards.
+
+### 9. `sprintf` into a tight buffer in MQTT
 
 `src/targets/mqtt.cpp` builds `m_topic[90]` with unbounded `sprintf`. Worst case is 82 bytes,
 so it is safe only because `mqttTopic` is capped at 31 in `jsonconfig.h`. Should be `snprintf`.
 
-### 9. Log lines are not atomic — fix committed, effect unproven
+### 10. Log lines are not atomic — fix committed, effect unproven
 
 ThorLog emits a message as one `printf()` per character into the single process-wide,
 line-buffered `stdout` shared by every task, so another task can interleave between any two
@@ -100,7 +120,7 @@ steady state. See dead end #1 below for what the apparent corruption actually wa
 
 ## Firmware — unexplained
 
-### 10. A 30-minute gap after changing the Google Sheets interval
+### 11. A 30-minute gap after changing the Google Sheets interval
 
 Observed once, in the sheet, after a 10 → 15 minute change:
 
@@ -133,7 +153,7 @@ google_sheets backing off to 1800s after N consecutive failures.
 
 ## Google Apps Script — `GoogleSheets/post_tilt.gs`
 
-### 11. Upload latency is ~50 Sheets round trips per request
+### 12. Upload latency is ~50 Sheets round trips per request
 
 Measured by splitting each upload at the 302 across 52 requests:
 

@@ -18,12 +18,21 @@
 #define HTTP_MAX_RESP_SIZE          4096
 
 /*
- * Kept at the value the old worker pool implied (HTTP_MAX_ASYNC_REQUESTS + 2) so
- * removing that pool does not also change how many browser connections the web UI
- * can hold open. With lru_purge_enable the oldest socket is recycled rather than
- * refused, so this is a tuning knob, not a hard limit on concurrent users.
+ * This is a share of CONFIG_LWIP_MAX_SOCKETS (10), not a private budget - whatever the
+ * web server holds is unavailable to the outbound TLS client, SNTP, mDNS and DHCP.
+ *
+ * It was 7 because the removed async worker pool implied HTTP_MAX_ASYNC_REQUESTS + 2,
+ * which left only 3 for everything else. A browser holding several parallel connections
+ * to the UI could then starve an upload, which fails immediately and distinctively:
+ *
+ *   esp-tls: Failed to create socket (family 2 socktype 1 protocol 0)
+ *   HTTP_CLIENT: Connection failed, sock < 0
+ *
+ * 4 leaves 6 for the rest of the system and still lets a browser pipeline the UI's
+ * assets; lru_purge_enable recycles the oldest socket rather than refusing a new one,
+ * so this bounds concurrency, not the number of users.
  */
-#define HTTP_MAX_OPEN_SOCKETS       7
+#define HTTP_MAX_OPEN_SOCKETS       4
 
 /**
  * @brief Initialize and start the HTTP server

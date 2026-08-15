@@ -44,7 +44,12 @@ dataSendHandler::dataSendHandler() {}
 void dataSendHandler::setTargetStatus(SendTargetID target, SendError error) {
     if (target < TARGET_COUNT) {
         targetStatus[target].lastError = error;
-        targetStatus[target].lastAttemptTime = (uint32_t)uptimeSeconds(true);
+        /*
+         * uptimeSeconds() returns the SECONDS COMPONENT of a d/h/m/s breakdown - 0..59 - not
+         * total uptime, so this field never held what its name and /api/errors/ claim. Any
+         * consumer differencing it against "now" got a value that wrapped every minute.
+         */
+        targetStatus[target].lastAttemptTime = sh_millis() / 1000;
 
         if (error == SEND_OK) {
             targetStatus[target].consecutiveFailures = 0;
