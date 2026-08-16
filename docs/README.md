@@ -7,7 +7,7 @@ Start here.
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build, flash, serial capture, HTTP endpoints, acceptance tests. **Read §5.1 before ever running `uploadfs`** — it destroys the device configuration. |
 | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Open bugs with file:line, one unexplained behaviour, and a **"do not re-investigate"** list of theories already disproven. **Read before diagnosing anything.** |
 | [APPS_SCRIPT.md](APPS_SCRIPT.md) | The Google Sheets side: deploying `post_tilt.gs`, the wine sheet layout, the constant that must track the device's push interval, and how to test it without deploying. |
-| [phase1/](phase1/) | Design specs and the implementation log for the reliability/offline-queue work. `STATUS.md` there is a point-in-time record and has since drifted — trust the code and KNOWN_ISSUES.md over it. |
+| [phase1/](phase1/) | Design specs and the implementation log for the reliability/offline-queue work. `STATUS.md` is a **historical record**, not current state — it opens with a list of its own superseded claims, including one safety mechanism it calls done that was inert until 2026-08-15. Trust the code and KNOWN_ISSUES.md over it. |
 
 ## The short version
 

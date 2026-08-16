@@ -1,6 +1,39 @@
 # Phase 1 implementation status
 
-Updated as work proceeds.
+> **This is a historical implementation log, not a description of the current code.**
+>
+> It was accurate when Phase 1 landed and has since drifted. Where it disagrees with the
+> code, the code wins. For what is true now:
+>
+> | For | Read |
+> |---|---|
+> | Open bugs, and theories already disproven | [../KNOWN_ISSUES.md](../KNOWN_ISSUES.md) |
+> | Build, flash, serial, acceptance tests | [../DEVELOPMENT.md](../DEVELOPMENT.md) |
+> | The Google Sheets script and its layout | [../APPS_SCRIPT.md](../APPS_SCRIPT.md) |
+>
+> **Corrections to claims made below**, in order of how much trouble they could cause:
+>
+> 1. **The recovery watchdog described under "The field-failure fix" was inert until
+>    2026-08-15.** Its boot-grace guard compared `uptimeSeconds()` — which returns the 0..59
+>    seconds *component*, not total uptime — against `RECOVERY_GRACE_SEC` (180), so it
+>    returned early on every call and could never fire. Phase 1's central safety mechanism
+>    therefore did not work for the whole period this document calls it done. Fixed and
+>    verified firing on hardware; see KNOWN_ISSUES.md #8.
+> 2. **Stage 13 is no longer "not started".** The recovery-reboot acceptance test (T6) has
+>    been run on hardware — the recipe is DEVELOPMENT.md §8.1.
+> 3. **The wine sheet layout below is two revisions out of date.** It describes 19 columns at
+>    `wine-layout-v13-v2-diagnostics`; the layout is now 12 columns at
+>    `wine-layout-v16-quality-as-fill`, and the "Average quality" column no longer exists.
+>    See APPS_SCRIPT.md §3.
+> 4. **The Apps Script has since run against the real runtime**, continuously, for days. The
+>    "never run against the real Apps Script runtime" caveat below no longer applies.
+> 5. Assorted numbers have moved: `fsFreeBytes` is ~339,968 not 356,352;
+>    `senderStaleRebootSec` defaults to 90 not 75; `MISSING_READING_MINUTES` is derived from
+>    the configured push interval rather than fixed at 60.
+>
+> Several confident conclusions in this document were later found wrong. That is recorded
+> rather than edited away — the "do not re-investigate" list in KNOWN_ISSUES.md exists
+> because re-deriving them was expensive.
 
 ## Build environment (set up during this work)
 
@@ -221,7 +254,7 @@ explicit truncation check. The *legacy* Fermentrack buffer had already been guar
 ### Filesystem headroom is tighter than planned
 
 `fsFreeBytes` after the larger UI is 356,352 (~348 KB), not the ~800 KB the original budget
-assumed. A full 1500-record queue is 192,000 B, leaving ~164 KB. It fits, but re-check if the UI
+assumed. *(Now ~339,968 — the UI has grown again since.)* A full 1500-record queue is 192,000 B, leaving ~164 KB. It fits, but re-check if the UI
 grows; the `QUEUE_MIN_FREE_BYTES` 32 KB floor guard is doing more work than anticipated.
 
 ## ⚠ BLE provisioning is silently disabled — needs a decision
@@ -280,7 +313,7 @@ so this can drift again — consider pinning a commit.
 | 9 Queue settings | §8, §22 | **done** | clean |
 | 10–11 GSheets v2 + ack | §6, §13–15 | **done** | clean |
 | 12 Web UI | §20–24 | **done** | `npm run build` clean |
-| 13 Acceptance tests | §27 | **not started** | — |
+| 13 Acceptance tests | §27 | **partial** — T6 (recovery reboot) verified on hardware 2026-08-15, see DEVELOPMENT.md §8.1 | — |
 | Apps Script | §15 | **done** — see below | mock-tested |
 
 **All six defined environments build clean** (`pio run`, 6 succeeded in 5m48s):
@@ -375,8 +408,22 @@ Three independent mitigations are now in place:
    diagnosis is confirmed.**
 2. `reconnectWiFi()` no longer calls `wifi_cfg_connect()` on every ~10 ms loop iteration.
 3. An independent monitor task (core 0, priority 2) restarts the device when the sender heartbeat
-   exceeds `senderStaleRebootSec` (75 s default) **and** BLE is still receiving **and** the network
+   exceeds `senderStaleRebootSec` (90 s default) **and** BLE is still receiving **and** the network
    is usable **and** uptime > 180 s. Repeated HTTP failures alone never reboot.
+
+> **CORRECTION (2026-08-15): mitigation 3 never worked until it was fixed.**
+>
+> The `uptime > 180 s` guard was written as
+> `if (uptimeSeconds(true) < RECOVERY_GRACE_SEC) return;`, and `uptimeSeconds()` returns the
+> seconds component of a d/h/m/s breakdown — a value capped at 59. It can never reach 180, so
+> `checkForRebootCondition()` returned early on **every call** and the reboot could not fire.
+>
+> This also means `staleEvents: 0` and `lastRecovery: null` were worthless as evidence of
+> health for as long as the bug existed: those counters could not have read anything else.
+>
+> Now derived from `uptimeTotalSeconds()` and verified on hardware — sender wedged with
+> `TB_DEBUG_FREEZE`, `rst:0xc (SW_CPU_RESET)` 90.7 s later, recovery record intact across the
+> restart. Mitigations 1 and 2 were unaffected.
 
 ## Deliberate design notes worth keeping
 
@@ -425,9 +472,26 @@ diagnostics, and the legacy/batch row-writing paths were unified. 2698 → 3930 
 step removed more than the layout added). Verified by executing the real file against a
 hand-written mock of `SpreadsheetApp` / `PropertiesService` / `LockService` / `ContentService` /
 `Utilities` — 29 scenarios across four harnesses, all passing.
-**It has never run against the real Apps Script runtime.**
+~~**It has never run against the real Apps Script runtime.**~~ **It has since** — deployed and
+serving a live fermentation continuously. There is also a mock harness in the repo now,
+`node GoogleSheets/test/run_tests.js`, so layout and threshold changes are checkable without
+deploying.
 
-### Wine sheet layout (`LAYOUT_VERSION = wine-layout-v13-v2-diagnostics`)
+### Wine sheet layout (`LAYOUT_VERSION = wine-layout-v13-v2-diagnostics`) — SUPERSEDED
+
+> **Two revisions out of date.** The layout is now **twelve** columns at
+> `wine-layout-v16-quality-as-fill`, documented in [../APPS_SCRIPT.md](../APPS_SCRIPT.md) §3.
+> Two changes since:
+>
+> - **v15** narrowed the diagnostic block from K–S to K–M. Smoothed SG went (column B already
+>   *is* the smoothed value), the five RSSI columns collapsed to one average with the detail in
+>   a note, and the per-row MAC went (it never changes; a change is now a note plus a
+>   `DEVICE_CHANGED` log entry).
+> - **v16** retired the **Average quality** column entirely. It is now the background fill on
+>   the two average cells E:F, bold, with the text and gap detail in a note on E — a column
+>   that was blank on ~7 rows in 8 and only described its neighbours.
+>
+> The table below is kept as the record of what v13 looked like.
 
 | Col | Field | | Col | Field |
 |---|---|---|---|---|
@@ -466,7 +530,15 @@ rows — both silently misalign the sheet.
 `WEBAPP_LOCK_WAIT_MS` stays 6000 (its log message promises "within 6 seconds"); v2 uses a separate
 `WEBAPP_BATCH_LOCK_WAIT_MS = 10000`. `_processed_ids` remains the dedup source of truth.
 
-### `MISSING_READING_MINUTES` raised 30 → 60
+### `MISSING_READING_MINUTES` raised 30 → 60 — SUPERSEDED
+
+> **Now derived, not fixed at 60.** A constant was still wrong for any cadence but the one it
+> was chosen for: at a 30-minute push interval a *single* missed reading hit exactly 60 and
+> flagged the wine MISSING. It is now `max(60, EXPECTED_READING_INTERVAL_MINUTES * 2.5)`,
+> alongside the average-quality thresholds which had the identical flaw — a perfect window sat
+> exactly on the COMPLETE boundary, so jitter read INCOMPLETE and one gap read INSUFFICIENT
+> DATA. See [../APPS_SCRIPT.md](../APPS_SCRIPT.md) §2. The reasoning below still explains why
+> the threshold must exceed the capture cadence.
 
 Done directly, not left as advice, because v2 is now the firmware default and the old value was
 guaranteed to misfire: under v2 the threshold is measured against **capture** time, and with a
@@ -495,5 +567,11 @@ spreadsheet write failures still follow the retry contract exactly.
 4. `createOrRefreshCharts` is still only called from `initialSetup()`, so a sheet auto-created by a
    POST gets its charts on the next manual setup run. Pre-existing; the `NEW_WINE_SHEET_CREATED`
    log already says so.
-5. Wall-clock time for a 20-row batch against the real runtime versus the firmware's 15 s timeout
-   still needs one live measurement.
+5. ~~Wall-clock time for a 20-row batch against the real runtime versus the firmware's 15 s
+   timeout still needs one live measurement.~~ **Measured.** Splitting 52 uploads at the 302:
+   the Apps Script leg averages **10.6 s** (range 6–22 s) and the device's own leg 2.3 s. The
+   firmware timeout is now 60 s, not 15, so there is margin — but note `senderStaleRebootSec`
+   is 90 s, so a request that hangs to its full timeout leaves only 30 s before the health
+   monitor treats the stalled heartbeat as grounds for a reboot. Anything that makes the script
+   slower eats that margin. Breakdown and the four worthwhile reductions:
+   [../APPS_SCRIPT.md](../APPS_SCRIPT.md) §5.
