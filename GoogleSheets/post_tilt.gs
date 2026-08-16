@@ -25,18 +25,40 @@ const ROLLING_AVERAGE_HOURS = 4;
 const AVERAGE_OUTPUT_INTERVAL_HOURS = 4;
 
 /*
+ * How often TiltBridge is expected to upload, in minutes.
+ *
+ * SET THIS TO MATCH the device's Google Sheets push interval (Settings -> Google Sheets,
+ * or gsheetsPushEvery / 60). Everything below scales from it.
+ *
+ * Why it has to exist: the quality thresholds below were absolute minutes chosen for a
+ * 10-minute cadence. At a 30-minute cadence a perfect window has 30-minute gaps, which sat
+ * exactly on the COMPLETE limit - so ordinary jitter reported INCOMPLETE and a single missed
+ * reading reported INSUFFICIENT DATA. The averages were grading the configured upload
+ * interval rather than whether any data was actually missing.
+ */
+const EXPECTED_READING_INTERVAL_MINUTES = 30;
+
+/*
  * Mark a wine MISSING after no incoming reading for this long.
  *
  * Under the schemaVersion 2 batch protocol this is measured against the reading's
  * CAPTURE time, not the moment the request arrived. TiltBridge's default offline-queue
- * snapshot interval is 30 minutes, so the newest capture in a batch is routinely
- * 30+ minutes old on arrival and a threshold of 30 would flap every wine to MISSING.
+ * snapshot interval is 30 minutes, so the newest capture in a batch can be 30+ minutes old
+ * on arrival and too tight a threshold flaps every wine to MISSING.
  *
- * Keep this comfortably above the device's snapshot interval. 60 tolerates the 30-minute
- * default plus one missed snapshot. If you shorten the snapshot interval on the device,
- * this can come down with it; if you lengthen it, this must go up.
+ * Derived from the expected cadence for the same reason as the average-quality limits: a
+ * fixed 60 meant that at a 30-minute upload interval a single missed reading hit the
+ * threshold exactly. 2.5x tolerates two consecutive misses before crying wolf, and the
+ * floor keeps the previous 60 for anyone at a 10- or 15-minute cadence.
+ *
+ * Must stay comfortably above BOTH the push interval and the device's
+ * queueSnapshotIntervalSec, since during an outage it is the snapshot interval that spaces
+ * captures apart.
  */
-const MISSING_READING_MINUTES = 60;
+const MISSING_READING_MINUTES =
+  Math.max(60, Math.round(EXPECTED_READING_INTERVAL_MINUTES * 2.5));
+// EXPECTED_READING_INTERVAL_MINUTES is declared above this block - const is in the temporal
+// dead zone until its declaration is evaluated, so ordering here is load-bearing.
 
 /* Check missing readings automatically every 15 minutes. */
 const MISSING_CHECK_INTERVAL_MINUTES = 15;
@@ -67,9 +89,26 @@ const AVERAGE_COMPLETE_COLOR = '#d9ead3';
 const AVERAGE_INCOMPLETE_COLOR = '#fff2cc';
 const AVERAGE_INSUFFICIENT_COLOR = '#f4cccc';
 
-/* Quality limits for each four-hour average window. */
-const AVERAGE_COMPLETE_MAX_GAP_MINUTES = 30;
-const AVERAGE_INCOMPLETE_MAX_GAP_MINUTES = 60;
+
+/*
+ * Quality limits for each four-hour average window, as multiples of the expected cadence.
+ *
+ * COMPLETE tolerates 1.5x - jitter, a slow Apps Script run, one late batch. INCOMPLETE
+ * tolerates 3x, i.e. up to two consecutive readings missing. Beyond that the window really
+ * is too sparse to average, which is what INSUFFICIENT DATA is for.
+ *
+ * The Math.max floors keep the long-standing 30/60 behaviour for anyone at a 10- or
+ * 15-minute cadence, so this is not a silent tightening for existing sheets.
+ *
+ * NOT auto-detected from the readings themselves, deliberately: estimating the cadence from
+ * the same window being judged makes the metric self-fulfilling - during a real outage the
+ * observed spacing grows, and a half-empty window would be graded COMPLETE.
+ */
+const AVERAGE_COMPLETE_MAX_GAP_MINUTES =
+  Math.max(30, Math.round(EXPECTED_READING_INTERVAL_MINUTES * 1.5));
+
+const AVERAGE_INCOMPLETE_MAX_GAP_MINUTES =
+  Math.max(60, EXPECTED_READING_INTERVAL_MINUTES * 3);
 
 /*
  * ---------------------------------------------------------------------------
@@ -145,25 +184,32 @@ const MONITORING_SHEET = 'Monitoring';
 const MONITORING_COLUMN_COUNT = 9;
 
 /*
- * Wine sheet layout, thirteen columns:
+ * Wine sheet layout, twelve columns:
  *
  *   A  Date and time         capture time, never the upload time
  *   B  SG                    final calibrated, smoothed value
  *   C  Temperature °C
  *   D  (blank visual separator)
- *   E  4-hour avg SG
- *   F  4-hour avg °C
- *   G  Average quality
- *   H  Previous day avg SG
- *   I  Previous day avg °C
- *   J  (blank visual separator)
- *   K  Raw SG            \  schemaVersion 2 only. The single-reading payload
- *   L  Signal dBm         |  carries none of these, so they stay blank there.
- *   M  Record id         /
+ *   E  4-hour avg SG     \  quality is the FILL on these two cells, plus a
+ *   F  4-hour avg °C      /  note on E. See WHERE THE QUALITY COLUMN WENT.
+ *   G  Previous day avg SG
+ *   H  Previous day avg °C
+ *   I  (blank visual separator)
+ *   J  Raw SG            \  schemaVersion 2 only. The single-reading payload
+ *   K  Signal dBm         |  carries none of these, so they stay blank there.
+ *   L  Record id         /
  *
- * A..I keep the positions they had in every previous layout, so the charts,
- * the rolling averages, the daily averages, the new-day shading and the gap
- * detection all continue to address the same columns.
+ * WHERE THE QUALITY COLUMN WENT
+ *
+ * 'Average quality' used to be its own column G, holding text like
+ * 'INCOMPLETE - 45m gap'. It was a whole column that was blank on ~7 rows out of
+ * every 8 - it is only written on the four-hourly average rows - and its content
+ * described the two cells beside it rather than standing on its own.
+ *
+ * It is now the background fill on E and F, with the full text and the gap detail
+ * in a note on E. Green/amber/red still answers 'can I trust this average' at a
+ * glance, hovering gives the same words as before, and the table is a column
+ * narrower.
  *
  * WHAT THE DIAGNOSTIC BLOCK DROPPED, AND WHY
  *
@@ -190,7 +236,7 @@ const MONITORING_COLUMN_COUNT = 9;
  * Nothing here is lost to the audit trail: '_processed_ids' still records every
  * record id with its wine, sheet, row, capture time, receipt time and outcome.
  */
-const DATA_COLUMN_COUNT = 13;
+const DATA_COLUMN_COUNT = 12;
 
 const WINE_SHEET_HEADERS = [
   'Date and time',
@@ -199,7 +245,6 @@ const WINE_SHEET_HEADERS = [
   '',
   '4-hour avg SG',
   '4-hour avg °C',
-  'Average quality',
   'Previous day avg SG',
   'Previous day avg °C',
   '',
@@ -260,7 +305,7 @@ const TEMP_CHART_ROW =
  * reset to its raw readings instead; there is no in-place widening or narrowing any more.
  */
 const LAYOUT_VERSION =
-  'wine-layout-v15-narrow-diagnostics';
+  'wine-layout-v16-quality-as-fill';
 
 
 /*
@@ -1623,11 +1668,20 @@ function appendMeasurementRow(
     );
   }
 
+  /*
+   * Quality is the fill on the two average cells plus a note on the first of them,
+   * rather than the text column G used to be. Same three signals as before -
+   * colour, emphasis, detail on hover - without a column that is blank on every
+   * row that is not a four-hourly average.
+   */
   if (averages.quality) {
     state.sheet
-      .getRange(newRow, 7)
+      .getRange(newRow, 5, 1, 2)
       .setBackground(averageQualityColor)
-      .setFontWeight('bold')
+      .setFontWeight('bold');
+
+    state.sheet
+      .getRange(newRow, 5)
       .setNote(averageQualityNote);
   }
 
@@ -1636,7 +1690,7 @@ function appendMeasurementRow(
 
   if (signalNote) {
     state.sheet
-      .getRange(newRow, 12)
+      .getRange(newRow, 11)
       .setNote(signalNote);
   }
 
@@ -1734,7 +1788,7 @@ function appendUntimestampedRow(
 
 
 /*
- * The thirteen cell values of one data row, in layout order. The single place
+ * The twelve cell values of one data row, in layout order. The single place
  * that knows the column order, so changing the layout again means editing
  * WINE_SHEET_HEADERS and this function together.
  */
@@ -1750,7 +1804,6 @@ function buildMeasurementRowValues(
     '',
     averages.rollingSG,
     averages.rollingTempC,
-    averages.quality,
     averages.previousDaySG,
     averages.previousDayTempC,
     '',
@@ -2679,17 +2732,17 @@ function prepareSheet(
     .setFontWeight('bold')
     .setHorizontalAlignment('center');
 
-  /* Columns D and J are intentionally empty visual separators. */
+  /* Columns D and I are intentionally empty visual separators. */
   sheet
     .getRange('D:D')
     .clearContent();
 
   sheet
-    .getRange('J:J')
+    .getRange('I:I')
     .clearContent();
 
   sheet
-    .getRange('D2:J2')
+    .getRange('D2:I2')
     .setBackground(null);
 
   sheet
@@ -2697,12 +2750,12 @@ function prepareSheet(
     .setFontWeight('normal');
 
   sheet
-    .getRange('J2')
+    .getRange('I2')
     .setFontWeight('normal');
 
-  /* D2:J2 above also cleared the header fill on E..I; put it back. */
+  /* D2:I2 above also cleared the header fill on E..H; put it back. */
   sheet
-    .getRange('E2:I2')
+    .getRange('E2:H2')
     .setBackground(HEADER_COLOR);
 
   sheet.setFrozenRows(2);
@@ -2729,46 +2782,42 @@ function prepareSheet(
     .getRange('F:F')
     .setNumberFormat('0.0');
 
+  /* Previous-day averages, which the retired quality column used to sit before. */
   sheet
     .getRange('G:G')
-    .setNumberFormat('@');
-
-  sheet
-    .getRange('H:H')
     .setNumberFormat('0.0000');
 
   sheet
-    .getRange('I:I')
+    .getRange('H:H')
     .setNumberFormat('0.0');
 
   /* Raw SG carries the same four decimals as column B. */
   sheet
-    .getRange('K:K')
+    .getRange('J:J')
     .setNumberFormat('0.0000');
 
   /* Signal is whole negative dBm. */
   sheet
-    .getRange('L:L')
+    .getRange('K:K')
     .setNumberFormat('0');
 
   /* Record id is text, never coerced into a number or a date. */
   sheet
-    .getRange('M:M')
+    .getRange('L:L')
     .setNumberFormat('@');
 
-  sheet.setColumnWidth(1, 175);
-  sheet.setColumnWidth(2, 90);
-  sheet.setColumnWidth(3, 130);
-  sheet.setColumnWidth(4, 28);
-  sheet.setColumnWidth(5, 135);
-  sheet.setColumnWidth(6, 135);
-  sheet.setColumnWidth(7, 230);
-  sheet.setColumnWidth(8, 155);
-  sheet.setColumnWidth(9, 155);
-  sheet.setColumnWidth(10, 28);
-  sheet.setColumnWidth(11, 95);
-  sheet.setColumnWidth(12, 95);
-  sheet.setColumnWidth(13, 200);
+  sheet.setColumnWidth(1, 175);   /* A date and time   */
+  sheet.setColumnWidth(2, 90);    /* B SG              */
+  sheet.setColumnWidth(3, 130);   /* C temperature     */
+  sheet.setColumnWidth(4, 28);    /* D separator       */
+  sheet.setColumnWidth(5, 135);   /* E 4h avg SG       */
+  sheet.setColumnWidth(6, 135);   /* F 4h avg C        */
+  sheet.setColumnWidth(7, 155);   /* G prev day avg SG */
+  sheet.setColumnWidth(8, 155);   /* H prev day avg C  */
+  sheet.setColumnWidth(9, 28);    /* I separator       */
+  sheet.setColumnWidth(10, 95);   /* J raw SG          */
+  sheet.setColumnWidth(11, 95);   /* K signal dBm      */
+  sheet.setColumnWidth(12, 200);  /* L record id       */
 
   /*
    * The charts anchor one clear column past the data, and a sheet can have
@@ -3365,12 +3414,11 @@ function getLastAverageOutputDateBefore(
     ) {
       const averageSG = values[i][4];
       const averageTempC = values[i][5];
-      const averageQuality = values[i][6];
 
+      // Quality used to be a third cell tested here; it is a fill on these two now.
       if (
         averageSG === '' &&
-        averageTempC === '' &&
-        averageQuality === ''
+        averageTempC === ''
       ) {
         continue;
       }
@@ -3551,9 +3599,9 @@ function calculateRollingAverageAssessment(
 }
 
 /*
- * Turns a rolling assessment into the five things a four-hour average point
- * puts on a row: the two average values, the quality text, the fill colour for
- * column G and the explanatory note.
+ * Turns a rolling assessment into what a four-hour average point puts on a row:
+ * the two average values, plus the quality text, fill colour and explanatory note
+ * that are applied to those two cells (E:F) rather than to a column of their own.
  *
  * Shared by the append path and by rebuildDerivedColumns() so that a row
  * written live and the same row recomputed after a backfill cannot disagree
@@ -4584,7 +4632,7 @@ function sortAppendedSheets(
  * carries no guarantee about per-row backgrounds, notes or font weights, all
  * three of which this sheet uses as real per-row state: new-day shading across
  * the row, the data-gap fill on A..C plus its note on column A, and the
- * average-quality fill, bold and note on column G. It also offers no control
+ * average-quality fill and bold on E:F with its note on E. It also offers no control
  * over where blank keys land and no guarantee of stability for equal keys.
  *
  * So values, backgrounds, notes and font weights are read together, permuted
@@ -4844,7 +4892,8 @@ function toSortableTime(value) {
  * WHAT IS DERIVED, AND FROM WHAT
  *
  *   E, F  four-hour rolling average SG and °C   \
- *   G     average quality, its fill and its note |  a function of A, B and C
+ *   E:F   the average-quality fill, its bold and |  a function of A, B and C
+ *         its note on E                       |
  *   H, I  previous calendar day average SG and °C|  over a window of rows
  *   row fill   new-day shading                  /
  *
@@ -5135,7 +5184,7 @@ function rebuildDerivedColumns(
       rewriteStartRow,
       5,
       rewriteRowCount,
-      5
+      4
     );
 
   const rowRange =
@@ -5154,10 +5203,14 @@ function rebuildDerivedColumns(
       1
     );
 
+  /*
+   * The quality note and its bold live on E now, not on the retired column G.
+   * The fill spans E:F and is applied through the whole-row backgrounds below.
+   */
   const qualityRange =
     sheet.getRange(
       rewriteStartRow,
-      7,
+      5,
       rewriteRowCount,
       1
     );
@@ -5334,7 +5387,6 @@ function rebuildDerivedColumns(
     derivedValues.push([
       averages.rollingSG,
       averages.rollingTempC,
-      averages.quality,
       averages.previousDaySG,
       averages.previousDayTempC
     ]);
@@ -5380,8 +5432,10 @@ function rebuildDerivedColumns(
         : existingCaptureNote
     ]);
 
+    // E and F, matching the append path's getRange(newRow, 5, 1, 2).
     if (averages.quality) {
-      rowBackground[6] = qualityColor;
+      rowBackground[4] = qualityColor;
+      rowBackground[5] = qualityColor;
     }
 
     backgrounds.push(rowBackground);
