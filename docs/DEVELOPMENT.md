@@ -274,7 +274,21 @@ s.close()
 sys.stdout.write(out.decode("utf-8", "replace"))
 ```
 
-Omit the DTR/RTS lines to attach without resetting a running device. The boot log is the fastest
+Omit the DTR/RTS lines to attach without resetting a running device. **A reconnect loop that
+sets them explicitly reboots the device on every retry** — the plain
+`serial.Serial(port, 115200, timeout=0.5)` constructor leaves them alone.
+
+Three capture artifacts that are NOT device faults, all documented with evidence in
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md):
+
+- Runs of **exactly 64 bytes of `0xFF`** replacing part of an otherwise intact line are the
+  host CP210x/USB read path. `0xFF` is the UART idle level; a transmitter cannot emit 64 idle
+  bytes mid-message. **Capture the raw undecoded stream** when diagnosing serial corruption —
+  decoding with `errors="replace"` first destroys exactly the evidence you need.
+- A burst of thousands of duplicated lines in one second only ever happens on port reopen. It
+  exceeds what 115200 baud can carry, so it cannot be live output. Steady state is ~4 B/s.
+- Log lines spliced together mid-word were a real firmware issue and are fixed, but the
+  fix is unverified in the only place it was ever observed (boot). See KNOWN_ISSUES.md #10. The boot log is the fastest
 way to identify a board: it prints the partition table, `Project name`, `App version`, the
 compile time, and which subsystems came up.
 
@@ -302,19 +316,27 @@ it. Run it after editing anything under `tiltbridge_web_ui/src/`.
 
 ### Google Apps Script
 
-`GoogleSheets/post_tilt.gs` runs on Google's servers, so it cannot be exercised by a firmware
-build. Two things you can do locally:
+`GoogleSheets/post_tilt.gs` runs on Google's servers, so a firmware build never touches it and
+nothing in CI checks it. There is a mock harness in the repo:
 
 ```bash
-# Syntax check (it is plain V8 JavaScript)
+node GoogleSheets/test/run_tests.js      # layout consistency + quality thresholds
+```
+
+It loads the real file under Node's `vm` against mocks of `SpreadsheetApp`,
+`PropertiesService`, `LockService`, `Utilities`, `ContentService` and `Session`. Add cases to
+`GoogleSheets/test/run_tests.js` when you change the layout or the grading rules.
+
+Also worth running after any edit, because a load-time error takes the whole endpoint down:
+
+```bash
 cp GoogleSheets/post_tilt.gs /tmp/post_tilt.js && node --check /tmp/post_tilt.js
 ```
 
-For behaviour, stub the Apps Script globals (`SpreadsheetApp`, `PropertiesService`, `LockService`,
-`Utilities.formatDate`) and run the file under Node's `vm` module against a fake sheet — a grid of
-values, backgrounds, notes and font weights with `getRange`/`getValues`/`setValues` on it. That is
-how the derived-column rebuild described in `docs/phase1/APPS_SCRIPT_PROTOCOL.md` §5.2 was
-verified.
+**Editing the file here changes nothing on its own** — it has to be pasted into the Apps
+Script editor and the existing Web app deployment re-deployed. See
+[APPS_SCRIPT.md](APPS_SCRIPT.md) for that, the column layout, and the one constant
+(`EXPECTED_READING_INTERVAL_MINUTES`) you must keep in step with the device's push interval.
 
 On the device side, the endpoint can be exercised by hand:
 
@@ -344,7 +366,7 @@ No credentials are needed. `mdnsID` is configurable, so prefer the IP once you k
 | `/api/json/` | live Tilt readings, each with `mac`, `hasDeviceConfig`, `gsheets_name` |
 | `/api/settings/json/` | the whole configuration — this is the backup |
 | `/api/devices/` | per-Tilt configurations |
-| `/api/uptime/`, `/api/heap/` | uptime, free heap and fragmentation |
+| `/api/uptime/`, `/api/heap/` | uptime (incl. `totalSeconds`), free heap and fragmentation |
 
 `hardware` tells you which environment the running firmware was built from (`Headless`,
 `Small TFT`, `S3 OLED`, …), which is how to pick the right `-e` without guessing.
@@ -373,6 +395,47 @@ curl -X PUT http://<device>/api/settings/targets/ -H 'Content-Type: application/
 
 Records only reach flash while sending is failing, so `bytesUsed` staying at 0 during normal
 operation is the check that the live path is working.
+
+---
+
+## 8.1 Acceptance-testing the sender recovery watchdog
+
+The health monitor reboots the device when the outbound loop stops being serviced. There is a
+build-time hook to prove it still works — worth running after touching `sender_health.cpp`,
+`sendData.cpp::process()` or anything about uptime, because the guard it depends on was broken
+and silently disabled the whole mechanism (KNOWN_ISSUES.md #8).
+
+```bash
+# Build WITH the hook, via an env override so platformio.ini stays clean
+PLATFORMIO_BUILD_FLAGS="-D TB_DEBUG_FREEZE=1" \
+  ~/.platformio/penv/bin/pio run -e esp32_headless --target upload
+
+# Wait until uptime > RECOVERY_GRACE_SEC (180), then wedge the sender
+curl -s http://<device>/api/uptime/            # totalSeconds must exceed 180
+curl -X POST http://<device>/api/actions/ -H 'Content-Type: application/json' \
+     -d '{"action":"debugFreezeSender"}'
+```
+
+Expect a reboot `senderStaleRebootSec` (default 90 s) later. On serial:
+
+```
+E: Sender recovery: restarting. reason=1 heartbeatAge=90668 ms lockAge=0 ms target=-1
+rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+```
+
+`rst:0xc (SW_CPU_RESET)` is the deliberate restart — not `rst:0x1` (power-on) and not a
+hardware watchdog. Afterwards `GET /api/sender/` reports the persisted record:
+
+```json
+"lastRecovery": { "reason": "sender_heartbeat_stale", "heartbeatAgeMs": 90662,
+                  "uptimeSecAtReboot": 285, "bootCount": 1 }
+```
+
+**Reflash the normal build afterwards** and confirm the hook is gone — `debugFreezeSender`
+must return HTTP 400 in a production build.
+
+The queue is persistent, so a deliberate reboot loses no readings; anything pending is drained
+after the restart.
 
 ---
 

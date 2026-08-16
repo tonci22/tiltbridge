@@ -284,10 +284,45 @@ queued an upload.
 
 ---
 
+## Verification discipline
+
+Every bug in the "open" list above was found by reading code or soaking hardware. The ones
+that were *introduced* during this work all passed a test first. What the tests missed:
+
+**A single sample can pass by coincidence.** A fix that measured an interval from
+`lastAttemptTime` was verified once and reported working. It was broken: the anchor returned a
+0..59 seconds component, and the one test happened to have both timestamps inside the same
+minute, so the arithmetic came out right. Any test involving a clock must deliberately cross
+the boundary the code could be wrong about — a minute, an hour, midnight, a wrap.
+
+**Check the metric can fail before trusting it.** `staleEvents: 0` and `lastRecovery: null`
+were reported as evidence of health across ~25 hours. They were guaranteed regardless, because
+the mechanism that sets them could never fire. A green indicator is only evidence if you have
+seen it go red.
+
+**Instrumentation lies too.** A monitoring script decoded serial with `errors="replace"` before
+writing, which destroyed the byte pattern that identified the corruption as a host USB artifact
+— costing a day of chasing a firmware bug that did not exist. Log raw, decode later.
+
+**Preserved defaults need a reason.** `HTTP_MAX_OPEN_SOCKETS` was left at 7 when the worker
+pool that justified it was deleted, "to preserve behaviour". Nothing justified 7 any more, and
+it starved the outbound TLS client of sockets. When you delete the reason for a value, the
+value is a new decision, not a preserved one.
+
+**Say which parts are unverified.** Several fixes here are correct by inspection but were never
+observed working. Marking that explicitly is what stopped them being re-derived later, and it is
+why every entry above separates proven from suspected.
+
+---
+
 ## Environment
 
-Build and flash commands, serial capture recipes and the HTTP endpoint list are in
-[DEVELOPMENT.md](DEVELOPMENT.md). Two things worth repeating:
+Build and flash commands, serial capture recipes, the HTTP endpoint list and the recovery
+watchdog acceptance test are in [DEVELOPMENT.md](DEVELOPMENT.md). The Google Sheets side —
+deployment, the column layout, the one constant that must track the device's push interval,
+and `node GoogleSheets/test/run_tests.js` — is in [APPS_SCRIPT.md](APPS_SCRIPT.md).
+
+Two things worth repeating:
 
 - `uploadfs` **destroys** the device configuration, including per-device Tilt names and
   calibration. A firmware-only `--target upload` preserves it. Back up with
