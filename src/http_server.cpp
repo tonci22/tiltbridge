@@ -649,6 +649,15 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
             remaining = (elapsed >= period) ? PUSH_INTERVAL_DUE_NOW_SEC : (period - elapsed);
         }
 
+        /*
+         * This fire is deliberately off the cadence grid - it is the remainder of the OLD
+         * interval measured against the NEW one. Drop the anchor so the upload it triggers
+         * lays out a fresh grid on completion, rather than stepping the stale one forward
+         * and leaving one arbitrary gap behind. See dataSendHandler::rearmGSheetsTimer().
+         */
+        data_sender.gSheetsNextDueMs = 0;
+        data_sender.gSheetsGridIntervalSec = 0;
+
         data_sender.startTimer(data_sender.gSheetsTimer, remaining);
         Log.notice("Google Sheets interval %u -> %us; next upload in %us.\r\n",
                    (unsigned)previousPushEvery, (unsigned)config.gsheetsPushEvery,

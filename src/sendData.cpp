@@ -192,6 +192,87 @@ void dataSendHandler::startTimer(TimerHandle_t timer, uint32_t periodSeconds) {
     xTimerChangePeriod(timer, (TickType_t)ticks, 0);
 }
 
+/**
+ * @brief Re-arm the Google Sheets timer against a fixed grid. See the declaration.
+ *
+ * startTimer() counts from the moment it is called, so re-arming after an upload makes the
+ * real period `interval + upload duration`. Here the deadline is absolute: it advances by
+ * whole intervals, and the timer is given only the remainder. A push that took 20 s
+ * therefore leaves 9m40s, not 10m, and the cadence does not walk.
+ *
+ * Only the configured cadence is gridded. A drain burst or a backoff delay is deliberately
+ * off-cadence, so it drops the anchor and the next normal push lays out a fresh grid from
+ * wherever it lands - otherwise the first push after an outage could snap onto a stale grid
+ * point and fire immediately.
+ */
+void dataSendHandler::rearmGSheetsTimer(uint32_t periodSeconds)
+{
+    if (periodSeconds == 0)
+        periodSeconds = 1;
+
+    const uint32_t now = sh_millis();
+    const uint32_t intervalMs = periodSeconds * 1000UL;
+
+    /*
+     * Only the configured cadence gets a grid. A drain burst or a backoff delay is
+     * deliberately off-cadence: honour it exactly and drop the anchor, so that the next
+     * normal push lays out a fresh grid from wherever it lands instead of snapping onto a
+     * stale grid point and firing immediately.
+     */
+    if (periodSeconds != config.gsheetsPushEvery) {
+        gSheetsNextDueMs = 0;
+        gSheetsGridIntervalSec = 0;
+        startTimer(gSheetsTimer, periodSeconds);
+        return;
+    }
+
+    // No grid yet, or the push interval was changed in the UI: start one from here.
+    if (gSheetsNextDueMs == 0 || gSheetsGridIntervalSec != periodSeconds) {
+        gSheetsGridIntervalSec = periodSeconds;
+        gSheetsNextDueMs = now + intervalMs;
+        startTimer(gSheetsTimer, periodSeconds);
+        return;
+    }
+
+    /*
+     * Advance the deadline to the next grid point still ahead of us.
+     *
+     * The subtraction is unsigned, which stays correct across the ~49.7-day wrap of the
+     * millisecond counter: a deadline that has already passed shows up as a very large
+     * difference, which is exactly the "> intervalMs" case the loop consumes. Bounded so
+     * that a nonsense value can never spin here.
+     */
+    uint32_t remaining = gSheetsNextDueMs - now;
+
+    for (uint16_t guard = 0; remaining > intervalMs && guard < 1000; guard++) {
+        gSheetsNextDueMs += intervalMs;
+        remaining = gSheetsNextDueMs - now;
+    }
+
+    if (remaining > intervalMs) {
+        // Gave up stepping. Re-anchor rather than schedule something meaningless.
+        gSheetsNextDueMs = now + intervalMs;
+        remaining = intervalMs;
+    }
+
+    /*
+     * The push finished right on top of the next grid point, which happens when it returned
+     * early without doing any network work. Firing now would push twice in a row for no
+     * benefit, so take the following point: still on the grid, one interval later.
+     */
+    if (remaining < 2000) {
+        gSheetsNextDueMs += intervalMs;
+        remaining += intervalMs;
+    }
+
+    /*
+     * Rounded up, because the timer takes whole seconds. Rounding down would fire a
+     * fraction of a second EARLY, leaving the deadline still in the future on the next
+     * pass - and this function would then schedule that fraction as the next delay.
+     */
+    startTimer(gSheetsTimer, (remaining + 999) / 1000);
+}
+
 void dataSendHandler::init()
 {
     init_mqtt();
@@ -927,7 +1008,9 @@ bool dataSendHandler::send_to_google()
             if (attempted)
                 setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         }
-        startTimer(gSheetsTimer, backoffDelay(TARGET_GOOGLE_SHEETS, config.gsheetsPushEvery)); // Set up subsequent send to Google Sheets
+        // Anchored, like the v2 path: same timer, same target, so the two must not disagree
+        // about what "every gsheetsPushEvery seconds" means.
+        rearmGSheetsTimer(backoffDelay(TARGET_GOOGLE_SHEETS, config.gsheetsPushEvery));
     }
     return result;
 }

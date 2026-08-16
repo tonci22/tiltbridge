@@ -166,6 +166,19 @@ public:
     void createTimers();
     void startTimer(TimerHandle_t timer, uint32_t periodSeconds);
 
+    /**
+     * @brief Re-arm the Google Sheets timer on a fixed grid rather than from "now".
+     *
+     * Every other send timer is restarted after its upload finishes, so its true period is
+     * the configured interval PLUS however long the upload took - around 20 s per cycle for
+     * Google Sheets, almost all of it Apps Script's own execution time. That slip is
+     * cumulative, so a 10-minute push walks a full hour around the clock in about 25 days.
+     *
+     * This keeps an absolute deadline instead and hands the timer whatever is left of it, so
+     * the cadence stays put however slow a given upload was. See gsheets_v2.cpp.
+     */
+    void rearmGSheetsTimer(uint32_t periodSeconds);
+
     // Send Semaphores
     bool send_legacy_fermentrack = false;
     bool send_fermentrack = false;
@@ -185,6 +198,14 @@ public:
     enum class QueueUploadState : uint8_t { IDLE, SENDING, RETRYING, DISABLED };
     QueueUploadState queueUploadState = QueueUploadState::IDLE;
     uint32_t lastQueueUploadSuccessMs = 0;
+
+    /*
+     * Absolute sh_millis() deadline for the next Google Sheets push, and the interval the
+     * grid was laid out on. Zero means unanchored - the next push at the configured cadence
+     * starts a fresh grid. See rearmGSheetsTimer().
+     */
+    uint32_t gSheetsNextDueMs = 0;
+    uint32_t gSheetsGridIntervalSec = 0;
 
 private:
     // The former `bool send_lock` lived here. It has been replaced by the mutex owned by

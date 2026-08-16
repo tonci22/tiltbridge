@@ -245,13 +245,30 @@ s = serial.Serial("/dev/cu.usbserial-0001", 115200, timeout=0.5)
 
 A reconnect loop that sets the lines explicitly reboots the device on every retry.
 
-### 3. A burst of repeated log lines on serial reattach is not a device fault
+### 3. Google Sheets rows are no longer ~20 s later each cycle
+
+Every send timer is one-shot and re-armed **after** its upload finishes, so its real period
+was `interval + upload duration`. For Google Sheets the upload is ~14–20 s, almost all of it
+Apps Script's own execution (issue 12), so a 10-minute push actually landed every ~10m20s and
+walked a full hour around the clock in about 25 days. It showed up in the sheet's own
+timestamps because column A is the capture time, taken as the batch is built.
+
+`dataSendHandler::rearmGSheetsTimer()` (`sendData.cpp`) now keeps an absolute deadline and
+hands the timer only what is left of it, so the cadence holds however slow a given upload was.
+Two deliberate exceptions drop the anchor and re-grid on the next normal push: the 5-second
+backlog drain, and `backoffDelay()` when a target is failing — both are meant to be off
+cadence.
+
+**This is Google Sheets only.** Every other target still slips by its own upload duration.
+That is not a bug report; it is where to look if one of them ever needs the same treatment.
+
+### 4. A burst of repeated log lines on serial reattach is not a device fault
 
 Reopening the port produces thousands of duplicated lines in one second — more than 115200
 baud can carry, so it cannot be live output. It only ever occurs on reopen. Steady-state serial
 output is ~4 B/s.
 
-### 4. macOS Sequoia blocks local network access per app
+### 5. macOS Sequoia blocks local network access per app
 
 macOS 15 requires explicit permission per app to reach LAN devices, and denies it by reporting
 the address as **unreachable** — Chrome shows `ERR_ADDRESS_UNREACHABLE` while `curl` from
@@ -261,7 +278,7 @@ effect when Chrome is restarted, so it breaks with no user action.
 Fix: System Settings → Privacy & Security → Local Network → enable the app, then fully quit and
 reopen it. Incognito does not help — it is an OS permission, not a browser setting.
 
-### 5. The device's mDNS name follows `mdnsID`
+### 6. The device's mDNS name follows `mdnsID`
 
 It is `lovric.local` on the test device, **not** `tiltbridge.local`. The IP is more reliable
 than the name: mDNS is link-local multicast (TTL 1) and cannot cross a router, VPN or mobile
@@ -272,7 +289,7 @@ Google Sheets uploads continuing while the web UI is unreachable is the expected
 the *client* having moved networks — the device uploads outbound over its own Wi-Fi and never
 involves the laptop.
 
-### 6. An open web UI tab re-saves settings
+### 7. An open web UI tab re-saves settings
 
 A settings page left open holds the values it loaded and writes them back on save, silently
 reverting a change made elsewhere. Observed: an interval set to 600 via the API was overwritten
