@@ -196,14 +196,12 @@ What was dropped, and where it went instead:
 Nothing is lost to the audit trail: `_processed_ids` still records every record id with its wine,
 sheet, row, capture time, receipt time and outcome.
 
-**There is no in-place migration.** `migrateLegacyLayoutIfNeeded()` keeps A, B and C — the only
-columns every layout has ever agreed on, and the only ones that cannot be recomputed — clears
-everything from D rightwards, and logs a `WARNING`. Everything discarded is either derived (E–I
-are rebuilt from the raw readings as new rows arrive) or diagnostic detail whose absence costs
-nothing. A visibly reset sheet beats a quietly misaligned one.
-
-An in-place nineteen-to-thirteen narrowing did exist and was removed: the nineteen-column layout
-only ever existed on this unmerged branch, so nothing in the wild needs it.
+**There is no migration of any kind.** The script writes one layout and reads one layout. The
+lossy `migrateLegacyLayoutIfNeeded()` that preserved A, B and C from an older layout has been
+removed along with the in-place nineteen-to-thirteen narrowing before it: every layout it knew
+about only ever existed on this unmerged branch, so nothing in the wild needs either. If you
+change the layout of a sheet that already holds readings, delete the sheet and let TiltBridge
+recreate it.
 
 The note on a device change goes on column M rather than column A on purpose: column A's note is
 owned by the data-gap marker, which `rebuildDerivedColumns()` clears and rewrites, and two owners
@@ -269,9 +267,9 @@ Properties worth preserving in any reimplementation:
   Clearing a flag whose gap has since been filled is always right. Adding one from a coarser view
   of the same history is not.
 
-Run `rebuildAllDerivedColumns()` once after deploying this version: sheets written by the previous
-version still carry averages and quality marks computed before the queue delivered what they were
-missing, and nothing else clears them.
+There is no one-shot repair function. A sheet that has always run this version never needs one:
+every late upload queues its own rebuild, and the 15-minute trigger finishes whatever a request
+could not.
 
 ### Handling `TimestampValid: false`
 
@@ -350,9 +348,7 @@ Notes on the sketch:
 ## 6. Migration checklist for a user enabling enhanced mode
 
 1. Update the Apps Script to a version implementing this document; deploy a **new version** of the
-   web app (Apps Script serves the last deployed version, not the last saved code). Run
-   `rebuildAllDerivedColumns()` once from the editor to repair averages and quality marks that
-   earlier versions left stale (§5.2).
+   web app (Apps Script serves the last deployed version, not the last saved code).
 2. Confirm the deployment URL is unchanged, or paste the new one into TiltBridge.
 3. Send a manual test batch (curl the URL with a one-reading v2 body) and confirm the response
    contains `acceptedRecordIds`.

@@ -11,29 +11,93 @@
  * (new-day shading, data-gap fills, the average-quality fill and its note).
  */
 
+/*
+ * Utilities.formatDate for the two patterns the script uses, 'yyyy-MM-dd' and
+ * 'dd.MM.yyyy HH:mm:ss'.
+ *
+ * Both the pattern and the timezone are honoured for real, via Intl:
+ *
+ * - the pattern, because getPreviousCalendarDateKey() splits a formatted date on '-'
+ *   and does arithmetic on the pieces, so a formatter that returns anything else
+ *   yields NaN rather than a wrong day;
+ * - the timezone, because dateKey() is what decides where one calendar day ends and
+ *   the next begins, and therefore which rows a previous-day average covers. A UTC
+ *   stand-in would put that boundary two hours off for Europe/Zagreb and quietly
+ *   move rows between days.
+ */
+function formatDate(date, timezone, pattern) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date(date)).reduce((all, p) => {
+    all[p.type] = p.value;
+    return all;
+  }, {});
+
+  /* Intl renders midnight as '24' in some locales; the script never wants that. */
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+
+  if (pattern === 'yyyy-MM-dd') {
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  }
+  if (pattern === 'dd.MM.yyyy HH:mm:ss') {
+    return `${parts.day}.${parts.month}.${parts.year} ${hour}:${parts.minute}:${parts.second}`;
+  }
+  throw new Error('mock: unsupported date pattern ' + pattern);
+}
+
 function columnToIndex(letters) {
   return letters
     .split('')
     .reduce((total, ch) => total * 26 + ch.charCodeAt(0) - 64, 0);
 }
 
+/* What Sheets reports for a cell with no fill. Mirrors NO_FILL_COLOR in the script. */
+const NO_FILL = '#ffffff';
+
+let nextSheetId = 1;
+
 function makeSheet(name, maxColumns = 30) {
   const values = {}, notes = {}, backgrounds = {}, weights = {}, formats = {}, widths = {};
   const key = (r, c) => r + ':' + c;
+  const sheetId = nextSheetId++;
   let lastRow = 0;
+  let hidden = false;
 
   const sheet = {
     _values: values, _notes: notes, _backgrounds: backgrounds,
     _weights: weights, _formats: formats, _widths: widths,
 
     getName: () => name,
-    getSheetId: () => 1,
+    getSheetId: () => sheetId,
     getMaxColumns: () => maxColumns,
     getMaxRows: () => 5000,
     getLastRow: () => lastRow,
     setFrozenRows() { return sheet; },
     setColumnWidth(c, w) { widths[c] = w; return sheet; },
     getParent: () => null,
+
+    /* Enough of the rest of the Sheet API to run the real append path. */
+    appendRow(row) {
+      lastRow += 1;
+      row.forEach((v, j) => { values[key(lastRow, j + 1)] = v; });
+      return sheet;
+    },
+    insertColumnsAfter() { return sheet; },
+    hideSheet() { hidden = true; return sheet; },
+    isSheetHidden: () => hidden,
+    deleteRows() { return sheet; },
+    getCharts: () => [],
+    removeChart() { return sheet; },
+    insertChart() { return sheet; },
+    newChart() {
+      const builder = new Proxy({}, {
+        get: (_, prop) => (prop === 'build' ? () => ({}) : () => builder)
+      });
+      return builder;
+    },
 
     getRange(a, b, c, d) {
       let r1, c1, nr, nc;
@@ -66,16 +130,23 @@ function makeSheet(name, maxColumns = 30) {
         setValues(v) { fill(values, v); lastRow = Math.max(lastRow, r1 + v.length - 1); return range; },
         getValues() { return grid(values, ''); },
         getDisplayValues() { return grid(values, '').map(r => r.map(v => v === '' ? '' : String(v))); },
+        getDisplayValue() { const v = values[key(r1, c1)]; return v === undefined ? '' : String(v); },
         getValue() { return values[key(r1, c1)] ?? ''; },
         setValue(v) { values[key(r1, c1)] = v; lastRow = Math.max(lastRow, r1); return range; },
         setNote(n) { notes[key(r1, c1)] = n; return range; },
         getNote() { return notes[key(r1, c1)] ?? ''; },
         setNotes(g) { fill(notes, g); return range; },
         getNotes() { return grid(notes, ''); },
-        setBackground(c) { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) backgrounds[key(r1 + i, c1 + j)] = c; return range; },
+        /*
+         * Sheets reports an unfilled cell as '#ffffff', never null, and setBackground(null)
+         * is how you get back to unfilled. rebuildDerivedColumns() compares the fills it
+         * computed against the ones already there and writes nothing when they match, so a
+         * mock that reported null for "no fill" would make every rebuild look like a change.
+         */
+        setBackground(c) { const v = c === null ? NO_FILL : c; for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) backgrounds[key(r1 + i, c1 + j)] = v; return range; },
         setBackgrounds(g) { fill(backgrounds, g); return range; },
-        getBackground() { return backgrounds[key(r1, c1)] ?? null; },
-        getBackgrounds() { return grid(backgrounds, null); },
+        getBackground() { return backgrounds[key(r1, c1)] ?? NO_FILL; },
+        getBackgrounds() { return grid(backgrounds, NO_FILL); },
         setFontWeight(w) { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) weights[key(r1 + i, c1 + j)] = w; return range; },
         setFontWeights(g) { fill(weights, g); return range; },
         getFontWeight() { return weights[key(r1, c1)] ?? 'normal'; },
@@ -89,7 +160,9 @@ function makeSheet(name, maxColumns = 30) {
           return range;
         },
         clearNote() { return range; },
+        clearFormat() { return range; },
         merge() { return range; },
+        breakApart() { return range; },
         setFontColor() { return range; }, setFontSize() { return range; },
         setFontStyle() { return range; }, setHorizontalAlignment() { return range; },
         setWrap() { return range; }, setBorder() { return range; }
@@ -123,19 +196,26 @@ function loadScript(scriptPath, spreadsheet) {
 
   const context = {
     console,
-    SpreadsheetApp: { getActiveSpreadsheet: () => spreadsheet, flush() { } },
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => spreadsheet,
+      openById: () => spreadsheet,
+      flush() { }
+    },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: k => properties[k] ?? null,
         setProperty: (k, v) => { properties[k] = String(v); },
         deleteProperty: k => { delete properties[k]; },
-        getKeys: () => Object.keys(properties)
+        getKeys: () => Object.keys(properties),
+        /* The script reads the lot in one call and caches it; see allProperties(). */
+        getProperties: () => Object.assign({}, properties)
       })
     },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() { } }) },
     Utilities: {
-      formatDate: d => new Date(d).toISOString(),
-      sleep() { }, getUuid: () => 'mock-uuid'
+      formatDate: formatDate,
+      sleep() { }, getUuid: () => 'mock-uuid',
+      base64EncodeWebSafe: s => Buffer.from(String(s)).toString('base64url')
     },
     ContentService: {
       createTextOutput: t => ({ setMimeType: () => ({ getContent: () => t }) }),

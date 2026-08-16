@@ -25,9 +25,15 @@
 >    `wine-layout-v13-v2-diagnostics`; the layout is now 12 columns at
 >    `wine-layout-v16-quality-as-fill`, and the "Average quality" column no longer exists.
 >    See APPS_SCRIPT.md §3.
-> 4. **The Apps Script has since run against the real runtime**, continuously, for days. The
+> 4. **Sheets no longer auto-migrate, and `LAYOUT_WIDENED` no longer exists.**
+>    `migrateLegacyLayoutIfNeeded()` and the manual `rebuildAllDerivedColumns()` repair have
+>    both been deleted: every layout they knew about existed only on this branch, so nothing
+>    in the wild needs them. "Remaining risks" #1 below is therefore wrong in its second
+>    half — a sheet written under an older layout is now *not* converted at all, and the only
+>    correct move is to delete it and let TiltBridge recreate it.
+> 5. **The Apps Script has since run against the real runtime**, continuously, for days. The
 >    "never run against the real Apps Script runtime" caveat below no longer applies.
-> 5. Assorted numbers have moved: `fsFreeBytes` is ~339,968 not 356,352;
+> 6. Assorted numbers have moved: `fsFreeBytes` is ~339,968 not 356,352;
 >    `senderStaleRebootSec` defaults to 90 not 75; `MISSING_READING_MINUTES` is derived from
 >    the configured push interval rather than fixed at 60.
 >

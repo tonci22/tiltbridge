@@ -94,5 +94,76 @@ checkThat('MISSING tolerates two consecutive misses', missing > interval * 2,
 checkThat('thresholds are ordered', complete < incomplete && incomplete < interval * 4,
   `${complete} < ${incomplete}`);
 
+/*
+ * The post-batch sort is skipped unless a row actually landed out of order, so the
+ * flag that decides it has to be right. Getting it wrong the safe way costs a wasted
+ * read of column A; getting it wrong the other way leaves a backlog interleaved with
+ * the live rows and never rebuilds the averages over it.
+ */
+console.log('\nOut-of-order detection on the append path');
+
+const MINUTE = 60 * 1000;
+const base = new Date('2026-08-16T06:00:00Z').getTime();
+
+function measurement(offsetMinutes, recordId) {
+  return {
+    captureDate: offsetMinutes === null ? null : new Date(base + offsetMinutes * MINUTE),
+    sg: 1.088, tempC: 23.1, sgRaw: '', recordId: recordId
+  };
+}
+
+/* A wine sheet with one existing reading, laid out by the script itself. */
+function freshState(wineName, existingOffsets = [0]) {
+  const sheet = makeSheet(wineName);
+  ss._sheets[wineName] = sheet;
+  sheet.getRange(2, 1, 1, columnCount).setValues([headers]);
+  existingOffsets.forEach((offset, i) => {
+    sheet.getRange(3 + i, 1, 1, 3).setValues([[new Date(base + offset * MINUTE), 1.088, 23.1]]);
+  });
+  return ctx.getWineSheetState(ss, {}, {}, wineName, new Date(base));
+}
+
+{
+  const state = freshState('InOrder');
+  ctx.appendMeasurementRow(ss, state, measurement(30, 'r1'));
+  ctx.appendMeasurementRow(ss, state, measurement(60, 'r2'));
+  check('rows in order need no sort', state.appendedOutOfOrder, false);
+  check('and both were written', state.rowsAppended, 2);
+}
+
+{
+  /* The backlog case: a queued reading captured before the row already at the bottom. */
+  const state = freshState('Backlog', [0, 30, 60]);
+  ctx.appendMeasurementRow(ss, state, measurement(45, 'r1'));
+  check('a reading older than the last row forces a sort', state.appendedOutOfOrder, true);
+}
+
+{
+  /*
+   * sortWineSheetByCaptureTime() parks rows with no capture time at the bottom, so a
+   * timestamped row appended after one of them is out of order even though its own
+   * capture time is the newest in the sheet.
+   */
+  const state = freshState('NoClock');
+  ctx.appendMeasurementRow(ss, state, measurement(null, 'r1'));
+  check('an untimestamped row is not itself out of order', state.appendedOutOfOrder, false);
+  checkThat('but it is remembered as the new bottom of the sheet', state.hasTrailingUntimestampedRow);
+
+  ctx.appendMeasurementRow(ss, state, measurement(30, 'r2'));
+  check('so the next timestamped row forces a sort', state.appendedOutOfOrder, true);
+}
+
+{
+  /* A sheet that already ended in an untimestamped row, read back fresh. */
+  const state = freshState('NoClockOnLoad');
+  ctx.appendMeasurementRow(ss, state, measurement(null, 'r1'));
+
+  const reloaded = ctx.getWineSheetState(ss, {}, {}, 'NoClockOnLoad', new Date(base));
+  checkThat('a later request still sees the untimestamped tail',
+    reloaded.hasTrailingUntimestampedRow);
+  check('and the newest capture time is the timestamped row, not the blank one',
+    reloaded.lastSavedCaptureDate.getTime(), base);
+}
+
 console.log(`\n${failures === 0 ? 'All checks passed.' : failures + ' CHECK(S) FAILED.'}\n`);
 process.exit(failures === 0 ? 0 : 1);

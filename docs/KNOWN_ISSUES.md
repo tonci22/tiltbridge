@@ -201,21 +201,18 @@ All variance is Google's leg; the device's own work is a steady 1–3 s. **Uploa
 a firmware problem.** At ~150–200 ms per Sheets service call, ~56 calls ≈ 9.5 s, which is what
 is observed. The multiplier is that four Tilts write to four different sheets.
 
-Four fixes, cheapest first:
+The four fixes originally listed here have been applied, along with three more. Kept as a
+record of where the calls went, because the same mistakes are easy to reintroduce:
 
-1. `post_tilt.gs:1568-1570` — `setBackground(null)` runs on **every** appended row and is
-   overwritten three lines later on the first row of a day. A fresh row at the end of the sheet
-   has no background to clear. 4 wasted round trips per request.
-2. `post_tilt.gs:1558, 1568, 1573` — three separate `getRange()` calls on the same row.
-3. `post_tilt.gs:4488` (`sortAppendedSheets`) runs on every request that appended anything, and
-   `sortWineSheetByCaptureTime` reads *all* of column A per sheet (`:4631-4639`). In steady
-   state readings always arrive in order, so this checks a condition that is essentially never
-   true — and the payload grows for the whole fermentation. Only sort when a row was actually
-   written with a capture time earlier than the row above it.
-4. `post_tilt.gs:1293-1416` (`getWineSheetState`) does 3–4 separate backward scans that all want
-   facts about the tail of the same sheet. One shared read of the last ~500 rows replaces them.
-
-Items 1–3 are ~12 of ~56 round trips — roughly 2 seconds.
+| fix | what it was | now |
+|---|---|---|
+| `setBackground(null)` on every appended row | 1–2 round trips per row, clearing a fill a fresh row never had | applied only when there is a fill to apply |
+| three `getRange()` calls on the same row | — | one `Range`, reused |
+| `sortAppendedSheets` on every request that appended | full read of column A per sheet, growing with the fermentation, to check an ordering that in steady state is never violated | `appendMeasurementRow()` sets `state.appendedOutOfOrder` from capture times it already has; the sort runs only when it is set |
+| `getWineSheetState` doing 3–4 separate backward scans | one per fact about the same tail rows | one `readSheetTail()` over columns A–F |
+| a `getProperty()` per script property | 6–10 round trips per request | one `getProperties()`, cached per execution, dropped when the lock is taken |
+| `ensureSystemLogSheet` / `ensureMonitoringSheet` | headers, formats and column widths reapplied on **every call** — and `safeLogEvent()` calls it per event, so one `DATA_GAP` cost ~12 trips | formatted on creation, then gated on a `*-format-v1` property |
+| `readProcessedIdSet` | read all 20 000 retained ids on every request | reads `PROCESSED_ID_LOOKBACK_ROWS` (2000); older ids cannot still be queued on the device |
 
 **Do not change:** the chunked backward scans (500-row chunks with early exit) are well
 designed, and batching all readings into one request is already right.

@@ -180,6 +180,14 @@ const NO_FILL_COLOR = '#ffffff';
 const SYSTEM_LOG_SHEET = 'System Log';
 const MONITORING_SHEET = 'Monitoring';
 
+/*
+ * Layout gates for the two fixed tabs, in the same spirit as LAYOUT_VERSION:
+ * their headers, number formats and column widths are applied once, not on
+ * every call. Bump the suffix to make an existing spreadsheet reapply them.
+ */
+const SYSTEM_LOG_FORMAT_KEY = 'system-log-format-v1';
+const MONITORING_FORMAT_KEY = 'monitoring-format-v1';
+
 /* Monitoring layout: A..H as before, plus I for the wine's current device. */
 const MONITORING_COLUMN_COUNT = 9;
 
@@ -297,12 +305,10 @@ const TEMP_CHART_ROW =
  * 'sheet-layout-<LAYOUT_VERSION>-<sheetId>' is '1', so a change to prepareSheet alone has
  * no effect on existing sheets - the version string is what invalidates that key.
  *
- * v15 exists because the diagnostic block narrowed from K-S to K-M. Every sheet has to be
- * re-prepared once so the headers, the number formats, the column widths, the title merge and
- * the chart anchor all follow the new width. Re-preparing an up-to-date sheet is
- * non-destructive - migrateLegacyLayoutIfNeeded returns early when the headers already match,
- * and prepareSheet only clears the D and J separator columns. A sheet on an OLDER layout is
- * reset to its raw readings instead; there is no in-place widening or narrowing any more.
+ * prepareSheet() only ever writes the title, the header row, the formats, the widths and the
+ * charts, so re-preparing a sheet is non-destructive and costs one pass. It does NOT convert
+ * data written under a different column layout: if you ever change the layout of a sheet that
+ * already holds readings, the honest move is to let TiltBridge create a new one.
  */
 const LAYOUT_VERSION =
   'wine-layout-v16-quality-as-fill';
@@ -342,6 +348,19 @@ const PROCESSED_IDS_SHEET = '_processed_ids';
 const PROCESSED_ID_RETENTION = 20000;
 
 /*
+ * How many of those ids are actually read back on a request.
+ *
+ * The retention above is the audit trail; this is the de-duplication window,
+ * and it only has to cover ids the device can still resend - which is bounded
+ * by what fits in its offline queue. At a 30-minute cadence 2000 rows is around
+ * six weeks, so an id old enough to fall outside it cannot still be queued.
+ *
+ * Reading the whole 20000-row store on every request was a large payload on a
+ * mature spreadsheet for an answer that only ever concerns the recent tail.
+ */
+const PROCESSED_ID_LOOKBACK_ROWS = 2000;
+
+/*
  * Safety cap for one request. The firmware default is 20 readings per batch.
  * Readings beyond this cap are left unacknowledged, so the device simply
  * resends them in the next batch.
@@ -361,6 +380,106 @@ const WEBAPP_BATCH_LOCK_WAIT_MS = 10000;
 
 
 /*
+ * ===========================================================================
+ * Per-execution caches
+ * ===========================================================================
+ *
+ * Every call into a Google service is a round trip of roughly 150-200 ms, and
+ * an upload makes enough of them that the sum is the whole of the observed
+ * latency. None of the three things cached below can change under us during a
+ * single execution, so each is fetched once.
+ *
+ * These are module-level, which in Apps Script means per execution: a web
+ * request and a trigger run are separate executions and share nothing.
+ */
+let cachedSpreadsheet = null;
+let cachedPropertyMap = null;
+let cachedSystemLogSheet = null;
+let cachedMonitoringSheet = null;
+
+
+function getSpreadsheet() {
+  if (!cachedSpreadsheet) {
+    cachedSpreadsheet =
+      SpreadsheetApp.openById(SPREADSHEET_ID);
+  }
+
+  return cachedSpreadsheet;
+}
+
+
+/*
+ * Script Properties in one read instead of six to ten.
+ *
+ * One request asks for the layout gate, the timezone gate, the missing-reading
+ * state, the wine's device and its last incoming reading, each a round trip of
+ * its own. getProperties() answers all of them in one.
+ *
+ * Writes go straight through and update the map, so a read after a write in the
+ * same execution sees the new value.
+ *
+ * The map is dropped the moment the script lock is acquired: everything read
+ * before the lock is a snapshot by design, and everything read after it has to
+ * see what a request that finished while we were waiting left behind.
+ */
+function allProperties() {
+  if (cachedPropertyMap === null) {
+    cachedPropertyMap =
+      PropertiesService
+        .getScriptProperties()
+        .getProperties();
+  }
+
+  return cachedPropertyMap;
+}
+
+
+/* null for a missing key, matching getProperty() rather than getProperties(). */
+function getProperty(key) {
+  const value = allProperties()[key];
+
+  return value === undefined
+    ? null
+    : value;
+}
+
+
+function setProperty(key, value) {
+  const text = String(value);
+
+  PropertiesService
+    .getScriptProperties()
+    .setProperty(key, text);
+
+  allProperties()[key] = text;
+}
+
+
+function deleteProperty(key) {
+  PropertiesService
+    .getScriptProperties()
+    .deleteProperty(key);
+
+  delete allProperties()[key];
+}
+
+
+function propertyKeysWithPrefix(prefix) {
+  return Object
+    .keys(allProperties())
+    .filter(function (key) {
+      return key.indexOf(prefix) === 0;
+    });
+}
+
+
+/* Call immediately after acquiring the script lock. See allProperties(). */
+function dropPropertyCache() {
+  cachedPropertyMap = null;
+}
+
+
+/*
  * RUN THIS FUNCTION MANUALLY ONCE AFTER PASTING THE CODE.
  *
  * It:
@@ -370,11 +489,6 @@ const WEBAPP_BATCH_LOCK_WAIT_MS = 10000;
  * - installs the automatic missing-reading check,
  * - flags transmission gaps and average quality,
  * - runs the first status check.
- *
- * If you are upgrading a spreadsheet that already holds readings, run
- * rebuildAllDerivedColumns() once as well. Earlier versions computed each
- * four-hour average once, when its row was written, so windows the offline
- * queue completed after the fact are still marked INCOMPLETE.
  */
 function initialSetup() {
   const lock = LockService.getScriptLock();
@@ -395,9 +509,10 @@ function initialSetup() {
     );
   }
 
+  dropPropertyCache();
+
   try {
-    const spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
+    const spreadsheet = getSpreadsheet();
 
     ensureSpreadsheetTimeZone(spreadsheet);
     ensureSystemLogSheet(spreadsheet);
@@ -466,31 +581,6 @@ function installMissingReadingTrigger() {
     .timeBased()
     .everyMinutes(MISSING_CHECK_INTERVAL_MINUTES)
     .create();
-}
-
-
-/*
- * Optional manual tool: immediately writes all queued errors to System Log.
- */
-function flushPendingLogsNow() {
-  const lock = LockService.getScriptLock();
-
-  if (!lock.tryLock(BACKGROUND_LOCK_WAIT_MS)) {
-    throw new Error(
-      'Could not acquire the spreadsheet lock to flush pending logs.'
-    );
-  }
-
-  try {
-    const spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
-
-    ensureSpreadsheetTimeZone(spreadsheet);
-    flushPendingLogs(spreadsheet);
-
-  } finally {
-    lock.releaseLock();
-  }
 }
 
 
@@ -624,9 +714,10 @@ function doPost(e) {
     });
   }
 
+  dropPropertyCache();
+
   try {
-    const spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
+    const spreadsheet = getSpreadsheet();
 
     ensureSpreadsheetTimeZone(spreadsheet);
 
@@ -849,9 +940,10 @@ function handleBatchPost(
   let lastTouchedSheet = null;
   let savedRowCount = 0;
 
+  dropPropertyCache();
+
   try {
-    spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
+    spreadsheet = getSpreadsheet();
 
     ensureSpreadsheetTimeZone(spreadsheet);
 
@@ -1386,8 +1478,8 @@ function getWineSheetState(
   const context =
     wineContexts[key] || {};
 
-  const lastAverageOutputDate =
-    getLastAverageOutputDate(sheet);
+  /* One backward scan answers everything this state needs about the tail. */
+  const tail = readSheetTail(sheet);
 
   const state = {
     wineName: wineName,
@@ -1400,7 +1492,7 @@ function getWineSheetState(
 
     /* Capture time of the newest row actually written to the sheet. */
     lastSavedCaptureDate:
-      getLastMeasurementDate(sheet),
+      tail.lastMeasurementDate,
 
     /*
      * Capture time of the previous reading seen in this request, saved or
@@ -1410,10 +1502,10 @@ function getWineSheetState(
     lastCaptureSeen: null,
 
     lastAverageOutputDate:
-      lastAverageOutputDate,
+      tail.lastAverageDate,
 
     firstMeasurementDate:
-      lastAverageOutputDate
+      tail.lastAverageDate
         ? null
         : getFirstMeasurementDate(sheet),
 
@@ -1422,10 +1514,25 @@ function getWineSheetState(
     /* Rows this request appended; drives the post-batch ordering check. */
     rowsAppended: 0,
 
+    /*
+     * Whether anything this request appended broke the sheet's chronological
+     * order. Only then is the sort after the batch worth its read of column A.
+     */
+    appendedOutOfOrder: false,
+
+    /*
+     * Whether the sheet currently ends in rows with no capture time, which is
+     * where sortWineSheetByCaptureTime() parks them. A timestamped row appended
+     * below one of those is out of order by construction.
+     */
+    hasTrailingUntimestampedRow:
+      tail.lastRow >= 3 &&
+      tail.lastMeasurementRow < tail.lastRow,
+
     /* Data rows start at row 3, below the title and the header. */
     nextRow: Math.max(
       3,
-      sheet.getLastRow() + 1
+      tail.lastRow + 1
     )
   };
 
@@ -1593,31 +1700,62 @@ function appendMeasurementRow(
       previousDayAverages.tempC;
   }
 
+  /*
+   * Does this row land out of chronological order?
+   *
+   * Two ways it can. Its capture time can be older than the newest row already
+   * in the sheet - the backlog case this whole path exists for - or the sheet
+   * can end in untimestamped rows, which sortWineSheetByCaptureTime() keeps
+   * parked at the bottom and which a timestamped row must not be appended
+   * below.
+   *
+   * Answered here, from what the append already knows, so that the sort after
+   * the batch can be skipped entirely when nothing moved. It used to read the
+   * whole of column A on every request that wrote a row, to check an ordering
+   * that in steady state is never violated, and that read grew with the
+   * fermentation.
+   */
+  if (
+    state.hasTrailingUntimestampedRow ||
+    (
+      state.lastSavedCaptureDate &&
+      captureDate.getTime() <
+        state.lastSavedCaptureDate.getTime()
+    )
+  ) {
+    state.appendedOutOfOrder = true;
+  }
+
   const newRow = state.nextRow;
 
   /*
    * Column A is the reading's own capture time, never the upload time.
    * new Date(CapturedAtUtc) already carries the correct instant, and Sheets
    * renders it in the spreadsheet timezone.
+   *
+   * One Range, reused. The fill is applied only when there is a fill to apply:
+   * this row is past the old last row, so it has no background to clear first,
+   * and the unconditional setBackground(null) that used to run here was a round
+   * trip per row that either did nothing or was overwritten three lines later.
    */
-  state.sheet
-    .getRange(newRow, 1, 1, DATA_COLUMN_COUNT)
-    .setValues([
-      buildMeasurementRowValues(
-        measurement,
-        captureDate,
-        averages
-      )
-    ]);
+  const rowRange =
+    state.sheet.getRange(
+      newRow,
+      1,
+      1,
+      DATA_COLUMN_COUNT
+    );
 
-  state.sheet
-    .getRange(newRow, 1, 1, DATA_COLUMN_COUNT)
-    .setBackground(null);
+  rowRange.setValues([
+    buildMeasurementRowValues(
+      measurement,
+      captureDate,
+      averages
+    )
+  ]);
 
   if (firstReadingOfDay) {
-    state.sheet
-      .getRange(newRow, 1, 1, DATA_COLUMN_COUNT)
-      .setBackground(NEW_DAY_COLOR);
+    rowRange.setBackground(NEW_DAY_COLOR);
   }
 
   if (hasIncomingDataGap) {
@@ -1745,9 +1883,12 @@ function appendUntimestampedRow(
       )
     ]);
 
-  state.sheet
-    .getRange(newRow, 1, 1, DATA_COLUMN_COUNT)
-    .setBackground(null);
+  /*
+   * The sheet now ends in an untimestamped row, so any timestamped row appended
+   * after it - in this batch or a later one - is out of order and has to be
+   * sorted back above it.
+   */
+  state.hasTrailingUntimestampedRow = true;
 
   const uptimeMs = toNumber(
     measurement.uptimeMsAtCapture
@@ -1919,21 +2060,18 @@ function noteDeviceChange(
     return;
   }
 
-  const properties =
-    PropertiesService.getScriptProperties();
-
   const key =
     WINE_DEVICE_PREFIX +
     state.sheet.getSheetId();
 
   const previousDeviceId =
-    properties.getProperty(key);
+    getProperty(key);
 
   if (previousDeviceId === deviceId) {
     return;
   }
 
-  properties.setProperty(key, deviceId);
+  setProperty(key, deviceId);
 
   /* First device ever seen for this wine: nothing changed, so nothing to say. */
   if (!previousDeviceId) {
@@ -1977,11 +2115,9 @@ function noteDeviceChange(
 /* The device currently associated with a wine sheet, or '' if none seen yet. */
 function getStoredDeviceId(sheet) {
   return (
-    PropertiesService
-      .getScriptProperties()
-      .getProperty(
-        WINE_DEVICE_PREFIX + sheet.getSheetId()
-      ) || ''
+    getProperty(
+      WINE_DEVICE_PREFIX + sheet.getSheetId()
+    ) || ''
   );
 }
 
@@ -2023,7 +2159,6 @@ function buildLegacyMeasurement(
     sg: sg,
     tempC: (tempF - 32) * 5 / 9,
     sgRaw: '',
-    sgSmoothed: '',
     rssi: '',
     rssiAvg: '',
     rssiMin: '',
@@ -2057,7 +2192,6 @@ function buildBatchMeasurement(
     sg: sg,
     tempC: (tempF - 32) * 5 / 9,
     sgRaw: toNumber(reading.SG_Raw),
-    sgSmoothed: toNumber(reading.SG_Smoothed),
     rssi: toNumber(reading.RSSI),
     rssiAvg: toNumber(reading.RSSI_Avg),
     rssiMin: toNumber(reading.RSSI_Min),
@@ -2286,6 +2420,11 @@ function hideProcessedIdSheet(sheet) {
 }
 
 
+/*
+ * The recent tail of the id store, not all of it. See
+ * PROCESSED_ID_LOOKBACK_ROWS: the retained rows are an audit trail, but only
+ * ids the device could still be holding can arrive again.
+ */
 function readProcessedIdSet(sheet) {
   const known = new Set();
 
@@ -2295,9 +2434,19 @@ function readProcessedIdSet(sheet) {
     return known;
   }
 
+  const firstRow = Math.max(
+    2,
+    lastRow - PROCESSED_ID_LOOKBACK_ROWS + 1
+  );
+
   const values =
     sheet
-      .getRange(2, 1, lastRow - 1, 1)
+      .getRange(
+        firstRow,
+        1,
+        lastRow - firstRow + 1,
+        1
+      )
       .getValues();
 
   for (let i = 0; i < values.length; i++) {
@@ -2407,9 +2556,10 @@ function checkForMissingReadings() {
     return;
   }
 
+  dropPropertyCache();
+
   try {
-    const spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
+    const spreadsheet = getSpreadsheet();
 
     ensureSpreadsheetTimeZone(spreadsheet);
     ensureMonitoringSheet(spreadsheet);
@@ -2528,15 +2678,12 @@ function handleMissingReading(
   minutesOld,
   now
 ) {
-  const properties =
-    PropertiesService.getScriptProperties();
-
   const key =
     getMissingStateKey(sheet);
 
   const previousState =
     parseJsonSafely(
-      properties.getProperty(key),
+      getProperty(key),
       {}
     );
 
@@ -2573,7 +2720,7 @@ function handleMissingReading(
     }
   );
 
-  properties.setProperty(
+  setProperty(
     key,
     JSON.stringify({
       active: true,
@@ -2589,15 +2736,12 @@ function handleReadingRecovery(
   wineName,
   now
 ) {
-  const properties =
-    PropertiesService.getScriptProperties();
-
   const key =
     getMissingStateKey(sheet);
 
   const previousState =
     parseJsonSafely(
-      properties.getProperty(key),
+      getProperty(key),
       {}
     );
 
@@ -2628,7 +2772,7 @@ function handleReadingRecovery(
     }
   );
 
-  properties.deleteProperty(key);
+  deleteProperty(key);
 }
 
 
@@ -2643,19 +2787,16 @@ function getMissingStateKey(sheet) {
 function ensureSpreadsheetTimeZone(
   spreadsheet
 ) {
-  const properties =
-    PropertiesService.getScriptProperties();
-
   const key =
     'spreadsheet-timezone-' +
     TIME_ZONE;
 
-  if (properties.getProperty(key) !== '1') {
+  if (getProperty(key) !== '1') {
     spreadsheet.setSpreadsheetTimeZone(
       TIME_ZONE
     );
 
-    properties.setProperty(key, '1');
+    setProperty(key, '1');
   }
 }
 
@@ -2664,26 +2805,21 @@ function ensureSheetPrepared(
   sheet,
   wineName
 ) {
-  const properties =
-    PropertiesService.getScriptProperties();
-
   const key =
     getSheetLayoutPropertyKey(sheet);
 
-  if (properties.getProperty(key) !== '1') {
+  if (getProperty(key) !== '1') {
     prepareSheet(sheet, wineName);
-    properties.setProperty(key, '1');
+    setProperty(key, '1');
   }
 }
 
 
 function markSheetPrepared(sheet) {
-  PropertiesService
-    .getScriptProperties()
-    .setProperty(
-      getSheetLayoutPropertyKey(sheet),
-      '1'
-    );
+  setProperty(
+    getSheetLayoutPropertyKey(sheet),
+    '1'
+  );
 }
 
 
@@ -2701,17 +2837,14 @@ function prepareSheet(
   sheet,
   wineName
 ) {
-  migrateLegacyLayoutIfNeeded(sheet);
-
   /*
-   * Remove any older title merge before applying this layout's. Widened to the
-   * sheet's own width, not the layout's, so a merge left over from a wider
-   * layout is fully broken apart before the narrower one is made.
+   * Break any existing title merge before making this one. Widened to the
+   * sheet's own width rather than the layout's, so that a merge left by a
+   * different layout width is fully broken apart first.
    */
-  const titleRange =
-    sheet.getRange(1, 1, 1, sheet.getMaxColumns());
-
-  titleRange.breakApart();
+  sheet
+    .getRange(1, 1, 1, sheet.getMaxColumns())
+    .breakApart();
 
   sheet
     .getRange(1, 1, 1, DATA_COLUMN_COUNT)
@@ -2725,38 +2858,35 @@ function prepareSheet(
     .setFontWeight('bold')
     .setHorizontalAlignment('center');
 
+  /*
+   * Header row in one write. Columns D and I are intentionally empty visual
+   * separators, so they get no fill and no bold - which is why the fills go on
+   * as a row rather than as one colour plus corrections afterwards.
+   *
+   * NO_FILL_COLOR rather than null: setBackgrounds() is documented as taking
+   * colour codes, and it is already what the rebuild writes into these same two
+   * columns on every data row, so the separator reads the same top to bottom.
+   */
+  const headerFills =
+    WINE_SHEET_HEADERS.map(function (header) {
+      return header === ''
+        ? NO_FILL_COLOR
+        : HEADER_COLOR;
+    });
+
+  const headerWeights =
+    WINE_SHEET_HEADERS.map(function (header) {
+      return header === ''
+        ? 'normal'
+        : 'bold';
+    });
+
   sheet
     .getRange(2, 1, 1, DATA_COLUMN_COUNT)
     .setValues([WINE_SHEET_HEADERS])
-    .setBackground(HEADER_COLOR)
-    .setFontWeight('bold')
+    .setBackgrounds([headerFills])
+    .setFontWeights([headerWeights])
     .setHorizontalAlignment('center');
-
-  /* Columns D and I are intentionally empty visual separators. */
-  sheet
-    .getRange('D:D')
-    .clearContent();
-
-  sheet
-    .getRange('I:I')
-    .clearContent();
-
-  sheet
-    .getRange('D2:I2')
-    .setBackground(null);
-
-  sheet
-    .getRange('D2')
-    .setFontWeight('normal');
-
-  sheet
-    .getRange('I2')
-    .setFontWeight('normal');
-
-  /* D2:I2 above also cleared the header fill on E..H; put it back. */
-  sheet
-    .getRange('E2:H2')
-    .setBackground(HEADER_COLOR);
 
   sheet.setFrozenRows(2);
 
@@ -3001,165 +3131,12 @@ function createOrRefreshCharts(
 }
 
 
-/*
- * Migration from ANY layout that is not the current one.
- *
- * CHOSEN APPROACH: preserve the three raw measurement columns, clear everything
- * else, and log loudly. Lossy by design, not a faithful migration.
- *
- * A, B and C are the only columns every layout this script has ever written
- * agrees on, and they are the only ones that cannot be recomputed. Everything
- * from D rightwards either is derived - E..I are rebuilt from the raw readings
- * as new rows arrive - or is diagnostic detail whose absence costs nothing.
- *
- * Why not "detect and refuse": prepareSheet() would then either leave stale
- * headers over reinterpreted columns, or append current-layout rows underneath
- * old ones. Both silently misalign the sheet, which is exactly the outcome to
- * avoid. A visibly reset sheet is better than a quietly wrong one.
- *
- * So the raw readings (A date, B SG, C °C) are kept, since every layout this
- * script has ever written stores them in those positions, everything from D
- * rightwards is cleared, and a WARNING records that a reset is the cleaner
- * option.
- */
-function migrateLegacyLayoutIfNeeded(sheet) {
-  const lastRow = sheet.getLastRow();
-
-  /* Empty or brand new sheet: prepareSheet() lays it out from scratch. */
-  if (lastRow < 2) {
-    return;
-  }
-
-  const headers =
-    sheet
-      .getRange(
-        2,
-        1,
-        1,
-        Math.min(
-          sheet.getMaxColumns(),
-          DATA_COLUMN_COUNT
-        )
-      )
-      .getDisplayValues()[0];
-
-  if (isCurrentWineLayout(headers)) {
-    return;
-  }
-
-  /* Header row only, no data to preserve or misalign. */
-  if (lastRow < 3) {
-    return;
-  }
-
-  /*
-   * The oldest layout this script ever wrote put °F in C and °C in D. Every
-   * later one has °C in C.
-   */
-  const celsiusColumnIndex =
-    String(headers[2]).indexOf('°F') !== -1 &&
-    String(headers[3]).indexOf('°C') !== -1
-      ? 3
-      : 2;
-
-  const rowCount = lastRow - 2;
-
-  const readColumnCount = Math.max(
-    celsiusColumnIndex + 1,
-    3
-  );
-
-  const oldData =
-    sheet
-      .getRange(3, 1, rowCount, readColumnCount)
-      .getValues();
-
-  const convertedData =
-    oldData.map(function (row) {
-      const values = [];
-
-      for (
-        let i = 0;
-        i < DATA_COLUMN_COUNT;
-        i++
-      ) {
-        values.push('');
-      }
-
-      values[0] = row[0];
-      values[1] = row[1];
-
-      values[2] =
-        row[celsiusColumnIndex] === undefined
-          ? ''
-          : row[celsiusColumnIndex];
-
-      return values;
-    });
-
-  sheet
-    .getRange(3, 1, rowCount, DATA_COLUMN_COUNT)
-    .clearContent();
-
-  sheet
-    .getRange(3, 1, rowCount, DATA_COLUMN_COUNT)
-    .setValues(convertedData);
-
-  /*
-   * Old quality and gap notes and fills referred to columns that no longer
-   * mean the same thing. Only A..C keep their meaning.
-   */
-  sheet
-    .getRange(
-      3,
-      4,
-      rowCount,
-      DATA_COLUMN_COUNT - 3
-    )
-    .setBackground(null)
-    .clearNote();
-
-  safeLogEvent(
-    'WARNING',
-    getWineNameFromSheet(sheet),
-    'LAYOUT_WIDENED',
-    'This sheet used an older column layout. Its capture times, SG and temperature were kept; all derived and diagnostic columns were cleared and will refill as new readings arrive. Deleting the sheet and letting TiltBridge recreate it gives a cleaner result.',
-    {
-      sheetName: sheet.getName(),
-      migratedRows: rowCount,
-      previousHeaders:
-        truncateText(headers.join(' | '), 500),
-      layoutVersion: LAYOUT_VERSION
-    }
-  );
-}
-
-
-function isCurrentWineLayout(headers) {
-  for (
-    let i = 0;
-    i < WINE_SHEET_HEADERS.length;
-    i++
-  ) {
-    if (
-      String(headers[i] || '').trim() !==
-      WINE_SHEET_HEADERS[i]
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 function getStoredLastIncomingReading(wineName) {
   const stored = Number(
-    PropertiesService
-      .getScriptProperties()
-      .getProperty(
-        'last-incoming-reading-' +
-        safePropertyPart(wineName)
-      ) ||
+    getProperty(
+      'last-incoming-reading-' +
+      safePropertyPart(wineName)
+    ) ||
     0
   );
 
@@ -3178,13 +3155,11 @@ function rememberIncomingReading(
   wineName,
   date
 ) {
-  PropertiesService
-    .getScriptProperties()
-    .setProperty(
-      'last-incoming-reading-' +
-      safePropertyPart(wineName),
-      String(date.getTime())
-    );
+  setProperty(
+    'last-incoming-reading-' +
+    safePropertyPart(wineName),
+    String(date.getTime())
+  );
 }
 
 
@@ -3359,11 +3334,93 @@ function getFirstMeasurementDate(sheet) {
 }
 
 
-function getLastAverageOutputDate(sheet) {
-  return getLastAverageOutputDateBefore(
-    sheet,
-    sheet.getLastRow() + 1
-  );
+/*
+ * The three facts getWineSheetState() needs about the end of a wine sheet, from
+ * one backward scan instead of three.
+ *
+ * They all live in the same rows, so reading columns A..F once and answering
+ * all of them together costs the same as answering any one of them did:
+ *
+ *   lastMeasurementRow/Date  newest row carrying a capture time, which is not
+ *                            necessarily the last row - untimestamped rows are
+ *                            parked below it
+ *   lastAverageDate          capture time of the newest four-hour average point,
+ *                            which is what the next average is spaced from
+ *   lastRow                  where the next append goes
+ *
+ * Chunked backwards with an early exit, like the scans it replaces: in the
+ * normal case both answers are in the last chunk and nothing else is read.
+ */
+function readSheetTail(sheet) {
+  const lastRow = sheet.getLastRow();
+
+  const tail = {
+    lastRow: lastRow,
+    lastMeasurementRow: 0,
+    lastMeasurementDate: null,
+    lastAverageDate: null
+  };
+
+  if (lastRow < 3) {
+    return tail;
+  }
+
+  const chunkSize = 500;
+  let endRow = lastRow;
+
+  while (endRow >= 3) {
+    const startRow = Math.max(
+      3,
+      endRow - chunkSize + 1
+    );
+
+    const values =
+      sheet
+        .getRange(
+          startRow,
+          1,
+          endRow - startRow + 1,
+          6
+        )
+        .getValues();
+
+    for (
+      let i = values.length - 1;
+      i >= 0;
+      i--
+    ) {
+      const time =
+        toSortableTime(values[i][0]);
+
+      /* No capture time: excluded from everything derived. */
+      if (time === null) {
+        continue;
+      }
+
+      if (tail.lastMeasurementDate === null) {
+        tail.lastMeasurementRow = startRow + i;
+        tail.lastMeasurementDate = new Date(time);
+      }
+
+      if (
+        tail.lastAverageDate === null &&
+        (
+          values[i][4] !== '' ||
+          values[i][5] !== ''
+        )
+      ) {
+        tail.lastAverageDate = new Date(time);
+      }
+
+      if (tail.lastAverageDate !== null) {
+        return tail;
+      }
+    }
+
+    endRow = startRow - 1;
+  }
+
+  return tail;
 }
 
 
@@ -3403,7 +3460,7 @@ function getLastAverageOutputDateBefore(
           startRow,
           1,
           endRow - startRow + 1,
-          7
+          6
         )
         .getValues();
 
@@ -3412,13 +3469,10 @@ function getLastAverageOutputDateBefore(
       i >= 0;
       i--
     ) {
-      const averageSG = values[i][4];
-      const averageTempC = values[i][5];
-
-      // Quality used to be a third cell tested here; it is a fill on these two now.
+      /* An average point is a row with something in E or F. */
       if (
-        averageSG === '' &&
-        averageTempC === ''
+        values[i][4] === '' &&
+        values[i][5] === ''
       ) {
         continue;
       }
@@ -3895,12 +3949,10 @@ function queuePendingLog(
       '-' +
       Utilities.getUuid();
 
-    PropertiesService
-      .getScriptProperties()
-      .setProperty(
-        key,
-        JSON.stringify(event)
-      );
+    setProperty(
+      key,
+      JSON.stringify(event)
+    );
 
     if (
       level === 'ERROR' ||
@@ -3926,23 +3978,15 @@ function queuePendingLog(
  * global script lock.
  */
 function flushPendingLogs(spreadsheet) {
-  const properties =
-    PropertiesService.getScriptProperties();
-
-  const allProperties =
-    properties.getProperties();
+  const properties = allProperties();
 
   const pending = [];
 
-  Object.keys(allProperties).forEach(function (key) {
-    if (
-      key.indexOf(PENDING_LOG_PREFIX) !== 0
-    ) {
-      return;
-    }
-
+  propertyKeysWithPrefix(
+    PENDING_LOG_PREFIX
+  ).forEach(function (key) {
     const event = parseJsonSafely(
-      allProperties[key],
+      properties[key],
       null
     );
 
@@ -3965,7 +4009,7 @@ function flushPendingLogs(spreadsheet) {
             propertyKey: key,
             storedValue:
               truncateText(
-                allProperties[key],
+                properties[key],
                 1500
               )
           }
@@ -4045,50 +4089,78 @@ function flushPendingLogs(spreadsheet) {
     );
 
   pending.forEach(function (item) {
-    properties.deleteProperty(item.key);
+    deleteProperty(item.key);
   });
 }
 
 
+/*
+ * The System Log tab, formatted once rather than on every event.
+ *
+ * This used to reapply the headers, the frozen row, the number format and six
+ * column widths every time it was called - and safeLogEvent() calls it per
+ * event, so a single DATA_GAP cost a dozen round trips to rewrite formatting
+ * that was already there. Now the layout is applied when the tab is created,
+ * and once more per FORMAT_VERSION so an existing tab still picks up a change.
+ */
 function ensureSystemLogSheet(spreadsheet) {
+  if (cachedSystemLogSheet) {
+    return cachedSystemLogSheet;
+  }
+
   let sheet =
     spreadsheet.getSheetByName(
       SYSTEM_LOG_SHEET
     );
 
+  let needsFormatting = false;
+
   if (!sheet) {
     sheet = spreadsheet.insertSheet(
       SYSTEM_LOG_SHEET
     );
+
+    needsFormatting = true;
+
+  } else if (
+    getProperty(SYSTEM_LOG_FORMAT_KEY) !== '1'
+  ) {
+    needsFormatting = true;
   }
 
-  sheet
-    .getRange('A1:F1')
-    .setValues([[
-      'Date and time',
-      'Level',
-      'Wine / component',
-      'Error code',
-      'Message',
-      'Technical details'
-    ]])
-    .setBackground(HEADER_COLOR)
-    .setFontWeight('bold');
+  if (needsFormatting) {
+    sheet
+      .getRange('A1:F1')
+      .setValues([[
+        'Date and time',
+        'Level',
+        'Wine / component',
+        'Error code',
+        'Message',
+        'Technical details'
+      ]])
+      .setBackground(HEADER_COLOR)
+      .setFontWeight('bold');
 
-  sheet.setFrozenRows(1);
+    sheet.setFrozenRows(1);
 
-  sheet
-    .getRange('A:A')
-    .setNumberFormat(
-      'dd.MM.yyyy HH:mm:ss'
-    );
+    sheet
+      .getRange('A:A')
+      .setNumberFormat(
+        'dd.MM.yyyy HH:mm:ss'
+      );
 
-  sheet.setColumnWidth(1, 175);
-  sheet.setColumnWidth(2, 90);
-  sheet.setColumnWidth(3, 180);
-  sheet.setColumnWidth(4, 210);
-  sheet.setColumnWidth(5, 420);
-  sheet.setColumnWidth(6, 500);
+    sheet.setColumnWidth(1, 175);
+    sheet.setColumnWidth(2, 90);
+    sheet.setColumnWidth(3, 180);
+    sheet.setColumnWidth(4, 210);
+    sheet.setColumnWidth(5, 420);
+    sheet.setColumnWidth(6, 500);
+
+    setProperty(SYSTEM_LOG_FORMAT_KEY, '1');
+  }
+
+  cachedSystemLogSheet = sheet;
 
   return sheet;
 }
@@ -4102,13 +4174,8 @@ function safeLogEvent(
   details
 ) {
   try {
-    const spreadsheet =
-      SpreadsheetApp.openById(
-        SPREADSHEET_ID
-      );
-
     const sheet =
-      ensureSystemLogSheet(spreadsheet);
+      ensureSystemLogSheet(getSpreadsheet());
 
     sheet.appendRow([
       new Date(),
@@ -4141,83 +4208,98 @@ function safeLogEvent(
 }
 
 
+/* Formatted once, for the same reason as ensureSystemLogSheet(). */
 function ensureMonitoringSheet(spreadsheet) {
+  if (cachedMonitoringSheet) {
+    return cachedMonitoringSheet;
+  }
+
   let sheet =
     spreadsheet.getSheetByName(
       MONITORING_SHEET
     );
 
+  let needsFormatting = false;
+
   if (!sheet) {
     sheet = spreadsheet.insertSheet(
       MONITORING_SHEET
     );
+
+    needsFormatting = true;
+
+  } else if (
+    getProperty(MONITORING_FORMAT_KEY) !== '1'
+  ) {
+    needsFormatting = true;
   }
 
-  sheet
-    .getRange('A1:I1')
-    .setValues([[
-      'Wine',
-      'Status',
-      'Last reading',
-      'Minutes since reading',
-      'Last SG',
-      'Last temperature °C',
-      'Last troubleshooting issue',
-      'Last checked',
-      /*
-       * The device column exists because the MAC left the wine sheets. This is
-       * the "mentioned once" home for it: one row per wine, always current.
-       */
-      'Device'
-    ]])
-    .setBackground(HEADER_COLOR)
-    .setFontWeight('bold');
+  if (needsFormatting) {
+    sheet
+      .getRange('A1:I1')
+      .setValues([[
+        'Wine',
+        'Status',
+        'Last reading',
+        'Minutes since reading',
+        'Last SG',
+        'Last temperature °C',
+        'Last troubleshooting issue',
+        'Last checked',
+        /*
+         * The device column exists because the MAC left the wine sheets. This
+         * is the "mentioned once" home for it: one row per wine, always
+         * current.
+         */
+        'Device'
+      ]])
+      .setBackground(HEADER_COLOR)
+      .setFontWeight('bold');
 
-  /* Clear the old ABV header if this sheet came from an earlier version. */
-  sheet
-    .getRange('J:J')
-    .clearContent()
-    .clearFormat();
+    sheet.setFrozenRows(1);
 
-  sheet.setFrozenRows(1);
+    sheet
+      .getRange('C:C')
+      .setNumberFormat(
+        'dd.MM.yyyy HH:mm:ss'
+      );
 
-  sheet
-    .getRange('C:C')
-    .setNumberFormat(
-      'dd.MM.yyyy HH:mm:ss'
-    );
+    sheet
+      .getRange('D:D')
+      .setNumberFormat('0');
 
-  sheet
-    .getRange('D:D')
-    .setNumberFormat('0');
+    sheet
+      .getRange('E:E')
+      .setNumberFormat('0.0000');
 
-  sheet
-    .getRange('E:E')
-    .setNumberFormat('0.0000');
+    sheet
+      .getRange('F:F')
+      .setNumberFormat('0.0');
 
-  sheet
-    .getRange('F:F')
-    .setNumberFormat('0.0');
+    sheet
+      .getRange('H:H')
+      .setNumberFormat(
+        'dd.MM.yyyy HH:mm:ss'
+      );
 
-  sheet
-    .getRange('H:H')
-    .setNumberFormat(
-      'dd.MM.yyyy HH:mm:ss'
-    );
+    sheet
+      .getRange('I:I')
+      .setNumberFormat('@');
 
-  sheet
-    .getRange('I:I')
-    .setNumberFormat('@');
+    sheet.setColumnWidth(1, 180);
+    sheet.setColumnWidth(2, 100);
+    sheet.setColumnWidth(3, 175);
+    sheet.setColumnWidth(4, 150);
+    sheet.setColumnWidth(5, 90);
+    sheet.setColumnWidth(6, 145);
+    sheet.setColumnWidth(7, 500);
+    sheet.setColumnWidth(8, 175);
+    sheet.setColumnWidth(9, 155);
 
-  sheet.setColumnWidth(1, 180);
-  sheet.setColumnWidth(2, 100);
-  sheet.setColumnWidth(3, 175);
-  sheet.setColumnWidth(4, 150);
-  sheet.setColumnWidth(5, 90);
-  sheet.setColumnWidth(6, 145);
-  sheet.setColumnWidth(7, 500);
-  sheet.setColumnWidth(8, 175);
-  sheet.setColumnWidth(9, 155);
+    setProperty(MONITORING_FORMAT_KEY, '1');
+  }
+
+  cachedMonitoringSheet = sheet;
 
   return sheet;
 }
@@ -4233,6 +4315,11 @@ function writeMonitoringRows(
   const existingRows =
     Math.max(0, sheet.getLastRow() - 1);
 
+  /*
+   * Content and status fill go; the number formats stay. They are set per
+   * column by ensureMonitoringSheet() and survive, so clearFormat() here only
+   * destroyed them and forced five setNumberFormat() calls to put them back.
+   */
   if (existingRows > 0) {
     sheet
       .getRange(
@@ -4242,7 +4329,7 @@ function writeMonitoringRows(
         MONITORING_COLUMN_COUNT
       )
       .clearContent()
-      .clearFormat();
+      .setBackground(null);
   }
 
   if (rows.length === 0) {
@@ -4258,30 +4345,6 @@ function writeMonitoringRows(
   sheet
     .getRange(2, 1, rows.length, MONITORING_COLUMN_COUNT)
     .setValues(rows);
-
-  sheet
-    .getRange(2, 3, rows.length, 1)
-    .setNumberFormat(
-      'dd.MM.yyyy HH:mm:ss'
-    );
-
-  sheet
-    .getRange(2, 4, rows.length, 1)
-    .setNumberFormat('0');
-
-  sheet
-    .getRange(2, 5, rows.length, 1)
-    .setNumberFormat('0.0000');
-
-  sheet
-    .getRange(2, 6, rows.length, 1)
-    .setNumberFormat('0.0');
-
-  sheet
-    .getRange(2, 8, rows.length, 1)
-    .setNumberFormat(
-      'dd.MM.yyyy HH:mm:ss'
-    );
 
   const backgrounds =
     rows.map(function (row) {
@@ -4307,24 +4370,20 @@ function setLastIssue(
   wineName,
   issue
 ) {
-  PropertiesService
-    .getScriptProperties()
-    .setProperty(
-      'last-issue-' +
-      safePropertyPart(wineName),
-      truncateText(issue, 1000)
-    );
+  setProperty(
+    'last-issue-' +
+    safePropertyPart(wineName),
+    truncateText(issue, 1000)
+  );
 }
 
 
 function getLastIssue(wineName) {
   return (
-    PropertiesService
-      .getScriptProperties()
-      .getProperty(
-        'last-issue-' +
-        safePropertyPart(wineName)
-      ) ||
+    getProperty(
+      'last-issue-' +
+      safePropertyPart(wineName)
+    ) ||
     ''
   );
 }
@@ -4542,6 +4601,16 @@ function sortAppendedSheets(
     const state = sheetStates[key];
 
     if (state.rowsAppended === 0) {
+      return;
+    }
+
+    /*
+     * Nothing this request wrote landed out of order, so the sheet is still
+     * ascending and the sort would read the whole of column A only to conclude
+     * that. appendMeasurementRow() decides this per row, from the capture times
+     * it already has - see appendedOutOfOrder there.
+     */
+    if (!state.appendedOutOfOrder) {
       return;
     }
 
@@ -5737,11 +5806,9 @@ function getPendingRebuildKey(sheetName) {
 
 function readPendingRebuild(sheetName) {
   const stored =
-    PropertiesService
-      .getScriptProperties()
-      .getProperty(
-        getPendingRebuildKey(sheetName)
-      );
+    getProperty(
+      getPendingRebuildKey(sheetName)
+    );
 
   const parsed =
     parseJsonSafely(stored, null);
@@ -5767,25 +5834,21 @@ function writePendingRebuild(
   wineName,
   fromTime
 ) {
-  PropertiesService
-    .getScriptProperties()
-    .setProperty(
-      getPendingRebuildKey(sheetName),
-      JSON.stringify({
-        sheetName: sheetName,
-        wineName: wineName,
-        fromTime: Number(fromTime)
-      })
-    );
+  setProperty(
+    getPendingRebuildKey(sheetName),
+    JSON.stringify({
+      sheetName: sheetName,
+      wineName: wineName,
+      fromTime: Number(fromTime)
+    })
+  );
 }
 
 
 function deletePendingRebuild(sheetName) {
-  PropertiesService
-    .getScriptProperties()
-    .deleteProperty(
-      getPendingRebuildKey(sheetName)
-    );
+  deleteProperty(
+    getPendingRebuildKey(sheetName)
+  );
 }
 
 
@@ -5852,9 +5915,6 @@ function resolvePendingRebuild(
  * Returns the number of rebuild passes it ran.
  */
 function flushPendingRebuilds(spreadsheet) {
-  const properties =
-    PropertiesService.getScriptProperties();
-
   const startedAt = Date.now();
 
   let passCount = 0;
@@ -5865,15 +5925,9 @@ function flushPendingRebuilds(spreadsheet) {
     round++
   ) {
     const keys =
-      properties
-        .getKeys()
-        .filter(function (key) {
-          return (
-            key.indexOf(
-              PENDING_REBUILD_PREFIX
-            ) === 0
-          );
-        });
+      propertyKeysWithPrefix(
+        PENDING_REBUILD_PREFIX
+      );
 
     if (keys.length === 0) {
       return passCount;
@@ -5898,7 +5952,7 @@ function flushPendingRebuilds(spreadsheet) {
         readPendingRebuild(sheetName);
 
       if (!pending) {
-        properties.deleteProperty(keys[i]);
+        deleteProperty(keys[i]);
         continue;
       }
 
@@ -5940,98 +5994,4 @@ function flushPendingRebuilds(spreadsheet) {
   }
 
   return passCount;
-}
-
-
-/*
- * Optional manual tool: recompute every derived value on every wine sheet,
- * from its first reading onwards.
- *
- * Run this once after pasting this version of the script. Sheets written by
- * the previous version still carry four-hour averages and quality marks that
- * were computed before the offline queue delivered the readings they were
- * missing - an 'INCOMPLETE — 1h 30m gap' over a window that is now complete.
- * Nothing else clears those, because nothing else revisits a row once it is
- * written.
- *
- * Safe to run at any time and safe to run twice: it only ever rewrites derived
- * values, and only when recomputing them produces something different.
- *
- * A long history may need more than one run. Whatever a run cannot finish
- * inside its budget stays queued and the fifteen-minute background check
- * carries on with it, so a second run is a convenience, not a requirement.
- */
-function rebuildAllDerivedColumns() {
-  const lock = LockService.getScriptLock();
-
-  if (!lock.tryLock(BACKGROUND_LOCK_WAIT_MS)) {
-    throw new Error(
-      'Could not acquire the spreadsheet lock to rebuild derived columns.'
-    );
-  }
-
-  try {
-    const spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
-
-    ensureSpreadsheetTimeZone(spreadsheet);
-    ensureSystemLogSheet(spreadsheet);
-    flushPendingLogs(spreadsheet);
-
-    let queuedSheets = 0;
-
-    spreadsheet.getSheets().forEach(function (sheet) {
-      if (!isWineSheet(sheet)) {
-        return;
-      }
-
-      const firstDate =
-        getFirstMeasurementDate(sheet);
-
-      if (!firstDate) {
-        return;
-      }
-
-      writePendingRebuild(
-        sheet.getName(),
-        getWineNameFromSheet(sheet),
-        firstDate.getTime()
-      );
-
-      queuedSheets++;
-    });
-
-    const passCount =
-      flushPendingRebuilds(spreadsheet);
-
-    const remaining =
-      PropertiesService
-        .getScriptProperties()
-        .getKeys()
-        .filter(function (key) {
-          return (
-            key.indexOf(
-              PENDING_REBUILD_PREFIX
-            ) === 0
-          );
-        })
-        .length;
-
-    safeLogEvent(
-      'INFO',
-      'System',
-      'FULL_REBUILD_RUN',
-      'A full rebuild of the derived columns was run manually.',
-      {
-        sheetsQueued: queuedSheets,
-        rebuildPasses: passCount,
-        sheetsStillPending: remaining,
-        rowsPerPass:
-          REBUILD_MAX_ROWS_PER_BACKGROUND_PASS
-      }
-    );
-
-  } finally {
-    lock.releaseLock();
-  }
 }
