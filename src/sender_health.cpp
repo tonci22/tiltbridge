@@ -215,6 +215,10 @@ void SenderHealthMonitor::loadRecoveryRecord() {
         rtc_recovery_record.magic = 0;
         rtc_recovery_record.reason = RECOVERY_NONE;
 
+        // The durable copy has now been reported too. Without this it would be re-read on
+        // every later boot and the UI would show the same recovery for ever.
+        markStoredRecoverySurfaced();
+
         Log.warning("Previous boot ended in sender recovery: reason %u, heartbeat age %u ms, target %d\r\n",
                     (unsigned)m_lastRecovery.reason,
                     (unsigned)m_lastRecovery.heartbeatAgeMs,
@@ -222,18 +226,52 @@ void SenderHealthMonitor::loadRecoveryRecord() {
         return;
     }
 
-    // Nothing in RTC memory (power cycle). Fall back to the NVS copy, which survives
-    // power loss, so the cause is still visible after the user pulls the plug.
+    /*
+     * Nothing in RTC memory (power cycle). Fall back to the NVS copy, which survives power
+     * loss so the cause is still visible after the user pulls the plug - but only until it
+     * has been shown once. `surfaced` is what stops it becoming permanent.
+     *
+     * A blob written before `surfaced` existed is a different size, so the length check
+     * below rejects it and any recovery recorded by older firmware is quietly dropped.
+     * That is the intended migration: those records are historical and have, by
+     * definition, already been on screen.
+     */
     nvs_handle_t h;
     if (nvs_open(NVS_RECOVERY_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
         RecoveryRecord stored{};
         size_t len = sizeof(stored);
         if (nvs_get_blob(h, NVS_RECOVERY_KEY, &stored, &len) == ESP_OK &&
-            len == sizeof(stored) && stored.magic == RECOVERY_RECORD_MAGIC) {
+            len == sizeof(stored) && stored.magic == RECOVERY_RECORD_MAGIC &&
+            stored.surfaced == 0) {
             m_lastRecovery = stored;
+            markStoredRecoverySurfaced();
         }
         nvs_close(h);
     }
+}
+
+/*
+ * Mark the persisted recovery as reported, leaving everything else about it intact so the
+ * record is still there to be read by anything that wants the history.
+ *
+ * Read-modify-write rather than an erase: the event itself is worth keeping, it just must
+ * not be presented as news twice.
+ */
+void SenderHealthMonitor::markStoredRecoverySurfaced() {
+    nvs_handle_t h;
+    if (nvs_open(NVS_RECOVERY_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return;
+
+    RecoveryRecord stored{};
+    size_t len = sizeof(stored);
+    if (nvs_get_blob(h, NVS_RECOVERY_KEY, &stored, &len) == ESP_OK &&
+        len == sizeof(stored) && stored.magic == RECOVERY_RECORD_MAGIC &&
+        stored.surfaced == 0) {
+        stored.surfaced = 1;
+        nvs_set_blob(h, NVS_RECOVERY_KEY, &stored, sizeof(stored));
+        nvs_commit(h);
+    }
+    nvs_close(h);
 }
 
 void SenderHealthMonitor::persistRecoveryRecord(RecoveryReason reason) {

@@ -32,6 +32,18 @@ struct RecoveryRecord {
     uint32_t lockAgeMs;
     int32_t  currentTarget;
     uint32_t uptimeSecAtReboot;
+
+    /*
+     * Whether this recovery has already been reported to the UI.
+     *
+     * The RTC copy is consumed when it is read, so it reports for one boot. The NVS copy
+     * had no equivalent, so every later boot fell through to it and re-reported the same
+     * event forever - a device that recovered once showed the banner for good. This flag
+     * gives the durable copy the same one-shot behaviour without giving up the reason it
+     * is durable: it must survive a power cycle so the cause is still visible after the
+     * user pulls the plug.
+     */
+    uint32_t surfaced;
 };
 
 // Snapshot of everything the sender exposes. Times are ms since boot; 0 means "never".
@@ -95,6 +107,7 @@ public:
 
 private:
     void persistRecoveryRecord(RecoveryReason reason);
+    void markStoredRecoverySurfaced();
     void triggerRecovery(RecoveryReason reason);
 
     SemaphoreHandle_t m_lock = nullptr;

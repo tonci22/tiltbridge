@@ -133,12 +133,50 @@ Reproducing it: `PLATFORMIO_BUILD_FLAGS="-D TB_DEBUG_FREEZE=1" pio run -e esp32_
 `POST /api/actions/ {"action":"debugFreezeSender"}`. **Reflash the normal build afterwards** and
 confirm the hook is gone — that action must return HTTP 400 in a production build.
 
-### 9. `sprintf` into a tight buffer in MQTT
+### 9. FIXED — one recovery reboot showed its banner in the UI for ever
+
+`src/sender_health.cpp`, `loadRecoveryRecord()`. The recovery record is stored twice, and
+only one copy was ever consumed:
+
+```cpp
+if (rtc_recovery_record.magic == RECOVERY_RECORD_MAGIC) {
+    m_lastRecovery = rtc_recovery_record;
+    // Consume it so the UI reports it for this boot only.
+    rtc_recovery_record.magic = 0;          // <- cleared
+    ...
+    return;
+}
+// Nothing in RTC memory (power cycle). Fall back to the NVS copy...
+    m_lastRecovery = stored;                // <- never cleared
+```
+
+The RTC copy behaves exactly as its comment says. The NVS copy, added underneath for the
+good reason that it survives a power cycle, had no matching step — so every later boot fell
+through to it and re-reported the same event. A device that recovered once told you so for
+the rest of its life, and the comment's promise of "this boot only" was quietly false.
+
+Mistaken for a reboot loop, which is the real cost: the device was healthy
+(`staleEvents: 0`, `bootCount` never past 1) and the banner said otherwise. The event being
+reported was the deliberate `TB_DEBUG_FREEZE` verification in issue 8 — the reported
+`heartbeatAgeMs: 90662`, `uptimeSecAtReboot: 285`, `bootCount: 1` are that test's numbers
+exactly.
+
+Fixed with a `surfaced` flag on the persisted record: reported while clear, then set and
+written back, so the durable copy is shown on exactly one boot no matter which path finds
+it and still survives a power cycle until it has actually been seen. Erasing the key
+outright would have been simpler but breaks the case the key exists for — a recovery
+followed by power loss before anyone looked.
+
+The flag changes `sizeof(RecoveryRecord)`, so the existing length check rejects blobs
+written by older firmware. That is the intended migration: those records are historical and
+have by definition already been on screen.
+
+### 10. `sprintf` into a tight buffer in MQTT
 
 `src/targets/mqtt.cpp` builds `m_topic[90]` with unbounded `sprintf`. Worst case is 82 bytes,
 so it is safe only because `mqttTopic` is capped at 31 in `jsonconfig.h`. Should be `snprintf`.
 
-### 10. Log lines are not atomic — fix committed, effect unproven
+### 11. Log lines are not atomic — fix committed, effect unproven
 
 ThorLog emits a message as one `printf()` per character into the single process-wide,
 line-buffered `stdout` shared by every task, so another task can interleave between any two
@@ -155,7 +193,7 @@ steady state. See dead end #1 below for what the apparent corruption actually wa
 
 ## Firmware — unexplained
 
-### 11. A 30-minute gap after changing the Google Sheets interval
+### 12. A 30-minute gap after changing the Google Sheets interval
 
 Observed once, in the sheet, after a 10 → 15 minute change:
 
@@ -188,7 +226,7 @@ google_sheets backing off to 1800s after N consecutive failures.
 
 ## Google Apps Script — `GoogleSheets/post_tilt.gs`
 
-### 12. Upload latency is ~50 Sheets round trips per request
+### 13. Upload latency is ~50 Sheets round trips per request
 
 Measured by splitting each upload at the 302 across 52 requests:
 
@@ -249,7 +287,7 @@ A reconnect loop that sets the lines explicitly reboots the device on every retr
 
 Every send timer is one-shot and re-armed **after** its upload finishes, so its real period
 was `interval + upload duration`. For Google Sheets the upload is ~14–20 s, almost all of it
-Apps Script's own execution (issue 12), so a 10-minute push actually landed every ~10m20s and
+Apps Script's own execution (issue 13), so a 10-minute push actually landed every ~10m20s and
 walked a full hour around the clock in about 25 days. It showed up in the sheet's own
 timestamps because column A is the capture time, taken as the batch is built.
 
