@@ -288,7 +288,7 @@ Three capture artifacts that are NOT device faults, all documented with evidence
 - A burst of thousands of duplicated lines in one second only ever happens on port reopen. It
   exceeds what 115200 baud can carry, so it cannot be live output. Steady state is ~4 B/s.
 - Log lines spliced together mid-word were a real firmware issue and are fixed, but the
-  fix is unverified in the only place it was ever observed (boot). See KNOWN_ISSUES.md #11. The boot log is the fastest
+  fix is unverified in the only place it was ever observed (boot). See KNOWN_ISSUES.md #12. The boot log is the fastest
 way to identify a board: it prints the partition table, `Project name`, `App version`, the
 compile time, and which subsystems came up.
 

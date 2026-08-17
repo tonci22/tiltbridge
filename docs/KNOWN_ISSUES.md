@@ -171,12 +171,61 @@ The flag changes `sizeof(RecoveryRecord)`, so the existing length check rejects 
 written by older firmware. That is the intended migration: those records are historical and
 have by definition already been on screen.
 
-### 10. `sprintf` into a tight buffer in MQTT
+### 10. FIXED — a reconnect loop that could not end, because the retry failed *because* the device was connected
+
+Observed live on 2026-08-16 for over four hours. `src/wifi_setup.cpp`.
+
+```
+W wifi:sta is connected, disconnect before connecting to new ap
+W wifi_cfg_net: Failed to connect to Pension LOVRIC, retry #/#
+W wifi_cfg_net: Failed to connect to any network
+I: WiFi connecting to Pension LOVRIC          <- ten seconds later, again
+```
+
+1. `wifi_cfg_is_connected()` reports false while the STA is genuinely associated
+2. `reconnectWiFi()` gated only on that flag, so it called `wifi_cfg_connect()` every 10 s
+3. `esp_wifi` **refuses** — "sta is connected, disconnect before connecting to new ap"
+4. `wifi_cfg` records the refusal as a failed connection → "failed to connect to any network"
+5. that failure keeps its state machine convinced it is disconnected → back to 1
+
+Self-sustaining, and nothing in it can end on its own. Measured at **~97 disagreements per
+second, sustained for four hours** (`wifiFlagDisagreements` in `/api/sender/`, which is the
+counter to watch — it is the signature of the manager having desynchronised from the driver).
+
+What it cost while running: the provisioning AP raised (~11 KB of heap and an open AP),
+`/api/wifi/status` reporting an empty SSID and IP, HTTP dropping out for 30–60 s at a time,
+TLS handshakes stretching from ~8 s to ~23 s, and Google Sheets uploads failing with
+`SEND_ERR_CONNECTION_FAILED` — all while the link itself was fine and ping ran at 0% loss.
+
+**Nothing was lost.** `network_is_usable()` consults the interface rather than the manager,
+so every send kept being attempted, and the offline queue absorbed the ones that failed:
+two full outage-and-recovery cycles, queue peaking at 8, `droppedOverflow` 0. That
+defensive check is load-bearing, not belt-and-braces.
+
+Fixed in three parts:
+
+- `sta_link_is_up()` factors out the interface check, and `reconnectWiFi()` returns early
+  when the STA is actually up — no request, so no refusal, so nothing to misread. This
+  prevents the state being entered.
+- once the manager has disagreed for `WIFI_MANAGER_RESYNC_AFTER_MS` (5 min), the
+  association is dropped once, rate limited by `WIFI_MANAGER_RESYNC_COOLDOWN_MS`, forcing
+  its state machine to re-derive from reality. This recovers a device already in it.
+- the `WIFI_CFG_EVT_DISCONNECTED` subscription is restored, rate limited so it cannot
+  storm — it fires per failed *attempt*, not per outage, which is why it was commented out.
+
+Verified on hardware: `wifiFlagDisagreements` frozen at 5845 across two hours, having been
+climbing at 97/s before.
+
+**The root cause was physical.** RSSI was −91 dBm when this was diagnosed and −44 dBm once
+the path improved, at which point the reconnects — and everything downstream — stopped. The
+firmware fixes make a marginal link survivable; they do not make it good. Check RSSI first.
+
+### 11. `sprintf` into a tight buffer in MQTT
 
 `src/targets/mqtt.cpp` builds `m_topic[90]` with unbounded `sprintf`. Worst case is 82 bytes,
 so it is safe only because `mqttTopic` is capped at 31 in `jsonconfig.h`. Should be `snprintf`.
 
-### 11. Log lines are not atomic — fix committed, effect unproven
+### 12. Log lines are not atomic — fix committed, effect unproven
 
 ThorLog emits a message as one `printf()` per character into the single process-wide,
 line-buffered `stdout` shared by every task, so another task can interleave between any two
@@ -193,7 +242,7 @@ steady state. See dead end #1 below for what the apparent corruption actually wa
 
 ## Firmware — unexplained
 
-### 12. A 30-minute gap after changing the Google Sheets interval
+### 13. A 30-minute gap after changing the Google Sheets interval
 
 Observed once, in the sheet, after a 10 → 15 minute change:
 
@@ -226,7 +275,7 @@ google_sheets backing off to 1800s after N consecutive failures.
 
 ## Google Apps Script — `GoogleSheets/post_tilt.gs`
 
-### 13. Upload latency is ~50 Sheets round trips per request
+### 14. Upload latency is ~50 Sheets round trips per request
 
 Measured by splitting each upload at the 302 across 52 requests:
 
@@ -287,7 +336,7 @@ A reconnect loop that sets the lines explicitly reboots the device on every retr
 
 Every send timer is one-shot and re-armed **after** its upload finishes, so its real period
 was `interval + upload duration`. For Google Sheets the upload is ~14–20 s, almost all of it
-Apps Script's own execution (issue 13), so a 10-minute push actually landed every ~10m20s and
+Apps Script's own execution (issue 14), so a 10-minute push actually landed every ~10m20s and
 walked a full hour around the clock in about 25 days. It showed up in the sheet's own
 timestamps because column A is the capture time, taken as the batch is built.
 

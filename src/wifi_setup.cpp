@@ -30,6 +30,27 @@
 // Used to determine appropriate LCD display: success screen (initial) vs logo (reconnection).
 static bool wifi_was_disconnected = false;
 
+/*
+ * Disconnect bookkeeping.
+ *
+ * WIFI_CFG_EVT_DISCONNECTED fires on every failed reconnect ATTEMPT, not once per outage,
+ * so an access point that is simply gone produces an event every few seconds for as long
+ * as it stays gone. The handler used to log and redraw the LCD on every one of those,
+ * which is why its subscription was commented out - and with it disabled nothing ever set
+ * wifi_was_disconnected, so a dropout produced no log line at all AND the reconnect branch
+ * in on_wifi_got_ip() never ran, leaving mDNS unregistered after every reconnect.
+ *
+ * Restored, bounded to: one line when an outage starts, one more whenever the reason code
+ * changes (the part actually worth seeing), otherwise at most one per interval below, and
+ * one line on recovery saying how long it took and how many attempts it cost.
+ */
+#define WIFI_DISCONNECT_LOG_INTERVAL_MS 60000
+
+static uint32_t wifi_disconnect_events = 0;
+static uint32_t wifi_disconnect_first_ms = 0;
+static uint32_t wifi_disconnect_last_log_ms = 0;
+static int32_t  wifi_disconnect_last_reason = -1;
+
 // Event callback for WiFi connecting (attempting to connect to a network)
 static void on_wifi_connecting(const char *event, const void *data, size_t len, void *ctx) {
     if (data == nullptr || len == 0) {
@@ -77,11 +98,20 @@ static void on_wifi_got_ip(const char *event, const void *data, size_t len, void
         Log.notice("WiFi got IP: %s\r\n", status.ip);
 
         if (wifi_was_disconnected) {
-            // This is a reconnection after a disconnect
-            Log.notice("Reconnected to WiFi after disconnect\r\n");
+            // This is a reconnection after a disconnect. How long it took and how many
+            // attempts it cost is the whole diagnostic value of the pair of log lines.
+            const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+            Log.notice("Reconnected to WiFi after %u s and %u disconnect event(s)\r\n",
+                       (unsigned)((now - wifi_disconnect_first_ms) / 1000),
+                       (unsigned)wifi_disconnect_events);
+
             mdnsReset();  // Re-establish mDNS services
             lcd.display_logo();
+
             wifi_was_disconnected = false;
+            wifi_disconnect_events = 0;
+            wifi_disconnect_last_reason = -1;
+            wifi_disconnect_last_log_ms = 0;
         } else {
             // Initial connection - display success screen with access URLs
             char mdns_url[50] = "http://";
@@ -97,18 +127,41 @@ static void on_wifi_got_ip(const char *event, const void *data, size_t len, void
     }
 }
 
-// Event callback for WiFi disconnected
+// Event callback for WiFi disconnected. Rate limited - see the counters above.
 static void on_wifi_disconnected(const char *event, const void *data, size_t len, void *ctx) {
     if (data == nullptr || len < sizeof(wifi_disconnected_t)) {
         Log.warning("WiFi disconnected event received with invalid payload\r\n");
         return;
     }
     const wifi_disconnected_t *info = (const wifi_disconnected_t *)data;
-    Log.warning("WiFi disconnected from %s, reason: %d. Auto-reconnect in progress.\r\n", info->ssid, info->reason);
+    const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    const bool firstOfOutage = !wifi_was_disconnected;
 
-    // Update state and LCD/UI to show the disconnected state
-    wifi_was_disconnected = true;
-    lcd.display_wifi_disconnected_screen();
+    if (firstOfOutage) {
+        wifi_was_disconnected = true;
+        wifi_disconnect_events = 0;
+        wifi_disconnect_first_ms = now;
+
+        // Once per outage, not once per reconnect attempt.
+        lcd.display_wifi_disconnected_screen();
+    }
+
+    wifi_disconnect_events++;
+
+    const bool reasonChanged = (int32_t)info->reason != wifi_disconnect_last_reason;
+    const bool dueAgain = (now - wifi_disconnect_last_log_ms) >= WIFI_DISCONNECT_LOG_INTERVAL_MS;
+
+    if (firstOfOutage || reasonChanged || dueAgain) {
+        Log.warning("WiFi disconnected from %s, reason %d%s. Auto-reconnect in progress; "
+                    "%u attempt(s) over %u s. Readings keep queueing to flash meanwhile.\r\n",
+                    info->ssid, (int)info->reason,
+                    (reasonChanged && !firstOfOutage) ? " (changed)" : "",
+                    (unsigned)wifi_disconnect_events,
+                    (unsigned)((now - wifi_disconnect_first_ms) / 1000));
+        wifi_disconnect_last_log_ms = now;
+    }
+
+    wifi_disconnect_last_reason = (int32_t)info->reason;
 }
 
 // Event callback for AP started
@@ -181,7 +234,7 @@ void initWiFi() {
     esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_CONNECTING), on_wifi_connecting, NULL);
     esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_CONNECTED), on_wifi_connected, NULL);
     esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_GOT_IP), on_wifi_got_ip, NULL);
-    // esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_DISCONNECTED), on_wifi_disconnected, NULL);
+    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_DISCONNECTED), on_wifi_disconnected, NULL);
     esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_AP_START), on_wifi_ap_started, NULL);
     esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_VAR_CHANGED), on_var_changed, NULL);
     esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_PROVISIONING_STOPPED), on_provisioning_stopped, NULL);
@@ -260,6 +313,36 @@ void initWiFi() {
     initMDNS();
 }
 
+/*
+ * How long wifi_cfg may insist it is disconnected, while the interface is demonstrably up
+ * and holding a lease, before we force it to look again - and how long to wait before
+ * trying that a second time.
+ *
+ * Five minutes because a brief disagreement is normal while the manager processes its own
+ * reconnect; four hours is not. The cooldown exists so a manager that cannot be resynced
+ * costs one short outage per quarter hour rather than a permanent one.
+ */
+#define WIFI_MANAGER_RESYNC_AFTER_MS    300000
+#define WIFI_MANAGER_RESYNC_COOLDOWN_MS 900000
+
+static uint32_t wifi_disagree_since_ms = 0;
+static uint32_t wifi_last_resync_ms = 0;
+
+/*
+ * The link as the IP stack sees it, independent of what the WiFi manager believes.
+ *
+ * Shared by network_is_usable() and reconnectWiFi(), and deliberately free of the
+ * disagreement counter so the latter can consult it without inflating a diagnostic.
+ */
+static bool sta_link_is_up() {
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif == nullptr || !esp_netif_is_netif_up(netif))
+        return false;
+
+    esp_netif_ip_info_t ip = {};
+    return esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
+}
+
 // Check WiFi connectivity and trigger reconnect if needed.
 // Called from the main loop to ensure the manager's auto-reconnect is engaged.
 //
@@ -269,13 +352,78 @@ void initWiFi() {
 // spurious connect calls per minute against the WiFi manager.
 void reconnectWiFi() {
     static uint32_t lastAttemptMs = 0;
+    const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
     if (wifi_cfg_is_connected()) {
         lastAttemptMs = 0;
+        wifi_disagree_since_ms = 0;
         return;
     }
 
-    const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    /*
+     * The manager says down. If the STA is actually associated and holds a lease, asking
+     * it to connect is not merely useless, it is harmful, and it forms a loop that cannot
+     * end on its own:
+     *
+     *   esp_wifi rejects the request - "sta is connected, disconnect before connecting to
+     *   new ap" - wifi_cfg records that refusal as a failed connection, the failure keeps
+     *   its state machine convinced it is disconnected, so ten seconds later it asks
+     *   again. Forever.
+     *
+     * Observed on hardware for over an hour: ~96 flag disagreements a second, the
+     * provisioning AP raised, mDNS unregistered, HTTP dropping out for 30-60 s at a time
+     * and Google Sheets uploads failing with SEND_ERR_CONNECTION_FAILED - all while the
+     * link itself was fine and ping ran at 0% loss.
+     *
+     * Trusting the interface over the manager here is the same judgement
+     * network_is_usable() already makes, and for the same reason.
+     */
+    if (sta_link_is_up()) {
+        lastAttemptMs = 0;
+
+        if (wifi_disagree_since_ms == 0)
+            wifi_disagree_since_ms = now;
+
+        /*
+         * Breaking the loop above keeps the device working, but it leaves wifi_cfg still
+         * convinced it is disconnected - so mDNS is never re-registered, /api/wifi/status
+         * reports an empty SSID and IP, and the provisioning AP is eventually raised.
+         * Nothing in the manager resolves that by itself; it was observed wrong for over
+         * four hours on hardware while every upload succeeded.
+         *
+         * So once it has been wrong for long enough to rule out a transient, make it look:
+         * dropping the association forces its state machine to re-derive from reality, and
+         * the throttled path below reconnects on the next pass.
+         *
+         * This deliberately breaks a working link for a few seconds, which is why it is
+         * slow to trigger and rate limited. The offline queue covers the gap.
+         */
+        const bool longEnough =
+            (now - wifi_disagree_since_ms) >= WIFI_MANAGER_RESYNC_AFTER_MS;
+        const bool cooledDown =
+            wifi_last_resync_ms == 0 ||
+            (now - wifi_last_resync_ms) >= WIFI_MANAGER_RESYNC_COOLDOWN_MS;
+
+        if (longEnough && cooledDown) {
+            Log.warning("WiFi manager has reported disconnected for %u s while the interface is "
+                        "up with a lease. Dropping the association to resynchronise it.\r\n",
+                        (unsigned)((now - wifi_disagree_since_ms) / 1000));
+
+            wifi_last_resync_ms = now;
+            wifi_disagree_since_ms = 0;
+
+            wifi_cfg_disconnect();
+
+            // Let the stack settle before the throttled reconnect below takes over, rather
+            // than racing a connect against a disconnect that has not finished.
+            lastAttemptMs = now;
+        }
+        return;
+    }
+
+    // Genuinely down: the manager and the interface agree, so there is nothing to resync.
+    wifi_disagree_since_ms = 0;
+
     if (lastAttemptMs != 0 && (now - lastAttemptMs) < 10000)
         return;
 
@@ -299,16 +447,14 @@ bool network_is_usable() {
 
     // The manager says we are down. Before accepting that - and disabling every
     // outbound target as a result - check the interface itself.
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif == nullptr || !esp_netif_is_netif_up(netif))
-        return false;
-
-    esp_netif_ip_info_t ip = {};
-    if (esp_netif_get_ip_info(netif, &ip) != ESP_OK || ip.ip.addr == 0)
+    if (!sta_link_is_up())
         return false;
 
     // Interface is up and holds a lease while the manager reports disconnected.
     // Let sends proceed; http_request() fails safely if the link really is dead.
+    //
+    // This counter climbing is not cosmetic: it is the signature of the manager's state
+    // machine having desynchronised from the driver. See reconnectWiFi().
     s_wifi_flag_disagreements++;
     return true;
 }
