@@ -52,7 +52,7 @@ enum class RoamResult : uint8_t {
     LANDED,             // associated with the intended access point
     NO_CANDIDATE,       // scanned; nothing on this SSID was materially stronger
     SCAN_FAILED,        // esp_wifi_scan_start() refused
-    CONFIG_FAILED,      // could not read or write the station config
+    OUT_OF_MEMORY,      // could not allocate the scan result buffer
     SAME_AP,            // reconnected, but to the radio we were trying to leave
     REASSOC_TIMEOUT,    // still down when the budget ran out; manager still retrying
 };
@@ -62,7 +62,7 @@ static const char *roamResultName(RoamResult r) {
         case RoamResult::LANDED:           return "LANDED";
         case RoamResult::NO_CANDIDATE:     return "NO_CANDIDATE";
         case RoamResult::SCAN_FAILED:      return "SCAN_FAILED";
-        case RoamResult::CONFIG_FAILED:    return "CONFIG_FAILED";
+        case RoamResult::OUT_OF_MEMORY:    return "OUT_OF_MEMORY";
         case RoamResult::SAME_AP:          return "SAME_AP";
         case RoamResult::REASSOC_TIMEOUT:  return "REASSOC_TIMEOUT";
         default:                           return "NONE";
@@ -532,7 +532,7 @@ void wifi_link_check_ap() {
         (wifi_ap_record_t *)calloc(found, sizeof(wifi_ap_record_t));
     if (list == nullptr) {
         esp_wifi_clear_ap_list();
-        wifi_roam_note_result(RoamResult::CONFIG_FAILED);
+        wifi_roam_note_result(RoamResult::OUT_OF_MEMORY);
         return;
     }
 
