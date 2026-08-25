@@ -69,6 +69,23 @@ static const char *roamResultName(RoamResult r) {
     }
 }
 
+/*
+ * What the roam logic is doing right now, so the UI can say why the device is busy.
+ *
+ * Distinct from roamInProgress below, which exists only to suppress the dropout counter for
+ * the deliberate disconnect. This covers the whole operation including the scan, and must not
+ * widen that suppression: a genuine outage during the scan should still count as one.
+ */
+enum class RoamPhase : uint8_t { IDLE = 0, SCANNING, RECONNECTING };
+
+static const char *roamPhaseName(RoamPhase p) {
+    switch (p) {
+        case RoamPhase::SCANNING:     return "SCANNING";
+        case RoamPhase::RECONNECTING: return "RECONNECTING";
+        default:                      return "IDLE";
+    }
+}
+
 struct WifiLinkState {
     RssiStats rssi{};
     uint64_t  windowStartedMs   = 0;
@@ -107,6 +124,7 @@ struct WifiLinkState {
      * available and the telemetry could not say whether the recovery had run and failed or
      * never run at all. Anything that can fail silently will.
      */
+    RoamPhase roamPhase         = RoamPhase::IDLE;
     uint32_t  roamAttempts      = 0;
     uint64_t  roamLastAttemptMs = 0;  // 0 = never attempted
     RoamResult roamLastResult   = RoamResult::NONE;
@@ -287,6 +305,7 @@ void wifi_link_json(JsonObject o) {
      * Attempts and the last outcome, so a recovery that runs and fails is visible. Without
      * these a failed attempt left no trace at all - see the note on the state fields.
      */
+    o["roamPhase"] = roamPhaseName(snap.roamPhase);
     o["roamAttempts"] = snap.roamAttempts;
     o["roamLastResult"] = roamResultName(snap.roamLastResult);
 
@@ -383,7 +402,7 @@ void wifi_link_json(JsonObject o) {
 #define WIFI_ROAM_POOR_SUSTAIN_MS     600000   // ...and must stay poor for ten minutes
 #define WIFI_ROAM_MIN_GAIN_DBM        12       // a candidate must beat us by this much
 #define WIFI_ROAM_COOLDOWN_MS         3600000  // at most one attempt an hour
-#define WIFI_ROAM_MIN_SAMPLES         30       // ~5 min of samples before the average counts
+#define WIFI_ROAM_MIN_SAMPLES         30      // ~5 min of samples before the average counts
 #define WIFI_ROAM_MAX_SCAN_RECORDS    24
 /*
  * How long to wait for the manager to bring the link back after we stand down.
@@ -401,11 +420,21 @@ void wifi_link_json(JsonObject o) {
 /**
  * @brief Record how an attempt ended. Every exit path after the guards must call this.
  */
+static void wifi_roam_set_phase(RoamPhase p) {
+    portENTER_CRITICAL(&s_link_mux);
+    s_link.roamPhase = p;
+    portEXIT_CRITICAL(&s_link_mux);
+}
+
 static void wifi_roam_note_result(RoamResult r) {
     portENTER_CRITICAL(&s_link_mux);
     s_link.roamLastResult = r;
     if (r == RoamResult::LANDED)
         s_link.roamRecoveries++;
+
+    // Every exit path after the guards records a result, so clearing the phase here means no
+    // path can leave the UI showing a scan that finished.
+    s_link.roamPhase = RoamPhase::IDLE;
     portEXIT_CRITICAL(&s_link_mux);
 }
 
@@ -509,6 +538,8 @@ void wifi_link_check_ap() {
      * Harmless, unless a web UI scan is running concurrently, in which case the two can
      * consume each other's results and both report nothing useful.
      */
+    wifi_roam_set_phase(RoamPhase::SCANNING);
+
     wifi_scan_config_t scan_cfg = {};
     scan_cfg.show_hidden = false;
     if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) {
@@ -585,6 +616,7 @@ void wifi_link_check_ap() {
     // Tell the observer half this drop is ours, so it is not counted as a dropout.
     portENTER_CRITICAL(&s_link_mux);
     s_link.roamInProgress = true;
+    s_link.roamPhase = RoamPhase::RECONNECTING;
     portEXIT_CRITICAL(&s_link_mux);
 
     /*

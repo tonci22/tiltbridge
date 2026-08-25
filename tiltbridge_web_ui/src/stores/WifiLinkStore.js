@@ -51,6 +51,9 @@ export const useWifiLinkStore = defineStore("WifiLinkStore", () => {
 
     // Attempts and the last outcome, so a recovery that ran and failed is visible. Counting
     // only successes once hid a broken association path for hours.
+    // What the roam logic is doing right now: IDLE, SCANNING or RECONNECTING. See the note
+    // in WifiSignalIndicator about why RECONNECTING is often invisible.
+    const roamPhase = ref("IDLE");
     const roamAttempts = ref(0);
     const roamLastResult = ref("NONE");
     const roamLastAttemptAgoSec = ref(null);
@@ -98,6 +101,7 @@ export const useWifiLinkStore = defineStore("WifiLinkStore", () => {
         bssid.value = w.bssid ?? null;
         roams.value = w.roams ?? 0;
         roamRecoveries.value = w.roamRecoveries ?? 0;
+        roamPhase.value = w.roamPhase ?? "IDLE";
         roamAttempts.value = w.roamAttempts ?? 0;
         roamLastResult.value = w.roamLastResult ?? "NONE";
         roamLastAttemptAgoSec.value = w.roamLastAttemptAgoSec ?? null;
@@ -143,7 +147,7 @@ export const useWifiLinkStore = defineStore("WifiLinkStore", () => {
         associated, managerConnected,
         desyncEpisodes, desyncCurrentSec, desyncLongestSec, desyncTotalSec,
         ssid, channel, ip, bssid, roams, roamRecoveries,
-        roamAttempts, roamLastResult, roamLastAttemptAgoSec,
+        roamPhase, roamAttempts, roamLastResult, roamLastAttemptAgoSec,
         rssiLatest, rssiQuality, rssiAverage, rssiMinimum, rssiMaximum, rssiSamples, windowSec,
         outages, connectedForSec, currentOutageSec, lastOutageAgoSec, lastOutageDurationSec,
         loaded, wifiLinkError,

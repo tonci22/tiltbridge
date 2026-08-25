@@ -29,6 +29,20 @@
           </div>
         </div>
 
+        <div class="px-4 pt-4 sm:px-6" v-if="busyLabel">
+          <div class="rounded-md bg-sky-50 p-4 border border-sky-300">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <ArrowPathIcon class="h-5 w-5 text-sky-600 animate-spin" aria-hidden="true" />
+              </div>
+              <div class="ml-3">
+                <h3 class="text-sm font-bold text-sky-900">{{ busyLabel }}</h3>
+                <p class="mt-1 text-sm text-sky-800">{{ $t('wifi.busy_detail') }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="flex flex-col">
           <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
             <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
@@ -177,10 +191,11 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
-import { ExclamationTriangleIcon } from "@heroicons/vue/24/outline";
+import { ArrowPathIcon, ExclamationTriangleIcon } from "@heroicons/vue/24/outline";
 import { useWifiLinkStore } from "@/stores/WifiLinkStore";
 import { rssiQualityClass } from "@/mixins/TiltDevice";
 import { formatAge } from "@/mixins/FormatAge";
+import { i18n } from "@/main.js";
 
 const store = useWifiLinkStore();
 const intervalObject = ref(null);
@@ -190,6 +205,12 @@ const windowAge = computed(() => formatAge(store.windowSec) ?? '--');
 const lastOutageAge = computed(() => formatAge(store.lastOutageAgoSec));
 const lastAttemptAge = computed(() => formatAge(store.roamLastAttemptAgoSec));
 const desyncFor = computed(() => formatAge(store.desyncCurrentSec));
+
+const busyLabel = computed(() => {
+  if (store.roamPhase === 'SCANNING') return i18n.global.t('wifi.busy_scanning');
+  if (store.roamPhase === 'RECONNECTING') return i18n.global.t('wifi.busy_reconnecting');
+  return null;
+});
 
 /*
  * An attempt that ended in anything but LANDED or NO_CANDIDATE is a failure worth colouring.

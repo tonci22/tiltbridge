@@ -23,6 +23,15 @@
         {{ networkLine }}
       </span>
 
+      <!-- The roam logic is holding up the main loop. Shown because for those seconds the
+           device is not scanning Tilts or sending, and a user watching the page deserves to
+           know why it went quiet rather than assuming it hung. -->
+      <span v-if="busyLabel"
+            class="inline-flex items-center gap-1 rounded bg-sky-100 px-1.5 py-0.5 text-xs font-medium text-sky-800">
+        <ArrowPathIcon class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        <span>{{ busyLabel }}</span>
+      </span>
+
       <!-- The manager reporting down while the interface is associated is the exact
            condition that silently disables every upload target. Worth a badge. -->
       <span v-if="store.wifiDesynced()"
@@ -47,7 +56,7 @@
 
 <script setup>
 import { computed } from "vue";
-import { ExclamationTriangleIcon, SignalSlashIcon } from "@heroicons/vue/24/outline";
+import { ArrowPathIcon, ExclamationTriangleIcon, SignalSlashIcon } from "@heroicons/vue/24/outline";
 import { useWifiLinkStore } from "@/stores/WifiLinkStore";
 import { rssiQualityClass } from "@/mixins/TiltDevice";
 import { formatAge } from "@/mixins/FormatAge";
@@ -68,6 +77,16 @@ const QUALITY_BARS = {
   WEAK: 1,
   CRITICAL: 1,
 };
+
+/*
+ * Only the two busy phases get a label; IDLE gets nothing rather than a reassuring "idle"
+ * badge that would sit there permanently.
+ */
+const busyLabel = computed(() => {
+  if (store.roamPhase === 'SCANNING') return i18n.global.t('wifi.busy_scanning');
+  if (store.roamPhase === 'RECONNECTING') return i18n.global.t('wifi.busy_reconnecting');
+  return null;
+});
 
 const bars = computed(() => QUALITY_BARS[store.rssiQuality] ?? 0);
 const qualityClass = computed(() => rssiQualityClass(store.rssiQuality));
