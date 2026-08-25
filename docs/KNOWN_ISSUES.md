@@ -238,6 +238,53 @@ log was captured to compare. Steady-state interleaving measured **0 occurrences 
 message lines** after the fix and **0 across 1,361** before it — there was nothing to fix in
 steady state. See dead end #1 below for what the apparent corruption actually was.
 
+### 16. FIXED — a rewritten queue journal lost its head, and readings could be resent
+
+`rewriteJournal()` collapses the journal to one entry establishing the head plus the sparse
+remainder. It wrote that head as an ordinary `QUEUE_JOURNAL_ACK`, and a trailing comment
+asserted this was sufficient: "re-establish it on load by treating the single head entry as
+authoritative. That is what markTerminated() + advanceHead() do when they replay it."
+
+They do not. `markTerminated()` files the sequence in the sparse set and `advanceHead()` only
+ever absorbs `m_headSequence + 1`, which is 1 on a fresh load. So a head of 100 replayed as a
+lone sparse entry and the head stayed at 0, destroying the "every sequence at or below this is
+delivered" fact. Every already-delivered reading then looked pending, the 64-entry sparse table
+filled, and the overflow path warns "sequence N may be resent" — duplicate rows downstream.
+
+The journal is the **only** record of the head. `QUEUE_STATE_PATH` is declared and removed on
+factory reset but never written or read, so nothing else carries it.
+
+**Fixed** by giving the head its own kind, `QUEUE_JOURNAL_HEAD`, which `loadJournal()` applies
+authoritatively. `markTerminated()` also gained a fast path for the in-order case, which needs
+no sparse slot at all, and now attempts compaction before declaring the table full.
+
+Verified by transcribing the algorithm and running both versions against the same journals:
+
+| journal | before | after |
+|---|---|---|
+| `HEAD(100), ACK(102), ACK(105)` | head **0** | head **100** |
+| 200 in-order ACKs | head 200 | head 200 |
+| head written as `ACK(100)` (legacy file) | head 0 | head 0 |
+
+That last row is deliberate: a journal written by older firmware still replays as it always
+did, and is corrected by the first rewrite under this code.
+
+**This is probably NOT what was observed on the production device**, and saying so matters more
+than claiming the fix. That device logged "replayed 72 journal entries, head at sequence 0u"
+with eight warnings. A rewrite only happens once the journal passes 2048 bytes — 256 entries —
+so at 72 entries it had almost certainly never been rewritten, and the head had never been
+written at all. The arithmetic fits a different cause: an early sequence that never reached a
+terminal outcome, leaving the head permanently stuck at 0 while 72 later terminations
+overflowed the 64 slots. Whether those sequences were legitimately never acknowledged or their
+outcomes were lost could not be determined, and the evidence is gone — the queue was erased by
+a filesystem flash before it could be examined.
+
+`loadJournal()` now logs where the gap is and whether the table is full, which distinguishes
+the two on any recurrence: a lost head puts the gap at sequence 1, a stalled reading puts it at
+that reading. `QUEUE_MAX_SPARSE_TERMINATED` was deliberately left at 64 — raising it would
+reduce the resend window without addressing a permanently stuck head, and the reason for the
+current value has not been disproven.
+
 ### 15. Pinned to esp_wifi_config 0.1.0 — upgrade to 0.2.2 is owed, next iteration
 
 `src/idf_component.yml` pins `thorrak/esp_wifi_config` to

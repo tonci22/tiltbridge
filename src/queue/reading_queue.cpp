@@ -69,16 +69,34 @@ void ReadingQueue::markTerminated(uint32_t sequence) {
     if (isTerminated(sequence))
         return;
 
-    if (m_sparseCount < QUEUE_MAX_SPARSE_TERMINATED) {
-        m_sparseTerminated[m_sparseCount++] = sequence;
-    } else {
-        // Should not happen with a bounded batch size. Losing the marker only means the
-        // record is offered again and the server dedups it - at-least-once still holds.
+    /*
+     * The in-order case needs no slot at all. Terminations normally arrive in sequence, and
+     * filing each one in the sparse set only to absorb it again on the next line meant a full
+     * table could reject a sequence that was about to become the head anyway.
+     */
+    if (sequence == m_headSequence + 1) {
+        m_headSequence = sequence;
+        advanceHead();
+        return;
+    }
+
+    // Out of order. If the table is full, absorb whatever is already contiguous first - that
+    // is what frees slots - before concluding there is no room.
+    if (m_sparseCount >= QUEUE_MAX_SPARSE_TERMINATED)
+        advanceHead();
+
+    if (m_sparseCount >= QUEUE_MAX_SPARSE_TERMINATED) {
+        /*
+         * Genuinely out of room: more than QUEUE_MAX_SPARSE_TERMINATED terminations are
+         * outstanding with a gap below them. Losing the marker means the record is offered
+         * again, so whatever consumes it must tolerate a repeat.
+         */
         Log.warning("Queue: sparse termination table full; sequence %lu may be resent.\r\n",
                     (unsigned long)sequence);
         return;
     }
 
+    m_sparseTerminated[m_sparseCount++] = sequence;
     advanceHead();
 }
 
@@ -298,6 +316,20 @@ void ReadingQueue::loadJournal() {
             // Torn final append; ignore it.
             break;
         }
+        if (e.kind == QUEUE_JOURNAL_HEAD) {
+            /*
+             * Authoritative: this one entry stands for every sequence at or below it. Taking
+             * the maximum rather than assigning keeps a stale head from an out-of-order file
+             * from moving it backwards.
+             */
+            if (e.sequence > m_headSequence)
+                m_headSequence = e.sequence;
+
+            advanceHead();      // absorb any sparse entries this head now makes contiguous
+            entries++;
+            continue;
+        }
+
         if (e.kind != QUEUE_JOURNAL_ACK && e.kind != QUEUE_JOURNAL_DROP)
             continue;
 
@@ -309,6 +341,33 @@ void ReadingQueue::loadJournal() {
     if (entries > 0)
         Log.info("Queue: replayed %u journal entries, head at sequence %lu.\r\n",
                  (unsigned)entries, (unsigned long)m_headSequence);
+
+    /*
+     * A non-empty sparse set after replay means terminations exist that cannot be folded into
+     * the head, i.e. something below them never reached a terminal outcome. Report where that
+     * gap is, because the two causes are indistinguishable from the message above alone:
+     *
+     *   - a lost head (fixed: see QUEUE_JOURNAL_HEAD) leaves a full table with the gap at 1
+     *   - a sequence that genuinely never completed leaves the gap at that sequence
+     *
+     * A device was seen replaying 72 entries with the head at 0 and eight "may be resent"
+     * warnings, and the cause could not be established after the fact for want of exactly
+     * this line.
+     */
+    if (m_sparseCount > 0) {
+        uint32_t lowest = m_sparseTerminated[0];
+        for (size_t i = 1; i < m_sparseCount; i++)
+            if (m_sparseTerminated[i] < lowest)
+                lowest = m_sparseTerminated[i];
+
+        Log.info("Queue: %u termination(s) not contiguous with the head; first gap at "
+                 "sequence %lu, lowest terminated above it %lu.%s\r\n",
+                 (unsigned)m_sparseCount, (unsigned long)(m_headSequence + 1),
+                 (unsigned long)lowest,
+                 m_sparseCount >= QUEUE_MAX_SPARSE_TERMINATED
+                     ? " Table is FULL; further terminations will be lost and those readings resent."
+                     : "");
+    }
 }
 
 bool ReadingQueue::recomputePending() {
@@ -656,11 +715,13 @@ void ReadingQueue::rewriteJournal() {
     if (f == nullptr)
         return;
 
-    // One entry establishes the head; the rest carry out-of-order terminations.
+    // One entry establishes the head; the rest carry out-of-order terminations. The head
+    // MUST be written as QUEUE_JOURNAL_HEAD - as an ACK it is indistinguishable from an
+    // ordinary termination and the head is lost on the next load. See the kind's definition.
     if (m_headSequence > 0) {
         QueueJournalEntry e{};
         e.sequence = m_headSequence;
-        e.kind = QUEUE_JOURNAL_ACK;
+        e.kind = QUEUE_JOURNAL_HEAD;
         fwrite(&e, 1, sizeof(e), f);
     }
     for (size_t i = 0; i < m_sparseCount; i++) {
@@ -674,9 +735,6 @@ void ReadingQueue::rewriteJournal() {
     fsync(fileno(f));
     fclose(f);
 
-    // A head-only journal loses the "every sequence below the head is done" fact, so
-    // re-establish it on load by treating the single head entry as authoritative. That is
-    // what markTerminated() + advanceHead() do when they replay it.
     if (rename(QUEUE_JOURNAL_PATH ".tmp", QUEUE_JOURNAL_PATH) != 0)
         remove(QUEUE_JOURNAL_PATH ".tmp");
 }

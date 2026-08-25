@@ -23,6 +23,22 @@
 #define QUEUE_JOURNAL_ACK  1
 #define QUEUE_JOURNAL_DROP 2
 
+/*
+ * "Every sequence at or below this one is terminated."
+ *
+ * rewriteJournal() collapses the log to a head plus the sparse remainder, and used to write
+ * that head as an ordinary ACK. Replaying an ACK cannot re-establish a head: markTerminated()
+ * files it in the sparse set and advanceHead() only ever absorbs m_headSequence + 1, which is
+ * 1 on a fresh load. So after any rewrite the head silently reset to 0 on the next boot,
+ * every delivered reading looked pending again, and the sparse table filled at 64 entries.
+ * Observed on hardware as "replayed 72 journal entries, head at sequence 0u" followed by
+ * eight "may be resent" warnings - 72 entries against 64 slots.
+ *
+ * A journal written by firmware predating this kind replays as it always did: head 0 and the
+ * warnings. The first rewrite under this code corrects it.
+ */
+#define QUEUE_JOURNAL_HEAD 3
+
 // Out-of-order terminations held in RAM above the contiguous head. One in-flight batch is
 // the realistic worst case; the cap simply bounds memory if a server misbehaves.
 #define QUEUE_MAX_SPARSE_TERMINATED 64
