@@ -1,0 +1,99 @@
+dependencies:
+  espressif/mdns:
+    component_hash: e81ca7a7f53ea34e78274df054da692c272e1315572876b237b1748e267c013b
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.11.3
+  h2zero/esp-nimble-cpp:
+    component_hash: 720050476f7fb47bd0aa08a94642fd09a50536391d60081858702a789405d76f
+    dependencies:
+    - name: espressif/esp_hosted
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: target in [esp32p4]
+      version: '*'
+    - name: espressif/esp_wifi_remote
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: target in [esp32p4]
+      version: '>=0.5.3'
+    - name: idf
+      require: private
+      rules:
+      - if: target in [esp32p4]
+      version: '>=5.3.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.5.0
+  idf:
+    source:
+      type: idf
+    version: 5.5.3
+  joltwallet/littlefs:
+    component_hash: 3af20a3d75c49db9dc2286fd50862c34055c9f578419ad1f2bf7ed3ed01391fe
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.22.3
+  thorrak/esp_bus:
+    component_hash: 605ccb6d50f533093df2ebae17cf82e21d79d3e2f1add5afe2c78e9620ab94a0
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32s2
+    - esp32s3
+    - esp32c2
+    - esp32c3
+    - esp32c6
+    - esp32h2
+    version: 1.0.3
+  thorrak/esp_wifi_config:
+    component_hash: 3c341ea7e548d18dfb1eb842a1a2dc2da5d665d6e9fa01cabf509692b56ee68a
+    dependencies:
+    - name: idf
+      version: '>=5.4'
+    - name: thorrak/esp_bus
+      version: ^1.0.3
+    - name: espressif/network_provisioning
+      rules:
+      - if: idf_version >=6.0
+      version: ^1.0.0
+    source:
+      git: https://github.com/tonci22/esp_wifi_config.git
+      path: .
+      type: git
+    targets:
+    - esp32
+    - esp32s2
+    - esp32s3
+    - esp32c3
+    - esp32c6
+    - esp32h2
+    version: 29c2678f214821f64791dadab44bc8112eea57f4
+direct_dependencies:
+- espressif/mdns
+- h2zero/esp-nimble-cpp
+- idf
+- joltwallet/littlefs
+- thorrak/esp_wifi_config
+manifest_hash: 6ce0d914397a37ad331e30dae5672d556e7771382b302d8ebb6af08011613a32
+target: esp32
+version: 2.0.0
