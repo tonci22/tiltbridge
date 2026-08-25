@@ -1,7 +1,10 @@
 <template>
   <div>
     <header class="bg-white shadow">
-      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+      <!-- Deliberately NOT max-w-7xl: every section below this one is full width, so the
+           centred container left the title inset from the content beneath it and stopped the
+           WiFi indicator reaching the right edge. -->
+      <div class="w-full py-6 px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <h1 class="text-3xl font-bold text-gray-900">
           {{ $t('tilt_list.header') }}
         </h1>

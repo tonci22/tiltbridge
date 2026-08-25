@@ -14,8 +14,10 @@ export const useConfigStore = defineStore("ConfigStore", () => {
     const cloudAppID = ref("");
     const cloudClientKey = ref("");
     const update_spiffs = ref(false);
-    const TZoffset = ref(0);
-    const tempUnit = ref("F");
+    // Match the firmware defaults in src/jsonconfig.h, so a page rendered before
+    // getConfig() returns does not briefly show the wrong unit or timezone.
+    const TZoffset = ref(2);
+    const tempUnit = ref("C");
     const smoothFactor = ref(0);
     const gravityUnit = ref("SG");
     const applyCalibration = ref(false);
@@ -209,8 +211,8 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         cloudAppID.value = "";
         cloudClientKey.value = "";
         update_spiffs.value = false;
-        TZoffset.value = 0;
-        tempUnit.value = "F";
+        TZoffset.value = 2;
+        tempUnit.value = "C";
         smoothFactor.value = 0;
         gravityUnit.value = "SG";
         applyCalibration.value = false;

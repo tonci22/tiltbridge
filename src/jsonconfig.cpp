@@ -383,13 +383,30 @@ void Config::load_from_json(JsonDocument obj) {
         update_filesystem = obj["update_filesystem"];
     }
 
+    /*
+     * Both of these are clamped here as well as in the HTTP handler. The handler guards
+     * against a bad UI; this guards against a hand-edited or truncated config file, and only
+     * this path runs at boot. Neither field was checked here before: a file carrying
+     * TZoffset 99 was loaded verbatim and then fed to `config.TZoffset * 3600` when stamping
+     * Google Sheets rows, and a tempUnit of anything at all was accepted.
+     */
     if (!obj["TZoffset"].isNull()) {
-        TZoffset = int(obj["TZoffset"]);
+        const int tz = int(obj["TZoffset"]);
+        if (tz < -12 || tz > 14) {
+            Log.warning("Stored TZoffset (%d) out of range; using %d.\r\n", tz, (int)TZoffset);
+        } else {
+            TZoffset = (int8_t)tz;
+        }
     }
 
     if (!obj["tempUnit"].isNull()) {
         const char *tu = obj["tempUnit"];
-        strlcpy(tempUnit, tu, 2);
+        if (tu != nullptr && (strcmp(tu, "C") == 0 || strcmp(tu, "F") == 0)) {
+            strlcpy(tempUnit, tu, 2);
+        } else {
+            Log.warning("Stored tempUnit (%s) is not C or F; using %s.\r\n",
+                        tu ? tu : "null", tempUnit);
+        }
     }
 
     if (!obj[GeneralSettings::gravityUnit].isNull()) {

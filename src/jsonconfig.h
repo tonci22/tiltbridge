@@ -80,8 +80,8 @@ public:
     bool invertTFT = false;
     bool combineTilts = false;
     bool update_filesystem = false;
-    int8_t TZoffset = -5;
-    char tempUnit[2] = "F";
+    int8_t TZoffset = 2;        // hours from UTC; see the -12..14 clamp in load_from_json()
+    char tempUnit[2] = "C";
     char gravityUnit[3] = "SG";  // "SG" = Specific Gravity, "P" = Plato, "B" = Brix
     uint8_t smoothFactor = 60;
     bool applyCalibration = true;
