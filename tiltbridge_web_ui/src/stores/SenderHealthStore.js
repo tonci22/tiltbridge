@@ -22,7 +22,10 @@ export const useSenderHealthStore = defineStore("SenderHealthStore", () => {
     const lastAnySuccessAgeSec = ref(null);
     const consecutiveSendFailures = ref(0);
     const staleEvents = ref(0);
-    const wifiFlagDisagreements = ref(0);
+    // Episodes, not polls: the firmware used to report a counter that ticked ~100x a second
+    // while the WiFi manager's flag was stale, so one minute read as thousands.
+    const wifiDesyncEpisodes = ref(0);
+    const wifiDesyncLongestSec = ref(0);
     const lastRecovery = ref(null);
 
     const loaded = ref(false);
@@ -44,7 +47,8 @@ export const useSenderHealthStore = defineStore("SenderHealthStore", () => {
                 lastAnySuccessAgeSec.value = response.lastAnySuccessAgeSec ?? null;
                 consecutiveSendFailures.value = response.consecutiveSendFailures ?? 0;
                 staleEvents.value = response.staleEvents ?? 0;
-                wifiFlagDisagreements.value = response.wifiFlagDisagreements ?? 0;
+                wifiDesyncEpisodes.value = response.wifiDesyncEpisodes ?? 0;
+                wifiDesyncLongestSec.value = response.wifiDesyncLongestSec ?? 0;
                 lastRecovery.value = response.lastRecovery ?? null;
 
                 loaded.value = true;
@@ -69,7 +73,8 @@ export const useSenderHealthStore = defineStore("SenderHealthStore", () => {
         lastAnySuccessAgeSec.value = null;
         consecutiveSendFailures.value = 0;
         staleEvents.value = 0;
-        wifiFlagDisagreements.value = 0;
+        wifiDesyncEpisodes.value = 0;
+        wifiDesyncLongestSec.value = 0;
         lastRecovery.value = null;
         loaded.value = false;
     }
@@ -86,7 +91,8 @@ export const useSenderHealthStore = defineStore("SenderHealthStore", () => {
         lastAnySuccessAgeSec,
         consecutiveSendFailures,
         staleEvents,
-        wifiFlagDisagreements,
+        wifiDesyncEpisodes,
+        wifiDesyncLongestSec,
         lastRecovery,
         loaded,
         senderError,

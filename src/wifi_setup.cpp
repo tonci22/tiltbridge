@@ -23,6 +23,7 @@
 #include "http_server.h"
 #include "time_sync.h"
 
+#include "wifi_link.h"
 #include "wifi_setup.h"
 
 // Track WiFi connection state to distinguish initial connection from reconnection.
@@ -83,6 +84,11 @@ static void on_wifi_got_ip(const char *event, const void *data, size_t len, void
     // Queued readings need a real capture time; this is the first moment SNTP can work.
     time_sync_start();
 
+    // Closes any outage the link-health tracker has open and starts a fresh RSSI window.
+    // Unconditional, and before any branch that can return early, so the tracker can never
+    // be left believing an outage is still in progress while traffic is flowing.
+    wifi_link_note_connected();
+
     // Disable modem sleep. The default WIFI_PS_MIN_MODEM only wakes the radio on DTIM
     // beacons, which inflated round trips to 30-80 ms on an otherwise clean link
     // (-52 dBm, no packet loss). Plain HTTP targets tolerate that, but a TLS handshake is
@@ -136,6 +142,10 @@ static void on_wifi_disconnected(const char *event, const void *data, size_t len
     const wifi_disconnected_t *info = (const wifi_disconnected_t *)data;
     const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
     const bool firstOfOutage = !wifi_was_disconnected;
+
+    // Self-guarding against the repeat events described above, so it does not depend on
+    // firstOfOutage being right to avoid counting one outage hundreds of times.
+    wifi_link_note_outage_started();
 
     if (firstOfOutage) {
         wifi_was_disconnected = true;
@@ -435,27 +445,108 @@ bool is_wifi_connected() {
     return wifi_cfg_is_connected();
 }
 
-static uint32_t s_wifi_flag_disagreements = 0;
+/*
+ * Desynchronisation between the WiFi manager's connected flag and the interface, measured as
+ * EPISODES rather than as polls.
+ *
+ * The original counter incremented once per network_is_usable() call. That call sits in
+ * dataSendHandler::process(), which runs on every loop() pass, so it ticked about a hundred
+ * times a second while desynchronised - and a single one-minute episode read as "5,984
+ * disagreements". The number was alarming, unitless and easy to mistake for thousands of
+ * separate faults; it was in fact a duration in units of ten milliseconds.
+ *
+ * So: count how many times it happened, how long the worst one lasted, and how long in total.
+ * Those answer the question the counter was there to answer.
+ *
+ * Touched from loopTask (via the sender) and from the sender-health monitor task, so the
+ * updates are bracketed. A spinlock rather than a mutex: a handful of scalar assignments, no
+ * blocking calls inside, and it must be safe to call from any task that gates work on the
+ * link being usable.
+ */
+static portMUX_TYPE s_desync_mux = portMUX_INITIALIZER_UNLOCKED;
 
-uint32_t wifi_flag_disagreements() {
-    return s_wifi_flag_disagreements;
+static uint32_t s_desync_episodes   = 0;
+static uint64_t s_desync_since_ms   = 0;   // 0 = not currently desynchronised
+static uint32_t s_desync_longest_ms = 0;
+static uint64_t s_desync_total_ms   = 0;
+
+// 64-bit, for the same reason as in wifi_link.cpp: a uint32 millisecond clock wraps at 49.7
+// days and this device is meant to run for months.
+static uint64_t desync_millis() {
+    return (uint64_t)(esp_timer_get_time() / 1000LL);
+}
+
+/**
+ * @brief Close the current episode, if one is open. Call when the two agree again.
+ */
+static void desync_end() {
+    portENTER_CRITICAL(&s_desync_mux);
+    if (s_desync_since_ms != 0) {
+        const uint32_t held = (uint32_t)(desync_millis() - s_desync_since_ms);
+        s_desync_total_ms += held;
+        if (held > s_desync_longest_ms)
+            s_desync_longest_ms = held;
+        s_desync_since_ms = 0;
+    }
+    portEXIT_CRITICAL(&s_desync_mux);
+}
+
+/**
+ * @brief Open an episode if one is not already open.
+ */
+static void desync_begin() {
+    portENTER_CRITICAL(&s_desync_mux);
+    if (s_desync_since_ms == 0) {
+        s_desync_since_ms = desync_millis();
+        s_desync_episodes++;
+    }
+    portEXIT_CRITICAL(&s_desync_mux);
+}
+
+WifiDesyncStats wifi_desync_stats() {
+    WifiDesyncStats out{};
+    const uint64_t now = desync_millis();
+
+    portENTER_CRITICAL(&s_desync_mux);
+    out.episodes  = s_desync_episodes;
+    out.longestMs = s_desync_longest_ms;
+    out.totalMs   = s_desync_total_ms;
+
+    if (s_desync_since_ms != 0) {
+        const uint32_t open = (uint32_t)(now - s_desync_since_ms);
+        out.currentMs = open;
+
+        // Include the episode still in progress, so the totals do not lurch when it closes.
+        out.totalMs += open;
+        if (open > out.longestMs)
+            out.longestMs = open;
+    }
+    portEXIT_CRITICAL(&s_desync_mux);
+
+    return out;
 }
 
 bool network_is_usable() {
-    if (wifi_cfg_is_connected())
+    if (wifi_cfg_is_connected()) {
+        desync_end();       // the two agree; any episode in progress is over
         return true;
+    }
 
     // The manager says we are down. Before accepting that - and disabling every
     // outbound target as a result - check the interface itself.
-    if (!sta_link_is_up())
+    if (!sta_link_is_up()) {
+        // Both say down, which is agreement, not disagreement. The link really is gone and
+        // the offline queue takes over.
+        desync_end();
         return false;
+    }
 
     // Interface is up and holds a lease while the manager reports disconnected.
     // Let sends proceed; http_request() fails safely if the link really is dead.
     //
-    // This counter climbing is not cosmetic: it is the signature of the manager's state
-    // machine having desynchronised from the driver. See reconnectWiFi().
-    s_wifi_flag_disagreements++;
+    // This is not cosmetic: it is the signature of the manager's state machine having
+    // desynchronised from the driver. See reconnectWiFi().
+    desync_begin();
     return true;
 }
 

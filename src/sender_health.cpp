@@ -172,7 +172,14 @@ void SenderHealthMonitor::to_json(JsonDocument &doc) const {
 
     // Non-zero means wifi_cfg_is_connected() claimed "down" while the STA interface was
     // demonstrably up with a lease. That is the failure mode this fork was built to catch.
-    doc["wifiFlagDisagreements"] = wifi_flag_disagreements();
+    /*
+     * Episodes, not polls. This used to report a per-call counter that ticked ~100x a second
+     * while the WiFi manager's flag was stale, so a single one-minute episode showed as
+     * thousands and read like thousands of separate faults.
+     */
+    const WifiDesyncStats desync = wifi_desync_stats();
+    doc["wifiDesyncEpisodes"]   = desync.episodes;
+    doc["wifiDesyncLongestSec"] = (uint32_t)(desync.longestMs / 1000);
 
     if (m_lastRecovery.reason != RECOVERY_NONE) {
         JsonObject rec = doc["lastRecovery"].to<JsonObject>();

@@ -3,6 +3,7 @@ import { mande } from 'mande';
 import { genCSRFOptions } from './CSRF';
 import { ref } from "vue";
 import { TiltDevice, TiltColors } from "@/mixins/TiltDevice";
+import { useWifiLinkStore } from "@/stores/WifiLinkStore";
 
 export const useTiltStore = defineStore("TiltStore", () => {
 
@@ -26,6 +27,15 @@ export const useTiltStore = defineStore("TiltStore", () => {
                 // TiltDevice reads the named fields it needs straight off the API object.
                 const tilt = new TiltDevice(tiltArray[tiltKey]);
                 tilts.value.push(tilt);
+            }
+
+            /*
+             * /api/json/ also carries the WiFi uplink report, so the homepage's signal
+             * indicator rides on this poll instead of issuing one of its own. Guarded
+             * because a UI build can be served by firmware that predates the `wifi` key.
+             */
+            if (response.wifi) {
+                useWifiLinkStore().applyPayload(response.wifi);
             }
 
             loaded.value = true;

@@ -1,10 +1,11 @@
 <template>
   <div>
     <header class="bg-white shadow">
-      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <h1 class="text-3xl font-bold text-gray-900">
           {{ $t('tilt_list.header') }}
         </h1>
+        <WifiSignalIndicator />
       </div>
     </header>
     <main>
@@ -126,6 +127,7 @@ import { useTiltStore } from "@/stores/TiltStore";
 import { useSendTargetErrorStore } from "@/stores/SendTargetErrorStore";
 import { useConfigStore } from "@/stores/ConfigStore";
 import SendTargetErrorBanner from "@/components/generic/SendTargetErrorBanner.vue";
+import WifiSignalIndicator from "@/components/generic/WifiSignalIndicator.vue";
 import DeviceConfigModal from "@/components/config/TiltBridge/DeviceConfigModal.vue";
 import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue";
 import { DocumentChartBarIcon, ExclamationTriangleIcon, AdjustmentsHorizontalIcon, Cog6ToothIcon } from "@heroicons/vue/24/outline";

@@ -263,6 +263,7 @@ JsonDocument Config::to_json() {
     obj["applyCalibration"] = applyCalibration;
     obj["tempCorrect"] = tempCorrect;
     obj["senderRecoveryEnabled"] = senderRecoveryEnabled;
+    obj["wifiRoamEnabled"] = wifiRoamEnabled;
     obj["senderStaleRebootSec"] = senderStaleRebootSec;
 
     obj[QueueSettings::offlineQueueEnabled] = offlineQueueEnabled;
@@ -408,6 +409,10 @@ void Config::load_from_json(JsonDocument obj) {
 
     if (!obj["tempCorrect"].isNull()) {
         tempCorrect = obj["tempCorrect"];
+    }
+
+    if (!obj["wifiRoamEnabled"].isNull()) {
+        wifiRoamEnabled = obj["wifiRoamEnabled"];
     }
 
     if (!obj["senderRecoveryEnabled"].isNull()) {

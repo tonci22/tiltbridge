@@ -106,6 +106,11 @@
                   <template #FieldName>{{ $t('queue.recovery.enable_recovery') }}</template>
                   <template #FieldDescription>{{ $t('queue.recovery.enable_recovery_desc') }}</template>
                 </CheckboxField>
+
+                <CheckboxField v-model="roamEnabled">
+                  <template #FieldName>{{ $t('queue.recovery.enable_wifi_roam') }}</template>
+                  <template #FieldDescription>{{ $t('queue.recovery.enable_wifi_roam_desc') }}</template>
+                </CheckboxField>
               </fieldset>
 
               <FormErrorMsg :form-error-message="recovery_error_message" v-if="recovery_error_message.length > 0" />
@@ -155,6 +160,7 @@ const batchSize = ref("20");
 const queueEnabled = ref(false);
 
 const recoveryEnabled = ref(true);
+const roamEnabled = ref(true);
 const staleRebootSec = ref("75");
 
 const form_error_message = ref("");
@@ -254,6 +260,7 @@ function seedQueueForm() {
 
 function seedRecoveryForm() {
   recoveryEnabled.value = configStore.senderRecoveryEnabled;
+  roamEnabled.value = configStore.wifiRoamEnabled;
   staleRebootSec.value = String(configStore.senderStaleRebootSec);
 }
 
@@ -309,7 +316,8 @@ async function submitRecoveryForm() {
   }
 
   const loader = $loading.show({});
-  const success = await configStore.updateSenderRecoveryConfig(recoveryEnabled.value, staleSec);
+  const success = await configStore.updateSenderRecoveryConfig(
+      recoveryEnabled.value, staleSec, roamEnabled.value);
   loader.hide();
 
   updateSuccessful.value = success;

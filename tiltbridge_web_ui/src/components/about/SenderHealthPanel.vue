@@ -105,12 +105,14 @@
 
                   <!-- A climbing counter here confirms the stale wifi_cfg_is_connected()
                        diagnosis in docs/phase1/00-OVERVIEW.md. -->
-                  <tr v-if="SenderHealthStore.wifiFlagDisagreements > 0">
+                  <tr v-if="SenderHealthStore.wifiDesyncEpisodes > 0">
                     <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" :title="$t('about.sender.wifi_disagreements_tooltip')">
                       {{ $t('about.sender.wifi_disagreements') }}
                     </th>
                     <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-600" :title="$t('about.sender.wifi_disagreements_tooltip')">
-                      {{ SenderHealthStore.wifiFlagDisagreements }}
+                      {{ $t('about.sender.wifi_disagreements_value', {
+                           episodes: SenderHealthStore.wifiDesyncEpisodes,
+                           longest: formatAge(SenderHealthStore.wifiDesyncLongestSec) }) }}
                     </td>
                   </tr>
 

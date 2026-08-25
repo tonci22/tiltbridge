@@ -238,6 +238,55 @@ log was captured to compare. Steady-state interleaving measured **0 occurrences 
 message lines** after the fix and **0 across 1,361** before it — there was nothing to fix in
 steady state. See dead end #1 below for what the apparent corruption actually was.
 
+### 15. Pinned to esp_wifi_config 0.1.0 — upgrade to 0.2.2 is owed, next iteration
+
+`src/idf_component.yml` pins `thorrak/esp_wifi_config` to
+`tonci22/esp_wifi_config@29c2678` — upstream `1764ce4` (0.1.0) verbatim plus one commit
+setting `WIFI_ALL_CHANNEL_SCAN` and `WIFI_CONNECT_AP_BY_SIGNAL` on the station config. The
+manifest previously asked for `version: main`, which is not a pin at all: upstream is now on
+0.2.2 and a clean checkout would have resolved to it and stopped compiling.
+
+**Do the 0.2.2 upgrade in the next iteration.** Three of its changes land on defects that are
+live in this tree:
+
+- `wifi_cfg_disconnect()` no longer sets `config.auto_reconnect = false`. In 0.1.0 it does,
+  and the component exposes no setter to put it back, so `reconnectWiFi()`'s manager-resync
+  path permanently disables auto-reconnect the first time it fires. This is a real bug today,
+  not a theoretical one.
+- The auto-reconnect retry is scheduled (`reconnect_pending` + `reconnect_due_tick`) instead
+  of a `vTaskDelay()` executed inside the disconnect event handler, and each retry iteration
+  stops clearing `CONNECTED_BIT` before waiting on it. Together those are why any disconnect
+  the manager did not initiate leaves its `state` field stale for up to a minute: it sleeps
+  five seconds, rewrites the station config as `{0}`, and can erase the very got-IP evidence
+  that would resynchronise it. `wifi_link_check_ap()` provokes this every time it stands the
+  link down — measured at one episode of ~60 s per move.
+
+  **The consequences are mild**, which is worth recording because the old per-poll counter
+  made them look severe. Uploads continue throughout, because `network_is_usable()` trusts
+  the netif over the manager — that fallback is the whole point. got-IP still fires, so
+  `mdnsReset()` runs and mDNS re-registers. The provisioning AP needs a total connect failure,
+  so it is not raised. `reconnectWiFi()`'s resync needs five minutes, so it never fires for
+  these. The real cost is `/api/wifi/status` reading blank for about a minute.
+- `WIFI_CFG_DEFAULTS` would clear the ~20 `-Wmissing-field-initializers` warnings the
+  `wifi_cfg_config_t` initialiser in `wifi_setup.cpp` currently emits.
+
+**0.2.2 does NOT fix access-point selection.** `scan_method` and `sort_method` are still
+absent from both of its connect sites, so the fork survives the upgrade: it needs a second
+branch, upstream 0.2.2 plus the same two-line patch.
+
+**Scope.** Upstream ships `MIGRATION.md` and the work is mechanical, essentially one file:
+
+- `wifi_setup.cpp` — seven `esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_X), h, NULL)` become
+  `esp_event_handler_register(WIFI_CFG_EVENT, WIFI_CFG_EVENT_X, h, NULL)`; the seven handlers
+  take the standard esp_event signature `(void*, esp_event_base_t, int32_t, void*)`; the
+  `len < sizeof(...)` payload guards go away because `event_data` is already typed; the config
+  initialiser becomes `WIFI_CFG_DEFAULTS`
+- `main.cpp` — drop `#include <esp_bus.h>` and the esp_bus init
+- `esp_bus` then has no remaining user in `src/` and can be dropped entirely
+
+Deliberately deferred rather than bundled with the WiFi observability and roam-recovery work,
+so that a regression in either can be attributed to one of them.
+
 ---
 
 ## Firmware — unexplained

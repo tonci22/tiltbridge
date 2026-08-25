@@ -89,6 +89,15 @@ public:
 
     // Outbound sender health / automatic recovery
     bool senderRecoveryEnabled = true;      // restart when outbound processing stops progressing
+
+    /*
+     * Whether to move off a poor access point when a materially better one is available on
+     * the same network. Defaults on, matching senderRecoveryEnabled above: both trade a
+     * brief, deliberate interruption for getting out of a state the device cannot otherwise
+     * leave. Turn it off on a single-access-point network, where there is nothing to move to
+     * and the scan is pure cost. See the rationale block in wifi_link.cpp.
+     */
+    bool wifiRoamEnabled = true;
     // Heartbeat age that counts as stalled (clamped 60..600). At the top of the spec's
     // 60-90s window because a single Google Sheets upload may legitimately hold the sender
     // for up to 60 s (two TLS handshakes via the Apps Script redirect).

@@ -19,6 +19,7 @@
 #include "sendData.h"
 #include "sender_health.h"
 #include "device_config.h"
+#include "wifi_link.h"
 #include "queue/reading_queue.h"
 #include "JsonKeys.h"
 
@@ -87,6 +88,21 @@ static void startSendNowTimer(TimerHandle_t& timer, const char* name, TimerCallb
 static void http_json(JsonDocument &doc) {
     doc["tilts"] = tilt_scanner.tilt_to_json();
     doc[GeneralSettings::gravityUnit] = config.gravityUnit;
+
+    // Carried here rather than fetched separately: the homepage already polls this endpoint
+    // every 15 s, so the WiFi indicator in its header costs no extra request.
+    wifi_link_json(doc["wifi"].to<JsonObject>());
+}
+
+/*
+ * The same report on its own endpoint, for the About page panel, which does not poll
+ * /api/json/. One builder feeds both so the header indicator and the panel cannot disagree.
+ *
+ * Not under /api/wifi/ - that prefix belongs to the esp_wifi_config component
+ * (api_base_path in initWiFi()), and registering into it would collide with its own routes.
+ */
+static void network_json(JsonDocument &doc) {
+    wifi_link_json(doc.to<JsonObject>());
 }
 
 static void settings_json(JsonDocument &doc) {
@@ -448,6 +464,7 @@ static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool trigger
     // when the key is simply absent from a partial controller settings update
     updateJsonSettingBool(json, QueueSettings::offlineQueueEnabled, config.offlineQueueEnabled);
     updateJsonSettingBool(json, "senderRecoveryEnabled", config.senderRecoveryEnabled);
+    updateJsonSettingBool(json, "wifiRoamEnabled", config.wifiRoamEnabled);
 
     // Process everything we were passed
     if (failCount) {
@@ -1010,6 +1027,7 @@ MAKE_GET_HANDLER(handle_api_errors, errors_json)
 MAKE_GET_HANDLER(handle_api_sender, sender_json)
 MAKE_GET_HANDLER(handle_api_devices, devices_json)
 MAKE_GET_HANDLER(handle_api_queue, queue_json)
+MAKE_GET_HANDLER(handle_api_network, network_json)
 
 // Generate PUT handlers
 MAKE_PUT_HANDLER(handle_settings_controller, processTiltBridgeSettingsJson)
@@ -1158,6 +1176,7 @@ void httpServer::registerJsonGetHandlers() {
         {"/api/sender/", handle_api_sender},
         {"/api/devices/", handle_api_devices},
         {"/api/queue/", handle_api_queue},
+        {"/api/network/", handle_api_network},
     };
 
     for (const auto& endpoint : get_endpoints) {

@@ -31,10 +31,24 @@ bool is_wifi_connected();
 bool network_is_usable();
 
 /**
- * @brief Count of times network_is_usable() found the manager flag disagreeing with a
- *        demonstrably-up interface. Non-zero confirms the stale-flag diagnosis.
+ * @brief How often, and for how long, the WiFi manager's flag has disagreed with a
+ *        demonstrably-up interface.
+ *
+ * Episodes rather than polls. The predecessor counted every network_is_usable() call, which
+ * runs ~100x a second from the sender loop, so one minute of disagreement reported as
+ * "5,984" - a duration in units of 10 ms masquerading as a fault count.
+ *
+ * A non-zero `episodes` still confirms the stale-flag diagnosis; `longestMs` is the figure
+ * that says whether it mattered.
  */
-uint32_t wifi_flag_disagreements();
+struct WifiDesyncStats {
+    uint32_t episodes  = 0;   // distinct episodes since boot
+    uint32_t currentMs = 0;   // 0 = the flag currently agrees with the interface
+    uint32_t longestMs = 0;
+    uint64_t totalMs   = 0;
+};
+
+WifiDesyncStats wifi_desync_stats();
 
 // ESP-IDF compatible local IP address retrieval
 // Writes the IP address as a string (e.g., "192.168.1.100") to ip_str

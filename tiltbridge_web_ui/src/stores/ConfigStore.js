@@ -23,6 +23,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
 
     // Outbound sender watchdog (see docs/phase1/03-sender-recovery.md)
     const senderRecoveryEnabled = ref(true);
+    const wifiRoamEnabled = ref(true);
     const senderStaleRebootSec = ref(75);
 
     // Google Sheets v2 protocol opt-in
@@ -119,6 +120,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
             applyCalibration.value = response.applyCalibration;
             tempCorrect.value = response.tempCorrect;
             senderRecoveryEnabled.value = response.senderRecoveryEnabled ?? true;
+            wifiRoamEnabled.value = response.wifiRoamEnabled ?? true;
             senderStaleRebootSec.value = response.senderStaleRebootSec ?? 75;
             gsheetsV2Enabled.value = response.gsheetsV2Enabled ?? false;
             fermentrackUrl.value = response.legacyFermentrackURL;
@@ -214,6 +216,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         applyCalibration.value = false;
         tempCorrect.value = false;
         senderRecoveryEnabled.value = true;
+        wifiRoamEnabled.value = true;
         senderStaleRebootSec.value = 75;
         gsheetsV2Enabled.value = false;
         brewstatusURL.value = "";
@@ -320,16 +323,18 @@ export const useConfigStore = defineStore("ConfigStore", () => {
      * Sender watchdog settings. Same controller endpoint as the general settings, but written
      * from the Offline Queue page because that is where the reliability knobs live together.
      */
-    async function updateSenderRecoveryConfig(recoveryEnabled, staleRebootSec) {
+    async function updateSenderRecoveryConfig(recoveryEnabled, staleRebootSec, roamEnabled) {
         try {
             const remote_api = mande("/api/settings/controller/", genCSRFOptions());
             const response = await remote_api.put({
                 senderRecoveryEnabled: recoveryEnabled,
                 senderStaleRebootSec: staleRebootSec,
+                wifiRoamEnabled: roamEnabled,
             });
             if (response && response.status === "ok") {
                 senderRecoveryEnabled.value = recoveryEnabled;
                 senderStaleRebootSec.value = staleRebootSec;
+                wifiRoamEnabled.value = roamEnabled;
                 configUpdateError.value = false;
                 return true;
             }
@@ -537,6 +542,7 @@ export const useConfigStore = defineStore("ConfigStore", () => {
         applyCalibration,
         tempCorrect,
         senderRecoveryEnabled,
+        wifiRoamEnabled,
         senderStaleRebootSec,
         gsheetsV2Enabled,
         brewstatusURL,

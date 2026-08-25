@@ -20,6 +20,7 @@
 #include "tilt/tiltScanner.h"
 #include "http_server.h"
 #include "wifi_setup.h"
+#include "wifi_link.h"
 #include "http_calibration.h"   // deleteAllCalibrationFiles() for the factory reset
 #include "mdns_setup.h"
 #include "sendData.h"
@@ -254,6 +255,14 @@ void loop() {
     }
 
     reconnectWiFi();
+    wifi_link_sample();     // Self-throttling; one RSSI sample every 10 s
+
+    /*
+     * Self-throttling, and does nothing at all unless the link has been measurably poor for
+     * ten minutes. When it does act it blocks this task for a few seconds to scan and
+     * re-associate - see the rationale in wifi_link.cpp.
+     */
+    wifi_link_check_ap();
 
     screenFlip(); // This must be in the loop
 }
