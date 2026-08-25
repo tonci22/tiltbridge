@@ -432,12 +432,6 @@ void wifi_link_check_ap() {
         return;
     }
 
-    wifi_ap_record_t cur;
-    if (esp_wifi_sta_get_ap_info(&cur) != ESP_OK) {
-        poorSinceMs = 0;
-        return;
-    }
-
     int8_t   avg;
     uint16_t samples;
     portENTER_CRITICAL(&s_link_mux);
@@ -472,6 +466,23 @@ void wifi_link_check_ap() {
      */
     if (sender_health.isHeld())
         return;
+
+    /*
+     * Only now ask the driver where we are.
+     *
+     * This call used to sit at the top of the function, above every one of the cheap gates
+     * above - so on a healthy link it ran on every loop() pass, about a hundred times a
+     * second, taking the WiFi driver's lock each time to answer a question whose answer was
+     * then thrown away. Everything above reads our own counters and a couple of statics;
+     * the driver is consulted once, at the point where we are actually about to act on it.
+     */
+    wifi_ap_record_t cur;
+    if (esp_wifi_sta_get_ap_info(&cur) != ESP_OK) {
+        // Associated a moment ago by the manager's reckoning, but not now. Nothing to
+        // compare against, so stand down and let reconnectWiFi() own it.
+        poorSinceMs = 0;
+        return;
+    }
 
     const unsigned poorMinutes = (unsigned)((now - poorSinceMs) / 60000);
 
