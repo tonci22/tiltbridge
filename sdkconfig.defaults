@@ -22,6 +22,18 @@ CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 # The host stack needs to be larger to support certain WiFi Config operations
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
 
+# esp_wifi_config 0.2.0 moved its events from esp_bus, which ran a 4 KB task of its own, to
+# ESP-IDF's default event loop. The wifi_setup.cpp handlers therefore run on the system
+# event task, and 2304 bytes is not the budget they were written against: on_wifi_got_ip()
+# alone holds a wifi_status_t and two URL buffers while it formats a log line, restarts
+# mDNS and redraws the LCD. 4096 restores what they had.
+#
+# Setting it here is not enough on its own: every sdkconfig.<env> in this repo is checked
+# in and already carries this symbol, and an existing sdkconfig value beats a default. The
+# per-env files were edited to match - change both, or verify the generated sdkconfig
+# afterwards, because this file alone will silently not apply.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
 # esp_wifi_config component options
 CONFIG_WIFI_CFG_ENABLE_WEBUI=y
 CONFIG_WIFI_CFG_WEBUI_CUSTOM_PATH="/littlefs/wifiui"

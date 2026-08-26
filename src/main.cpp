@@ -8,7 +8,6 @@
 #include <freertos/task.h>
 #include <freertos/timers.h>
 #include <nvs_flash.h>
-#include <esp_bus.h>
 #include <NimBLEDevice.h>
 
 #include <thorlog.h>
@@ -74,12 +73,12 @@ void reboot()
 
 void setup() {
 
-    esp_log_level_set("esp_bus", ESP_LOG_VERBOSE);
-
-    // Initialize esp_bus (required for esp_wifi_config events)
-    ESP_LOGI("tiltbridge", "Initializing esp_bus.");
-    ESP_ERROR_CHECK(esp_bus_init());
-
+    /*
+     * Nothing to bring up for the WiFi events here any more. esp_wifi_config published
+     * them on its own esp_bus task until 0.2.0 and that bus needed an explicit init before
+     * anything could subscribe; it now publishes on ESP-IDF's default event loop, which
+     * initWiFi() creates immediately before it registers its handlers.
+     */
     serial();
 
     Log.verbose("Loading config.\r\n");
@@ -253,6 +252,10 @@ void loop() {
         http_server.lcd_reinit_rqd = false;
         lcd.reinit();
     }
+
+    // Asked for by the WiFi event handlers, which cannot do it themselves - re-registering
+    // mDNS's esp_event handlers from the loop they run on leaves it with none.
+    mdnsServicePendingReset();
 
     reconnectWiFi();
     wifi_link_sample();     // Self-throttling; one RSSI sample every 10 s

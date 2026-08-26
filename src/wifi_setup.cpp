@@ -13,7 +13,6 @@
 
 #include <thorlog.h>
 #include <esp_wifi_config.h>
-#include <esp_bus.h>
 #include <esp_log.h>
 
 #include "url_utils.h"
@@ -34,7 +33,7 @@ static bool wifi_was_disconnected = false;
 /*
  * Disconnect bookkeeping.
  *
- * WIFI_CFG_EVT_DISCONNECTED fires on every failed reconnect ATTEMPT, not once per outage,
+ * WIFI_CFG_EVENT_DISCONNECTED fires on every failed reconnect ATTEMPT, not once per outage,
  * so an access point that is simply gone produces an event every few seconds for as long
  * as it stays gone. The handler used to log and redraw the LCD on every one of those,
  * which is why its subscription was commented out - and with it disabled nothing ever set
@@ -53,8 +52,8 @@ static uint32_t wifi_disconnect_last_log_ms = 0;
 static int32_t  wifi_disconnect_last_reason = -1;
 
 // Event callback for WiFi connecting (attempting to connect to a network)
-static void on_wifi_connecting(const char *event, const void *data, size_t len, void *ctx) {
-    if (data == nullptr || len == 0) {
+static void on_wifi_connecting(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
+    if (data == nullptr) {
         return;
     }
     const char *ssid = (const char *)data;
@@ -70,8 +69,8 @@ static void on_wifi_connecting(const char *event, const void *data, size_t len, 
 }
 
 // Event callback for WiFi connected
-static void on_wifi_connected(const char *event, const void *data, size_t len, void *ctx) {
-    if (data == nullptr || len < sizeof(wifi_connected_t)) {
+static void on_wifi_connected(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
+    if (data == nullptr) {
         Log.warning("WiFi connected event received with invalid payload\r\n");
         return;
     }
@@ -80,7 +79,7 @@ static void on_wifi_connected(const char *event, const void *data, size_t len, v
 }
 
 // Event callback for WiFi got IP
-static void on_wifi_got_ip(const char *event, const void *data, size_t len, void *ctx) {
+static void on_wifi_got_ip(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
     // Queued readings need a real capture time; this is the first moment SNTP can work.
     time_sync_start();
 
@@ -111,7 +110,9 @@ static void on_wifi_got_ip(const char *event, const void *data, size_t len, void
                        (unsigned)((now - wifi_disconnect_first_ms) / 1000),
                        (unsigned)wifi_disconnect_events);
 
-            mdnsReset();  // Re-establish mDNS services
+            // Performed on loopTask: re-registering mDNS's event handlers from a handler
+            // running on this very loop leaves it with none. See mdns_setup.cpp.
+            mdnsRequestReset();
             lcd.display_logo();
 
             wifi_was_disconnected = false;
@@ -134,8 +135,8 @@ static void on_wifi_got_ip(const char *event, const void *data, size_t len, void
 }
 
 // Event callback for WiFi disconnected. Rate limited - see the counters above.
-static void on_wifi_disconnected(const char *event, const void *data, size_t len, void *ctx) {
-    if (data == nullptr || len < sizeof(wifi_disconnected_t)) {
+static void on_wifi_disconnected(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
+    if (data == nullptr) {
         Log.warning("WiFi disconnected event received with invalid payload\r\n");
         return;
     }
@@ -175,7 +176,7 @@ static void on_wifi_disconnected(const char *event, const void *data, size_t len
 }
 
 // Event callback for AP started
-static void on_wifi_ap_started(const char *event, const void *data, size_t len, void *ctx) {
+static void on_wifi_ap_started(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
     wifi_ap_status_t ap_status;
     Log.info("WiFi AP started for configuration.\r\n");
     if (wifi_cfg_get_ap_status(&ap_status) == ESP_OK) {
@@ -186,14 +187,14 @@ static void on_wifi_ap_started(const char *event, const void *data, size_t len, 
 }
 
 // Event callback for provisioning stopped — initialize the HTTP server routes
-static void on_provisioning_stopped(const char *event, const void *data, size_t len, void *ctx) {
+static void on_provisioning_stopped(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
     Log.info("WiFi provisioning stopped, initializing HTTP server.\r\n");
     http_server.init();
 }
 
 // Event callback for variable changes (e.g., mdns_name changed via WiFi config API)
-static void on_var_changed(const char *event, const void *data, size_t len, void *ctx) {
-    if (data == nullptr || len < sizeof(wifi_var_t)) {
+static void on_var_changed(void *arg, esp_event_base_t base, int32_t event_id, void *data) {
+    if (data == nullptr) {
         return;
     }
     const wifi_var_t *var = (const wifi_var_t *)data;
@@ -203,7 +204,7 @@ static void on_var_changed(const char *event, const void *data, size_t len, void
             Log.notice("mDNS name changed via WiFi config: %s\r\n", var->value);
             strlcpy(config.mdnsID, var->value, sizeof(config.mdnsID));
             config.save();
-            mdnsReset();
+            mdnsRequestReset();   // on loopTask - see mdns_setup.cpp
         }
     }
 }
@@ -221,7 +222,6 @@ void initWiFi() {
 
     esp_log_level_set("wifi_cfg", ESP_LOG_VERBOSE);
     esp_log_level_set("tiltbridge", ESP_LOG_VERBOSE);
-    esp_log_level_set("esp_bus", ESP_LOG_VERBOSE);
 
     // Initialize TCP/IP stack before starting HTTP server
     // esp_netif_init() is safe to call multiple times
@@ -240,14 +240,46 @@ void initWiFi() {
         Log.error("Failed to start HTTP server early: %s\r\n", esp_err_to_name(http_ret));
     }
 
-    // Subscribe to WiFi events
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_CONNECTING), on_wifi_connecting, NULL);
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_CONNECTED), on_wifi_connected, NULL);
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_GOT_IP), on_wifi_got_ip, NULL);
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_DISCONNECTED), on_wifi_disconnected, NULL);
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_AP_START), on_wifi_ap_started, NULL);
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_VAR_CHANGED), on_var_changed, NULL);
-    esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_PROVISIONING_STOPPED), on_provisioning_stopped, NULL);
+    /*
+     * Subscribe to WiFi events.
+     *
+     * esp_wifi_config 0.2.0 moved these off esp_bus and onto ESP-IDF's default event loop,
+     * so the handlers above now run on the system event task - shared with WIFI_EVENT and
+     * IP_EVENT - rather than on a bus task of their own. Two consequences:
+     *
+     *   - Their stack is CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE, not the 4 KB esp_bus ran
+     *     with. Raised to 4096 in sdkconfig.defaults to keep the budget they were written
+     *     against: on_wifi_got_ip() puts a wifi_status_t and two URL buffers on the stack
+     *     before it redraws the LCD.
+     *   - A handler that blocks holds up IDF's own networking callbacks, so nothing here
+     *     may wait on the network.
+     *
+     * The payload length is gone with the bus - the event id fixes the type, as it does
+     * for WIFI_EVENT - so the handlers check only for NULL.
+     *
+     * esp_bus_sub() returned an error nobody read. A subscription that silently failed to
+     * register surfaces months later as "the LCD stopped updating on reconnect", so these
+     * are logged.
+     */
+    static const struct {
+        int32_t id;
+        esp_event_handler_t handler;
+    } wifi_event_subs[] = {
+        {WIFI_CFG_EVENT_CONNECTING,           on_wifi_connecting},
+        {WIFI_CFG_EVENT_CONNECTED,            on_wifi_connected},
+        {WIFI_CFG_EVENT_GOT_IP,               on_wifi_got_ip},
+        {WIFI_CFG_EVENT_DISCONNECTED,         on_wifi_disconnected},
+        {WIFI_CFG_EVENT_AP_START,             on_wifi_ap_started},
+        {WIFI_CFG_EVENT_VAR_CHANGED,          on_var_changed},
+        {WIFI_CFG_EVENT_PROVISIONING_STOPPED, on_provisioning_stopped},
+    };
+
+    for (const auto &sub : wifi_event_subs) {
+        esp_err_t sub_err = esp_event_handler_register(WIFI_CFG_EVENT, sub.id, sub.handler, NULL);
+        if (sub_err != ESP_OK)
+            Log.error("Unable to subscribe to WiFi event %s: %s\r\n",
+                      wifi_cfg_event_name((wifi_cfg_event_t)sub.id), esp_err_to_name(sub_err));
+    }
 
     // Default variables for WiFi config - mdns_name is used to set the mDNS hostname
     // This provides a default value; if NVS has a stored value, that takes precedence
@@ -255,47 +287,77 @@ void initWiFi() {
         {"mdns_name", "tiltbridge"},
     };
 
-    // Configure WiFi Config
-    wifi_cfg_config_t wifi_config = {
-        .default_networks = NULL,
-        .default_network_count = 0,
-        .default_vars = default_vars,
-        .default_var_count = sizeof(default_vars) / sizeof(default_vars[0]),
-        .max_retry_per_network = 3,
-        .retry_interval_ms = 5000,
-        .retry_max_interval_ms = 60000,
-        .auto_reconnect = true,
-        .provisioning_mode = WIFI_PROV_ON_FAILURE,  // If we fail to connect to any known network, start provisioning (SoftAP + captive portal)
-        .stop_provisioning_on_connect = true,       // Stop the AP and captive portal and deregister httpd endpoints once we successfully connect to a WiFi network
-        .provisioning_teardown_delay_ms = 5000,
-        .http_post_prov_mode = WIFI_HTTP_API_ONLY,  // Unregister captive portal/webui routes after provisioning so TiltBridge can register its own
-        .default_ap = {
-            .ssid = WIFI_SETUP_AP_NAME,
-            .password = WIFI_SETUP_AP_PASS,
-            .channel = 1,
-            .max_connections = 4,
-            .hidden = false,
-            .ip = "192.168.4.1",
-            .netmask = "255.255.255.0",
-            .gateway = "192.168.4.1",
-            .dhcp_start = "192.168.4.2",
-            .dhcp_end = "192.168.4.20",
-        },
-        .always_use_ap_defaults = true, // Ignore any saved AP config - we want to ensure the captive portal is always available and consistent
-        .enable_ap = true,
-        .http = {
-            .httpd = idf_httpd_get_handle(),  // Share our HTTP server with wifi_cfg
-            .api_base_path = "/api/wifi",
-            .enable_auth = false,
-            .auth_username = NULL,
-            .auth_password = NULL,
-        },
-        // Renamed upstream from `ble` to `prov_ble`. esp_wifi_config is pinned to a moving
-        // `main` in idf_component.yml, so this field can drift again on a component update.
-        .prov_ble = {
-            .device_name = "TiltBridge-{id}",
-        },
+    /*
+     * Configure WiFi Config, starting from the library's own defaults.
+     *
+     * 0.2.0 stopped patching fields left at zero - zero now means zero - and made
+     * WIFI_CFG_DEFAULTS the documented starting point. That matters most for
+     * `auto_reconnect`: a bool has no spare "unset" value, so a config built from scratch
+     * used to disable reconnection silently. A zero retry interval is now rejected
+     * outright rather than turned into a no-delay retry loop.
+     *
+     * The macro cannot be spliced into the aggregate initialiser it was written for: C++
+     * wants designators in declaration order and forbids naming a field twice, and every
+     * override below names a field the macro already sets. So take the defaults as a value
+     * and assign over them. Anything not mentioned here is deliberately the library's
+     * default, and a field the library adds later arrives defaulted rather than zeroed.
+     *
+     * The pragma is about C++, not about the macro. GCC does not raise
+     * -Wmissing-field-initializers for a designated initialiser in C, but it does in C++, so
+     * naming a subset of the fields - which is the entire point of WIFI_CFG_DEFAULTS - warns
+     * once per field the macro does not mention, nested structs included. That is 49
+     * warnings, every one of them describing a field this code leaves value-initialised on
+     * purpose.
+     */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+    wifi_cfg_config_t wifi_config = { WIFI_CFG_DEFAULTS };
+#pragma GCC diagnostic pop
+
+    wifi_config.default_vars = default_vars;
+    wifi_config.default_var_count = sizeof(default_vars) / sizeof(default_vars[0]);
+
+    wifi_config.max_retry_per_network = 3;
+    wifi_config.retry_interval_ms = 5000;
+    wifi_config.retry_max_interval_ms = 60000;
+    wifi_config.auto_reconnect = true;
+
+    // If we fail to connect to any known network, start provisioning (SoftAP + captive portal)
+    wifi_config.provisioning_mode = WIFI_PROV_ON_FAILURE;
+    // Stop the AP and captive portal and deregister httpd endpoints once we successfully
+    // connect to a WiFi network
+    wifi_config.stop_provisioning_on_connect = true;
+    wifi_config.provisioning_teardown_delay_ms = 5000;
+    // Unregister captive portal/webui routes after provisioning so TiltBridge can register its own
+    wifi_config.http_post_prov_mode = WIFI_HTTP_API_ONLY;
+
+    // Stated in full rather than leaning on the library defaults: the captive portal's
+    // address is documented and shown on the LCD, so it should not move because an
+    // upstream default did.
+    wifi_config.default_ap = wifi_cfg_ap_config_t{
+        .ssid = WIFI_SETUP_AP_NAME,
+        .password = WIFI_SETUP_AP_PASS,
+        .channel = 1,
+        .max_connections = 4,
+        .hidden = false,
+        .ip = "192.168.4.1",
+        .netmask = "255.255.255.0",
+        .gateway = "192.168.4.1",
+        .dhcp_start = "192.168.4.2",
+        .dhcp_end = "192.168.4.20",
     };
+    // Ignore any saved AP config - we want to ensure the captive portal is always
+    // available and consistent
+    wifi_config.always_use_ap_defaults = true;
+    wifi_config.enable_ap = true;
+
+    wifi_config.http.httpd = idf_httpd_get_handle();  // Share our HTTP server with wifi_cfg
+    wifi_config.http.api_base_path = "/api/wifi";
+    wifi_config.http.enable_auth = false;
+
+    // Renamed upstream from `ble` to `prov_ble` before 0.1.0. Inert unless
+    // CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING is turned on.
+    wifi_config.prov_ble.device_name = "TiltBridge-{id}";
 
     // Initialize WiFi Config
     esp_err_t err = wifi_cfg_init(&wifi_config);

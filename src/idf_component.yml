@@ -19,20 +19,23 @@ dependencies:
   espressif/mdns: "^1.2"
   joltwallet/littlefs: "^1.14"
 
-  # Pinned to a fork, for two reasons.
+  # Pinned to a fork: upstream 0.2.2 (c69c036) verbatim, plus one commit making
+  # the station config ask for the STRONGEST matching access point instead of
+  # the first one heard.
   #
-  # `version: main` upstream now resolves to 0.2.2, which renamed every
-  # WIFI_CFG_EVT_* event to WIFI_CFG_EVENT_* and moved from esp_bus to esp_event.
-  # wifi_setup.cpp subscribes to seven of those by their old names, so a clean
-  # checkout would simply stop compiling - a moving branch was never a safe pin.
+  # 0.2.2 still builds its station config as `wifi_config_t cfg = {0}` and fills
+  # in only the SSID and password, so scan_method keeps the ESP-IDF zero default
+  # of WIFI_FAST_SCAN with no RSSI floor. On a network where a repeater shares
+  # the SSID that decides the association by scan order rather than by signal:
+  # three consecutive boots here associated at -84, -86 and -50 dBm without the
+  # device moving. See src/wifi_link.cpp, which sizes its roam re-association
+  # budget around the patched ALL_CHANNEL_SCAN.
   #
-  # The fork is upstream 1764ce4 (0.1.0) verbatim, plus one commit making the
-  # station config ask for the STRONGEST matching access point instead of the
-  # first one heard. Upstream still defaults to WIFI_FAST_SCAN with no RSSI
-  # floor, which on a network where a repeater shares the SSID decides the
-  # association by scan order: three consecutive boots here associated at -84,
-  # -86 and -50 dBm without the device moving. See src/wifi_link.cpp.
+  # A commit, not a branch. This used to track `main`, and 0.2.0 renamed every
+  # WIFI_CFG_EVT_* to WIFI_CFG_EVENT_* and moved events from esp_bus to
+  # esp_event, so a clean checkout stopped compiling with no change here. To
+  # take a new upstream release, rebase that one commit onto its tag in the fork
+  # (branch `tiltbridge-<version>`) and bump the SHA below.
   thorrak/esp_wifi_config:
     git: https://github.com/tonci22/esp_wifi_config.git
-    version: 29c2678f214821f64791dadab44bc8112eea57f4
-  # thorrak/esp_bus: "^1.0.3"
+    version: 2b5adb769d615f3a9816a32dadff6b1c8abe5fdf

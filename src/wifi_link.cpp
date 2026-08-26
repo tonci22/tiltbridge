@@ -369,7 +369,7 @@ void wifi_link_json(JsonObject o) {
  * Recovering from a good signal to the wrong access point.
  *
  * The component builds its station config as `wifi_config_t cfg = {0}` and fills in only
- * the SSID and password (esp_wifi_config_network.c:83-87). Every remaining field therefore
+ * the SSID and password (esp_wifi_config_network.c:90-92). Every remaining field therefore
  * takes the ESP-IDF zero default, and two of those defaults decide this device's fate on a
  * network with a repeater:
  *
@@ -696,8 +696,10 @@ void wifi_link_check_ap() {
     } else {
         /*
          * Still down when the budget ran out. The manager's auto-reconnect is armed and
-         * untouched - we never called wifi_cfg_disconnect(), which would have disabled it -
-         * so it keeps retrying on its own backoff and the queue covers the gap.
+         * untouched - we stood the link down with esp_wifi_disconnect(), not
+         * wifi_cfg_disconnect(), which suppresses reconnection until something asks to
+         * connect again - so it keeps retrying on its own backoff and the queue covers the
+         * gap.
          */
         wifi_roam_note_result(RoamResult::REASSOC_TIMEOUT);
         Log.warning("Still disconnected %u s after standing down; leaving it to the "

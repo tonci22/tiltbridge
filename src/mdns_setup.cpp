@@ -52,3 +52,38 @@ void mdnsReset() {
     // Update the mDNS name in wifi_cfg's custom variables
     wifi_cfg_set_var("mdns_name", config.mdnsID);
 }
+
+/*
+ * Deferred reset, for callers that run on the system event loop task.
+ *
+ * mdnsReset() tears mDNS down and brings it back, and mdns_free()/mdns_init() unregister
+ * and re-register the mDNS component's own esp_event handlers. Called from a handler
+ * running on that same loop, ESP-IDF cannot remove them inline: the loop task already
+ * holds loop->mutex, so esp_event_handler_unregister_with_internal()'s
+ * `xSemaphoreTake(mutex, 0)` fails and it takes the deferred path, which only marks the
+ * node `unregistered` and queues a cleanup event. mdns_init()'s re-register then finds
+ * that still-present node, logs "handler already registered, overwriting", updates only
+ * its argument - crucially without clearing `unregistered` - and the queued cleanup then
+ * deletes the node outright. mDNS is left with no event handlers at all.
+ *
+ * Observed on hardware as three "handler already registered, overwriting" warnings during
+ * the first reconnect after the esp_wifi_config 0.2.0 event migration, which is what moved
+ * these callers onto the event loop task in the first place - under esp_bus they ran on a
+ * task of their own and removal was inline.
+ *
+ * Deferring to loopTask also keeps mdnsReset()'s failure path - a one second delay and a
+ * restart - off the loop that carries IDF's own networking callbacks.
+ */
+static volatile bool s_reset_pending = false;
+
+void mdnsRequestReset() {
+    s_reset_pending = true;
+}
+
+void mdnsServicePendingReset() {
+    if (!s_reset_pending)
+        return;
+
+    s_reset_pending = false;
+    mdnsReset();
+}

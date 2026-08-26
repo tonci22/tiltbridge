@@ -210,7 +210,7 @@ Fixed in three parts:
 - once the manager has disagreed for `WIFI_MANAGER_RESYNC_AFTER_MS` (5 min), the
   association is dropped once, rate limited by `WIFI_MANAGER_RESYNC_COOLDOWN_MS`, forcing
   its state machine to re-derive from reality. This recovers a device already in it.
-- the `WIFI_CFG_EVT_DISCONNECTED` subscription is restored, rate limited so it cannot
+- the `WIFI_CFG_EVENT_DISCONNECTED` subscription is restored, rate limited so it cannot
   storm — it fires per failed *attempt*, not per outage, which is why it was commented out.
 
 Verified on hardware: `wifiFlagDisagreements` frozen at 5845 across two hours, having been
@@ -285,54 +285,108 @@ that reading. `QUEUE_MAX_SPARSE_TERMINATED` was deliberately left at 64 — rais
 reduce the resend window without addressing a permanently stuck head, and the reason for the
 current value has not been disproven.
 
-### 15. Pinned to esp_wifi_config 0.1.0 — upgrade to 0.2.2 is owed, next iteration
+### 15. FIXED — upgraded to esp_wifi_config 0.2.2; events moved to `esp_event`
 
-`src/idf_component.yml` pins `thorrak/esp_wifi_config` to
-`tonci22/esp_wifi_config@29c2678` — upstream `1764ce4` (0.1.0) verbatim plus one commit
-setting `WIFI_ALL_CHANNEL_SCAN` and `WIFI_CONNECT_AP_BY_SIGNAL` on the station config. The
-manifest previously asked for `version: main`, which is not a pin at all: upstream is now on
-0.2.2 and a clean checkout would have resolved to it and stopped compiling.
+`src/idf_component.yml` now pins `tonci22/esp_wifi_config@2b5adb7` — upstream `c69c036`
+(0.2.2) verbatim, plus the same single commit setting `WIFI_ALL_CHANNEL_SCAN` and
+`WIFI_CONNECT_AP_BY_SIGNAL` on the station config, cherry-picked onto a second branch
+(`tiltbridge-0.2.2`) exactly as this entry anticipated. Still a commit and not a branch:
+tracking `main` is what let 0.2.0 break the build with no change on this side.
 
-**Do the 0.2.2 upgrade in the next iteration.** Three of its changes land on defects that are
-live in this tree:
+**What the upgrade fixes.**
 
-- `wifi_cfg_disconnect()` no longer sets `config.auto_reconnect = false`. In 0.1.0 it does,
-  and the component exposes no setter to put it back, so `reconnectWiFi()`'s manager-resync
-  path permanently disables auto-reconnect the first time it fires. This is a real bug today,
-  not a theoretical one.
-- The auto-reconnect retry is scheduled (`reconnect_pending` + `reconnect_due_tick`) instead
-  of a `vTaskDelay()` executed inside the disconnect event handler, and each retry iteration
-  stops clearing `CONNECTED_BIT` before waiting on it. Together those are why any disconnect
-  the manager did not initiate leaves its `state` field stale for up to a minute: it sleeps
-  five seconds, rewrites the station config as `{0}`, and can erase the very got-IP evidence
-  that would resynchronise it. `wifi_link_check_ap()` provokes this every time it stands the
-  link down — measured at one episode of ~60 s per move.
+- `wifi_cfg_disconnect()` no longer clears `config.auto_reconnect`. 0.2.2 sets a runtime
+  `reconnect_suppressed` flag that `wifi_cfg_connect()` lifts, so `reconnectWiFi()`'s
+  manager-resync path can no longer permanently disable auto-reconnect the first time it
+  fires. That was a live bug and it is gone by construction — **established by reading both
+  versions of the function, not on hardware.**
+- The auto-reconnect retry is scheduled (`reconnect_pending`) rather than a `vTaskDelay()`
+  executed inside the disconnect handler, and each retry iteration clears `CONNECTED_BIT`
+  before waiting on it. Those are the mechanism behind ~60 s of stale `state` after any
+  disconnect the manager did not initiate, which `wifi_link_check_ap()` provokes on every
+  move. **Expected to improve; not measured.**
 
-  **The consequences are mild**, which is worth recording because the old per-poll counter
-  made them look severe. Uploads continue throughout, because `network_is_usable()` trusts
-  the netif over the manager — that fallback is the whole point. got-IP still fires, so
-  `mdnsReset()` runs and mDNS re-registers. The provisioning AP needs a total connect failure,
-  so it is not raised. `reconnectWiFi()`'s resync needs five minutes, so it never fires for
-  these. The real cost is `/api/wifi/status` reading blank for about a minute.
-- `WIFI_CFG_DEFAULTS` would clear the ~20 `-Wmissing-field-initializers` warnings the
-  `wifi_cfg_config_t` initialiser in `wifi_setup.cpp` currently emits.
+**What it does not fix**, as this entry predicted: access-point selection. `scan_method` and
+`sort_method` are still absent from both connect sites in 0.2.2, which is why the fork
+survives the upgrade rather than being retired.
 
-**0.2.2 does NOT fix access-point selection.** `scan_method` and `sort_method` are still
-absent from both of its connect sites, so the fork survives the upgrade: it needs a second
-branch, upstream 0.2.2 plus the same two-line patch.
+**What the migration touched.**
 
-**Scope.** Upstream ships `MIGRATION.md` and the work is mechanical, essentially one file:
+- `wifi_setup.cpp` — seven `esp_bus_sub(...)` became
+  `esp_event_handler_register(WIFI_CFG_EVENT, WIFI_CFG_EVENT_*, ...)`, driven off a table so
+  that a registration which fails is logged rather than discarded as `esp_bus_sub()`'s result
+  was; the seven handlers take the esp_event signature; the `len < sizeof(...)` payload
+  guards became NULL checks, the event id now fixing the type; the `wifi_cfg_config_t` is
+  built from `WIFI_CFG_DEFAULTS` and overridden by assignment.
+- `main.cpp` — `esp_bus.h` and `esp_bus_init()` dropped, with nothing replacing them:
+  `initWiFi()` already creates the default event loop immediately before it registers.
+- `sdkconfig.defaults` — `CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096`; see the risk below.
+- `esp_bus` has no remaining user and no longer appears in `dependencies.lock`.
 
-- `wifi_setup.cpp` — seven `esp_bus_sub(WIFI_EVT(WIFI_CFG_EVT_X), h, NULL)` become
-  `esp_event_handler_register(WIFI_CFG_EVENT, WIFI_CFG_EVENT_X, h, NULL)`; the seven handlers
-  take the standard esp_event signature `(void*, esp_event_base_t, int32_t, void*)`; the
-  `len < sizeof(...)` payload guards go away because `event_data` is already typed; the config
-  initialiser becomes `WIFI_CFG_DEFAULTS`
-- `main.cpp` — drop `#include <esp_bus.h>` and the esp_bus init
-- `esp_bus` then has no remaining user in `src/` and can be dropped entirely
+**One claim in the previous version of this entry was wrong.** It said `WIFI_CFG_DEFAULTS`
+would clear the ~20 `-Wmissing-field-initializers` warnings the initialiser emitted. It does
+the opposite: GCC exempts designated initialisers from that warning in C but not in C++, and
+the macro leaves more fields unnamed than the hand-written initialiser did, so 20 warnings
+became 49. Suppressed with a scoped `#pragma GCC diagnostic` around the initialiser, which
+is the honest description — every one of those fields is value-initialised on purpose.
 
-Deliberately deferred rather than bundled with the WiFi observability and roam-recovery work,
-so that a regression in either can be attributed to one of them.
+**Running on the event loop task broke mDNS, and that is fixed.** The handlers no longer
+have a task of their own; they run on the system event loop task, shared with `WIFI_EVENT`
+and `IP_EVENT`. `on_wifi_got_ip()` called `mdnsReset()` directly, and `mdns_free()` /
+`mdns_init()` unregister and re-register the mDNS component's own esp_event handlers — which
+that loop cannot do inline. `esp_event_handler_unregister_with_internal()` attempts a
+non-recursive `xSemaphoreTake(loop->mutex, 0)`; on the loop's own task the mutex is already
+held, so it takes the deferred path, which only marks the node `unregistered` and queues a
+cleanup event. `mdns_init()`'s re-register then finds that still-present node, logs `handler
+already registered, overwriting`, updates only its `arg` — without clearing `unregistered` —
+and the queued cleanup deletes the node outright. mDNS is left with no event handlers.
+
+**Proven on hardware**: three `handler already registered, overwriting` warnings on the
+first reconnect, none after the fix. Fixed with `mdnsRequestReset()` /
+`mdnsServicePendingReset()` — the WiFi handlers ask, loopTask performs, where the mutex is
+not held and removal happens inline. It also keeps `mdnsReset()`'s failure path (a one
+second delay and a restart) off the loop that carries IDF's networking callbacks.
+**Anything else that registers or unregisters an esp_event handler must not be called from
+these handlers either.**
+
+What still runs on the event loop task: the LCD redraws, and `on_provisioning_stopped()`'s
+HTTP route registration — httpd handlers, not esp_event, so unaffected by the above. Neither
+waits on the network. **Neither has been stack-profiled**; the 4096 bump restores the budget
+esp_bus gave them rather than being a measured high-water mark.
+
+**A trap worth recording**: adding `CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE` to
+`sdkconfig.defaults` did nothing. Every `sdkconfig.<env>` here is checked in and already
+carried that symbol at 2304, and an existing sdkconfig value beats a default — the
+regenerated files still read 2304 and the bump was inert until the per-env files were
+edited too. Check the generated sdkconfig, not the defaults file.
+
+**Verified on hardware** — `esp32_headless`, ESP32-D0WD-V3, on `/dev/cu.usbserial-0001`:
+
+- Boot: all seven subscriptions registered (nothing logged a failure), then `connecting` →
+  `connected` (channel 11, RSSI −51) → `got IP` → `provisioning stopped` → HTTP server up →
+  mDNS registered. The payload casts survive the migration — SSID, channel, RSSI and the
+  disconnect reason code all print correctly off `event_data`.
+- `/api/wifi/status` answers with `Transfer-Encoding: chunked`, so 0.2.2's streaming JSON
+  writer is live and ordinary clients handle it.
+- Reconnect cycle via `POST /api/wifi/disconnect`: `WiFi disconnected … reason 8` →
+  auto-reconnect → `Reconnected to WiFi after 6 s and 1 disconnect event(s)` → `mDNS
+  responder restarted`. Afterwards `managerConnected: true`, `desyncEpisodes: 0`, and
+  `tiltbridge.local` still resolved to the device, which is the mDNS fix above being
+  exercised end to end.
+- All six environments compile and link. `wifi_setup.cpp`, `wifi_link.cpp`, `mdns_setup.cpp`
+  and `main.cpp` build without warnings; the three `-Wmissing-field-initializers` left in
+  `src/` are pre-existing, in `bridge_lcd_impl.cpp`'s I2C config, and unrelated.
+
+**Not covered**: a real access-point outage (only a software-initiated disconnect was
+tested), the SoftAP/provisioning path, and any target with an LCD.
+
+**Incidental confirmation for issue 10**: `POST /api/wifi/connect` while the STA is already
+associated still reproduces the stuck connect loop in 0.2.2 — `esp_wifi_connect()` returns
+"sta is connected, disconnect before connecting to new ap", the manager counts that as a
+failed attempt, exhausts its three retries and raises the provisioning AP, while the link
+itself stays up and `/api/network/` correctly reports `associated: true` with
+`managerConnected: false`. `reconnectWiFi()`'s `sta_link_is_up()` guard is what keeps the
+firmware out of this; going through the component's own HTTP API bypasses that guard.
 
 ---
 
