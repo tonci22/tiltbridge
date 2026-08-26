@@ -359,32 +359,57 @@ bool clearCalibrationPoints(uint8_t color, const char* deviceId) {
 }
 
 void deleteAllCalibrationFiles() {
-    DIR *dir = opendir(CONFIG_DIR);
-    if (dir == nullptr)
-        return;
-
-    // Collect first, delete after closing: removing entries while walking a directory is not
-    // guaranteed to be safe on LittleFS.
-    // sizeof(CONFIG_DIR) + '/' + the longest name LittleFS will hand back.
-    char victims[MAX_DEVICE_CONFIGS + TILT_COLORS][sizeof(CONFIG_DIR) + 1 + 256];
+    /*
+     * One file per pass: open the directory, take the first calibration file, close, delete.
+     *
+     * This used to collect every match up front into
+     * `char victims[MAX_DEVICE_CONFIGS + TILT_COLORS][sizeof(CONFIG_DIR) + 1 + 256]` - 16
+     * rows of 272 bytes, 4,352 of the 8 KB loopTask stack, which is where a factory reset
+     * runs. It also stopped silently at 16 entries, so a device with more calibration files
+     * than that kept the remainder across a reset that claims to erase everything.
+     *
+     * Reopening per file preserves the reason the collect-then-delete shape existed -
+     * removing entries while walking a directory is not guaranteed safe on LittleFS - at
+     * one 272-byte buffer instead of sixteen. A factory reset deletes a handful of files
+     * once, so the repeated scans cost nothing anybody can measure.
+     */
     size_t count = 0;
 
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != nullptr && count < (sizeof(victims) / sizeof(victims[0]))) {
-        const char *name = entry->d_name;
-        const size_t len = strlen(name);
+    for (;;) {
+        DIR *dir = opendir(CONFIG_DIR);
+        if (dir == nullptr)
+            break;
 
-        // "dev-<MAC>-cal.json" and "<colour index>-cal.json"
-        if (len < 9 || strcmp(name + len - 9, "-cal.json") != 0)
-            continue;
+        // sizeof(CONFIG_DIR) + '/' + the longest name LittleFS will hand back.
+        char victim[sizeof(CONFIG_DIR) + 1 + 256];
+        bool found = false;
 
-        snprintf(victims[count], sizeof(victims[0]), "%s/%s", CONFIG_DIR, name);
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            const char *name = entry->d_name;
+            const size_t len = strlen(name);
+
+            // "dev-<MAC>-cal.json" and "<colour index>-cal.json"
+            if (len < 9 || strcmp(name + len - 9, "-cal.json") != 0)
+                continue;
+
+            snprintf(victim, sizeof(victim), "%s/%s", CONFIG_DIR, name);
+            found = true;
+            break;
+        }
+        closedir(dir);
+
+        if (!found)
+            break;
+
+        if (remove(victim) != 0) {
+            // The next pass would select the same file and fail the same way, so stop
+            // rather than spin on it.
+            Log.error("Unable to delete %s during factory reset.\r\n", victim);
+            break;
+        }
         count++;
     }
-    closedir(dir);
-
-    for (size_t i = 0; i < count; i++)
-        remove(victims[i]);
 
     if (count > 0)
         Log.warning("Deleted %u calibration point file%s.\r\n",

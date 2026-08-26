@@ -46,14 +46,39 @@ The code comments acknowledge the hazard and say the monitor task must never tou
 but the HTTP handler does exactly that. Survived 530 polls at 60 s intervals without incident,
 so it is latent rather than frequent — but polling `/api/json/` is actively exercising it.
 
-### 4. Large stack frames on the 8 KB `loopTask`
+### 4. FIXED — large stack frames on the 8 KB `loopTask`
 
-- `src/targets/legacy_fermentrack.cpp:27` — `char tilt_data[TILT_ALL_DATA_SIZE + 128]` is
-  ~4 KB, then calls `http_request()` which adds ~700 B plus `esp_http_client_perform()`'s own
-  frame. ~4.7 KB of 8 KB in one call chain. Use the `measureJson` + heap + verify pattern
-  already proven at `src/targets/fermentrack_2.cpp:292-311`.
-- `src/http_calibration.cpp:355` — `char victims[16][272]` is ~4.3 KB, but only on a
-  user-triggered factory reset.
+Both call sites are off the stack.
+
+- `src/targets/legacy_fermentrack.cpp` — `char tilt_data[TILT_ALL_DATA_SIZE + 128]` was 4,015
+  bytes (477 * 8 + 71 + 128) and stayed live across `http_request()`, which adds its own frame
+  plus `esp_http_client_perform()`'s underneath it: roughly 4.7 KB of the 8 KB in one call
+  chain, on the task that also runs every other sender. Now the `measureJson` + heap + verify
+  pattern from `fermentrack_2.cpp`, with the `JsonDocument`s scoped so they are destroyed
+  before the request goes out. An allocation failure or a short serialise logs and marks the
+  cycle failed instead of sending a truncated body.
+- `src/http_calibration.cpp` — `char victims[MAX_DEVICE_CONFIGS + TILT_COLORS][...]` was 16
+  rows of 272 bytes, 4,352 of the same stack. Now one 272-byte buffer, deleting one file per
+  directory pass. Reopening the directory per file preserves the reason the collect-then-delete
+  shape existed at all: removing entries while walking one is not guaranteed safe on LittleFS.
+
+  **That array was also silently capping a factory reset at 16 files.** The `readdir` loop
+  stopped once it was full, so a device with more calibration files than that kept the
+  remainder across a reset that claims to erase everything. The same change fixes both.
+
+**Verified on hardware** (`esp32_headless`):
+
+- Legacy Fermentrack pointed at a listener on the LAN: `Calling send to Legacy Fermentrack.`
+  → `Completed send to Legacy Fermentrack.`, with the payload arriving as valid JSON carrying
+  exactly `mdns_id` and `tilts`. **Caveat**: no Tilts were in range, so the body was 37 bytes.
+  The success and free paths are proven; the large-payload case that motivated the fix is not,
+  and neither are the allocation-failure and truncation branches.
+- 22 calibration files created over the API, then a factory reset: `Deleted 22 calibration
+  point files.` and a clean restart. Twenty-two is deliberately six past the old cap, so this
+  covers the silent-16 bug as well as the stack.
+
+An `ESP_ERR_HTTP_INCOMPLETE_DATA` seen on the first two sends was the test listener replying
+without a `Content-Length`, not the firmware — worth knowing before anyone re-runs this.
 
 ### 5. `buildResolvedUrl` can write past its buffer
 
