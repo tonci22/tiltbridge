@@ -48,7 +48,7 @@ dependencies:
       type: service
     version: 1.22.3
   thorrak/esp_wifi_config:
-    component_hash: eb4803140e7d88be7fe3937b475de4227ce99363f078016136084d1406cfc3fb
+    component_hash: 908a1cff1c4d10359a6f5296fcbfadd8c0496f427a603008cfe7fc7c21f31af3
     dependencies:
     - name: idf
       version: '>=5.4'
@@ -67,13 +67,13 @@ dependencies:
     - esp32c3
     - esp32c6
     - esp32h2
-    version: 2b5adb769d615f3a9816a32dadff6b1c8abe5fdf
+    version: 1610265bd757e3f29c581a3da642caac24ee1c2f
 direct_dependencies:
 - espressif/mdns
 - h2zero/esp-nimble-cpp
 - idf
 - joltwallet/littlefs
 - thorrak/esp_wifi_config
-manifest_hash: 55498f1c2f1d07437cdb63248acc8ca618f786e7d8f4aac38afb63c149abd501
+manifest_hash: 887240e861fb88e8194339b96106ad70e1f834d1ae2989e702198c8c5a0d3a1e
 target: esp32s3
 version: 2.0.0

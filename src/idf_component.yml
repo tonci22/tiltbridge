@@ -16,12 +16,24 @@ dependencies:
   #   public: true
 
   h2zero/esp-nimble-cpp: ^2.3.4
-  espressif/mdns: "^1.2"
+  # Pinned exactly, not "^1.2". The caret range let mdns float from 1.11.3 to 1.12.0 the
+  # moment dependencies.lock was deleted to re-resolve something else, which also turned on
+  # CONFIG_MDNS_ENABLE_BROWSE in every sdkconfig. mDNS sits directly in the reconnect path
+  # (mdnsReset() runs on every got-IP), so it moves when we decide to move it.
+  espressif/mdns: "1.11.3"
   joltwallet/littlefs: "^1.14"
 
-  # Pinned to a fork: upstream 0.2.2 (c69c036) verbatim, plus one commit making
-  # the station config ask for the STRONGEST matching access point instead of
-  # the first one heard.
+  # Pinned to a fork: upstream 0.2.2 (c69c036) verbatim, plus two commits.
+  #
+  # The second binds the captive portal's DNS server to the SoftAP address instead
+  # of INADDR_ANY. It answers every name with the portal's own address, which is
+  # correct for a client that joined the portal - but on INADDR_ANY it served that
+  # answer on the station interface too, making a provisioned device a rogue
+  # resolver on its own LAN for as long as the portal was up. Measured here:
+  # `dig example.com @<station-ip>` returned 192.168.4.1, in ten windows in a day.
+  #
+  # The first makes the station config ask for the STRONGEST matching access point
+  # instead of the first one heard.
   #
   # 0.2.2 still builds its station config as `wifi_config_t cfg = {0}` and fills
   # in only the SSID and password, so scan_method keeps the ESP-IDF zero default
@@ -34,8 +46,8 @@ dependencies:
   # A commit, not a branch. This used to track `main`, and 0.2.0 renamed every
   # WIFI_CFG_EVT_* to WIFI_CFG_EVENT_* and moved events from esp_bus to
   # esp_event, so a clean checkout stopped compiling with no change here. To
-  # take a new upstream release, rebase that one commit onto its tag in the fork
+  # take a new upstream release, rebase both commits onto its tag in the fork
   # (branch `tiltbridge-<version>`) and bump the SHA below.
   thorrak/esp_wifi_config:
     git: https://github.com/tonci22/esp_wifi_config.git
-    version: 2b5adb769d615f3a9816a32dadff6b1c8abe5fdf
+    version: 1610265bd757e3f29c581a3da642caac24ee1c2f
