@@ -140,6 +140,10 @@ private:
     size_t   m_pendingCount = 0;
     bool     m_healthy = false;
 
+    // Removes delivered records from flash and collapses termination state to one head, so
+    // that a reboot cannot resurrect them. See the comment on the definition.
+    void purgeTerminatedRecords();
+
     uint32_t m_sparseTerminated[QUEUE_MAX_SPARSE_TERMINATED] = {};
     size_t   m_sparseCount = 0;
 };

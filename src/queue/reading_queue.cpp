@@ -696,7 +696,181 @@ void ReadingQueue::compact() {
         m_firstSegment++;
     }
 
+    // Whole-segment deletion above only ever reaches a LEADING segment in which every
+    // record is delivered. Everything else is handled here.
+    purgeTerminatedRecords();
+
     rewriteJournal();
+}
+
+/**
+ * @brief Physically remove delivered records, then collapse termination state to one head.
+ *
+ * WHY THIS EXISTS
+ *
+ * Termination used to be tracked purely in RAM as a head sequence plus a sparse table of at
+ * most QUEUE_MAX_SPARSE_TERMINATED out-of-order entries, journalled and replayed on load.
+ * That representation is lossy, and loses in the one direction that costs data.
+ *
+ * The head only advances through a CONTIGUOUS run. A single sequence that is never
+ * acknowledged - a record shed for space, a reading the server rejected, any gap at all -
+ * pins the head permanently, after which the 64-slot table is the only record of what was
+ * delivered. Past 64, markTerminated() discards the termination and says so:
+ *
+ *     W: Queue: sparse termination table full; sequence 287u may be resent.
+ *
+ * At runtime that merely resends. Across a reboot it is worse: loadJournal() replays every
+ * acknowledgement back through the same 64 slots, so a queue that had genuinely drained
+ * comes back full. Measured on the production device on 2026-09-03 - `queued 0, bytesUsed 0`
+ * before a restart, `Queue ready: 366 pending` after it, the same 366 records then re-sent
+ * for six days and refused every time as duplicates (savedRows 0).
+ *
+ * The second-order cost is the expensive one. pendingCount() above zero puts
+ * send_to_google_v2() on the drain path on every pass, so the LIVE reading is never
+ * collected: current data waits behind a backlog the sheet already has.
+ *
+ * THE FIX
+ *
+ * Stop tracking holes. A delivered record is removed from flash, so what remains IS the
+ * pending set - a fact that survives a reboot without any journal replay. Termination state
+ * then collapses to a single head below the lowest surviving record, and the sparse table
+ * starts empty every time rather than filling up with history.
+ *
+ * Cost is one rewrite of the segments that actually contain delivered records, on the same
+ * task that appends, after a drain. Segments are QUEUE_SEGMENT_MAX_RECORDS long, so this is
+ * a few KB of copying, not the whole queue.
+ */
+void ReadingQueue::purgeTerminatedRecords() {
+    if (m_firstSegment == 0)
+        return;
+
+    uint32_t lowestSurviving = 0;
+    bool anySurvivor = false;
+    uint32_t removedTotal = 0;
+
+    for (uint32_t seg = m_firstSegment; seg <= m_lastSegment; seg++) {
+        char path[64];
+        segmentPath(seg, path, sizeof(path));
+
+        FILE *in = fopen(path, "rb");
+        if (in == nullptr)
+            continue;
+
+        // Two passes over a segment rather than holding it in RAM: loopTask has an 8 KB
+        // stack and a segment is far larger than that.
+        uint16_t keep = 0, drop = 0;
+        QueuedReading rec;
+        while (fread(&rec, 1, QUEUE_RECORD_SIZE, in) == QUEUE_RECORD_SIZE) {
+            if (!qr_is_valid(rec))
+                continue;
+            if (isTerminated(rec.sequence))
+                drop++;
+            else
+                keep++;
+        }
+
+        if (drop == 0) {
+            // Nothing to remove. Still needs scanning for the lowest surviving sequence.
+            rewind(in);
+            while (fread(&rec, 1, QUEUE_RECORD_SIZE, in) == QUEUE_RECORD_SIZE) {
+                if (!qr_is_valid(rec))
+                    continue;
+                if (!anySurvivor || rec.sequence < lowestSurviving) {
+                    lowestSurviving = rec.sequence;
+                    anySurvivor = true;
+                }
+            }
+            fclose(in);
+            continue;
+        }
+
+        char tmp[72];
+        snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+        FILE *out = fopen(tmp, "wb");
+        if (out == nullptr) {
+            // Leaving the segment as it is costs a resend, not a loss.
+            Log.warning("Queue: unable to rewrite segment %lu; %u delivered record%s stay on flash.\r\n",
+                        (unsigned long)seg, (unsigned)drop, (drop == 1) ? "" : "s");
+            fclose(in);
+            continue;
+        }
+
+        rewind(in);
+        uint16_t written = 0;
+        bool writeFailed = false;
+        while (fread(&rec, 1, QUEUE_RECORD_SIZE, in) == QUEUE_RECORD_SIZE) {
+            if (!qr_is_valid(rec) || isTerminated(rec.sequence))
+                continue;
+
+            if (fwrite(&rec, 1, QUEUE_RECORD_SIZE, out) != QUEUE_RECORD_SIZE) {
+                writeFailed = true;
+                break;
+            }
+            written++;
+
+            if (!anySurvivor || rec.sequence < lowestSurviving) {
+                lowestSurviving = rec.sequence;
+                anySurvivor = true;
+            }
+        }
+
+        fclose(in);
+        const bool flushed = (fflush(out) == 0);
+        fclose(out);
+
+        if (writeFailed || !flushed) {
+            // The original is untouched, so the records are still there to resend.
+            remove(tmp);
+            Log.warning("Queue: rewrite of segment %lu failed; leaving it intact.\r\n",
+                        (unsigned long)seg);
+            continue;
+        }
+
+        if (written == 0) {
+            remove(tmp);
+            if (seg == m_lastSegment) {
+                // The active segment must keep existing for appends to land in it.
+                FILE *trunc = fopen(path, "wb");
+                if (trunc != nullptr)
+                    fclose(trunc);
+                m_lastSegmentCount = 0;
+            } else if (remove(path) == 0) {
+                if (seg == m_firstSegment && m_firstSegment < m_lastSegment)
+                    m_firstSegment++;
+            }
+        } else if (rename(tmp, path) != 0) {
+            remove(tmp);
+            Log.warning("Queue: unable to replace segment %lu; leaving it intact.\r\n",
+                        (unsigned long)seg);
+            continue;
+        } else if (seg == m_lastSegment) {
+            m_lastSegmentCount = written;
+        }
+
+        removedTotal += drop;
+    }
+
+    /*
+     * Everything still on flash is pending, so the terminated set is now expressible as one
+     * number: a head below the lowest surviving record. The sparse table starts empty, which
+     * is what stops it filling with history and losing terminations on the next load.
+     *
+     * With nothing left, the head goes to the last sequence issued - every record ever
+     * written has been dealt with, and a late acknowledgement for any of them is then
+     * correctly a no-op rather than a resurrection.
+     */
+    const uint32_t newHead = anySurvivor ? (lowestSurviving - 1)
+                                         : (m_nextSequence > 0 ? m_nextSequence - 1 : 0);
+
+    if (newHead > m_headSequence)
+        m_headSequence = newHead;
+
+    m_sparseCount = 0;
+
+    if (removedTotal > 0)
+        Log.info("Queue: purged %lu delivered record%s from flash; head now %lu, %u pending.\r\n",
+                 (unsigned long)removedTotal, (removedTotal == 1) ? "" : "s",
+                 (unsigned long)m_headSequence, (unsigned)m_pendingCount);
 }
 
 void ReadingQueue::rewriteJournal() {
