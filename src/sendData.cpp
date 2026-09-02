@@ -535,6 +535,18 @@ void dataSendHandler::take_queue_snapshot()
 
     if (stored > 0)
         Log.notice("Queue snapshot: stored %u reading%s.\r\n", stored, (stored == 1) ? "" : "s");
+
+    /*
+     * A snapshot that collects readings and stores none of them used to be completely
+     * silent: the only log line was guarded by `stored > 0`. That is the shape of a
+     * disappearance - readings are collected, given record ids, and then dropped with
+     * nothing said, on the device or anywhere else - so it is now an error in its own right.
+     */
+    if (stored < collected)
+        Log.error("Queue snapshot: queue REFUSED %u of %u readings - those are lost. "
+                  "Queue healthy %d, pending %u.\r\n",
+                  (unsigned)(collected - stored), (unsigned)collected,
+                  (int)reading_queue.isHealthy(), (unsigned)reading_queue.pendingCount());
 }
 
 /**

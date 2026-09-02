@@ -45,6 +45,35 @@
 // drains in minutes rather than at the normal 10-minute cadence.
 #define GSHEETS_V2_DRAIN_DELAY_SEC 5
 
+/**
+ * @brief The "status" or "code" field of a reply, or "" when absent.
+ */
+static const char *replyString(const JsonDocument &reply, const char *key)
+{
+    return reply[key].is<const char *>() ? reply[key].as<const char *>() : "";
+}
+
+/**
+ * @brief Whether a parsed reply actually acknowledges anything.
+ *
+ * The Apps Script answers "ok" when every record landed and "partial" when some did. Its
+ * refusals - WEBAPP_BUSY when it cannot take the spreadsheet lock, BATCH_NO_READINGS for a
+ * malformed request - come back as HTTP 200 with status "error" and an empty
+ * acceptedRecordIds, and the script's own comment says it expects the batch back unchanged.
+ *
+ * Anything unrecognised is treated as a refusal. A reply this firmware does not understand
+ * is not permission to drop a reading.
+ */
+static bool statusIsAcknowledgement(const JsonDocument &reply)
+{
+    const char *status = replyString(reply, "status");
+
+    if (status[0] == '\0')
+        return true;   // pre-status script: fall back to acceptedRecordIds alone
+
+    return strcmp(status, "ok") == 0 || strcmp(status, "partial") == 0;
+}
+
 bool dataSendHandler::send_to_google_v2()
 {
     if (!send_gSheets && !send_backlog_now)
@@ -258,6 +287,10 @@ bool dataSendHandler::send_to_google_v2()
     bool result = false;
     size_t acceptedCount = 0;
 
+    // Set by every path that ends with live readings still undelivered. One shared block at
+    // the end acts on it, so no path can decide to keep readings and then fail to do so.
+    bool persistLive = false;
+
     if (res != sendResult::success) {
         // Covers HTTP errors, timeouts, and a successful POST whose response was lost.
         // Nothing is acknowledged, so the identical batch - with identical record ids -
@@ -269,32 +302,9 @@ bool dataSendHandler::send_to_google_v2()
                         httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
         queueUploadState = QueueUploadState::RETRYING;
 
-        /*
-         * A live reading exists only in this buffer, so persist it now rather than dropping
-         * it and waiting for the next snapshot.
-         *
-         * THESE records, not freshly captured ones. "Failed" includes a POST the server
-         * actually processed whose response was lost, and re-sending the identical record id
-         * is what lets the script's duplicate suppression absorb that. Capturing fresh values
-         * instead would mint a new id and write a second, near-identical row.
-         *
-         * This only fires once per outage: it leaves the queue non-empty, so every later pass
-         * takes the drain path above and persistence reverts to take_queue_snapshot() on its
-         * configured interval - which is what keeps the queue growing slowly.
-         */
-        if (!fromQueue && batchForRssi != nullptr && reading_queue.isHealthy()) {
-            uint16_t stored = 0;
-            for (size_t i = 0; i < count; i++) {
-                if (reading_queue.append(batchForRssi[i])) {
-                    resetCollectedRssiIntervals(&batchForRssi[i], 1);
-                    stored++;
-                }
-            }
-
-            if (stored > 0)
-                Log.notice("GSheets v2: persisted %u undelivered reading%s to the queue.\r\n",
-                           (unsigned)stored, (stored == 1) ? "" : "s");
-        }
+        // Persisted by the shared block below, which is the single place that decides what
+        // happens to live readings nobody acknowledged.
+        persistLive = true;
     } else {
         JsonDocument reply;
         const DeserializationError err = deserializeJson(reply, response);
@@ -307,11 +317,35 @@ bool dataSendHandler::send_to_google_v2()
                       err.c_str(), response);
             setTargetStatus(TARGET_GOOGLE_SHEETS, SEND_ERR_OTHER);
             queueUploadState = QueueUploadState::RETRYING;
+            persistLive = true;
         } else if (!reply["acceptedRecordIds"].is<JsonArrayConst>()) {
             Log.error("GSheets v2: response has no acceptedRecordIds array; treating as unacknowledged. "
                       "Has the Apps Script been updated for schemaVersion 2?\r\n");
             setTargetStatus(TARGET_GOOGLE_SHEETS, SEND_ERR_OTHER);
             queueUploadState = QueueUploadState::RETRYING;
+            persistLive = true;
+        } else if (!statusIsAcknowledgement(reply)) {
+            /*
+             * The endpoint answered, and answered honestly: HTTP 200 carrying
+             * status:"error" with an EMPTY acceptedRecordIds. WEBAPP_BUSY is the one seen in
+             * the field - the script could not take the spreadsheet lock within its ten
+             * second budget and says so, expecting the identical batch back under the
+             * identical ids.
+             *
+             * This used to land in the branch below purely because acceptedRecordIds was a
+             * well-formed array. An empty array is still an array, so the reply was read as
+             * success: SEND_OK zeroed consecutiveFailures, the snapshot that was supposed to
+             * rescue the readings then found queuePersistenceNeeded() false BECAUSE of that
+             * reset, and four live readings were dropped with nothing logged but a warning
+             * promising a retry that could never happen. Observed on 2026-09-02 at 19:58,
+             * losing record ids ...00000DB1 through ...DB4.
+             */
+            Log.error("GSheets v2: server refused the batch (status \"%s\", code \"%s\"); "
+                      "nothing acknowledged, keeping the readings.\r\n",
+                      replyString(reply, "status"), replyString(reply, "code"));
+            setTargetStatus(TARGET_GOOGLE_SHEETS, SEND_ERR_SERVER_ERROR);
+            queueUploadState = QueueUploadState::RETRYING;
+            persistLive = true;
         } else {
             for (JsonVariantConst v : reply["acceptedRecordIds"].as<JsonArrayConst>()) {
                 const char *id = v.as<const char *>();
@@ -323,9 +357,12 @@ bool dataSendHandler::send_to_google_v2()
                         acceptedCount++;
                 } else {
                     // Live records were never stored, so acceptance is simply "delivered".
+                    // The id is then blanked, which is how the persistence block below tells
+                    // delivered records from the ones it still has to keep.
                     for (size_t i = 0; i < count; i++) {
-                        if (strcmp(sentIds[i], id) == 0) {
+                        if (sentIds[i][0] != '\0' && strcmp(sentIds[i], id) == 0) {
                             acceptedCount++;
+                            sentIds[i][0] = '\0';
                             break;
                         }
                     }
@@ -340,13 +377,20 @@ bool dataSendHandler::send_to_google_v2()
             setTargetStatus(TARGET_GOOGLE_SHEETS, SEND_OK);
 
             if (acceptedCount < count) {
-                // Queued records simply stay queued and go out again under the same ids.
-                // Live ones have nowhere to go, so persist instead of dropping them - the
-                // snapshot captures every Tilt, including the ones that did not land.
-                Log.warning("GSheets v2: server accepted %u of %u records; %u will be retried.\r\n",
+                /*
+                 * Queued records simply stay queued and go out again under the same ids.
+                 * Live ones have nowhere to go, so they are persisted HERE, directly.
+                 *
+                 * This used to set snapshot_due and rely on take_queue_snapshot() to rescue
+                 * them, which cannot work from this branch: setTargetStatus(SEND_OK) three
+                 * lines above has just zeroed consecutiveFailures, so the snapshot's
+                 * queuePersistenceNeeded() gate sees no backlog, a usable network and no
+                 * failures, and returns without storing anything. The readings were dropped
+                 * and the warning below claimed they would be retried.
+                 */
+                Log.warning("GSheets v2: server accepted %u of %u records; keeping the other %u.\r\n",
                             (unsigned)acceptedCount, (unsigned)count, (unsigned)(count - acceptedCount));
-                if (!fromQueue)
-                    snapshot_due = true;
+                persistLive = true;
             } else {
                 Log.notice("GSheets v2: all %u records accepted (%u still queued).\r\n",
                            (unsigned)acceptedCount, (unsigned)reading_queue.pendingCount());
@@ -355,6 +399,55 @@ bool dataSendHandler::send_to_google_v2()
             queueUploadState = (reading_queue.pendingCount() > 0)
                              ? QueueUploadState::SENDING
                              : QueueUploadState::IDLE;
+        }
+    }
+
+    /*
+     * The one place that decides what happens to live readings nobody acknowledged.
+     *
+     * Every branch above that ends undelivered sets persistLive, so a reading can only be
+     * dropped here, deliberately, and never by a branch that forgot. THESE records, not
+     * freshly captured ones: "undelivered" includes a POST the server actually processed
+     * whose response was lost, and resending the identical record id is what lets the
+     * script's duplicate suppression absorb it. Capturing fresh values would mint a new id
+     * and write a second, near-identical row.
+     *
+     * A failure to store is now LOUD. It used to log only `if (stored > 0)`, so a queue that
+     * refused every append said nothing at all - which is exactly the shape of the
+     * 2026-09-02 15:14-17:58 outage, where sixteen batches were collected, given record ids,
+     * and then vanished without reaching Google or the queue, leaving no trace on the device
+     * or in the spreadsheet's System Log.
+     */
+    if (persistLive && !fromQueue) {
+        if (batchForRssi == nullptr || !reading_queue.isHealthy()) {
+            Log.error("GSheets v2: %u undelivered reading%s CANNOT be kept (%s) and are lost.\r\n",
+                      (unsigned)(count - acceptedCount), (count - acceptedCount) == 1 ? "" : "s",
+                      batchForRssi == nullptr ? "no record buffer" : "queue not healthy");
+        } else {
+            uint16_t stored = 0;
+            uint16_t kept = 0;
+
+            for (size_t i = 0; i < count; i++) {
+                // Blanked by the acknowledgement loop above: already delivered, nothing to keep.
+                if (sentIds != nullptr && sentIds[i][0] == '\0')
+                    continue;
+
+                kept++;
+                if (reading_queue.append(batchForRssi[i])) {
+                    resetCollectedRssiIntervals(&batchForRssi[i], 1);
+                    stored++;
+                }
+            }
+
+            if (stored > 0)
+                Log.notice("GSheets v2: persisted %u undelivered reading%s to the queue.\r\n",
+                           (unsigned)stored, (stored == 1) ? "" : "s");
+
+            if (stored < kept)
+                Log.error("GSheets v2: queue REFUSED %u of %u undelivered readings - those are lost. "
+                          "Queue healthy %d, pending %u.\r\n",
+                          (unsigned)(kept - stored), (unsigned)kept,
+                          (int)reading_queue.isHealthy(), (unsigned)reading_queue.pendingCount());
         }
     }
 
