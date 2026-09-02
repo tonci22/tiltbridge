@@ -347,6 +347,13 @@ bool dataSendHandler::send_to_google_v2()
             queueUploadState = QueueUploadState::RETRYING;
             persistLive = true;
         } else {
+            /*
+             * How many rows the sheet actually gained. Absent on a script older than this
+             * field, which is reported as -1 rather than guessed at: "unknown" and "none"
+             * are different answers and only one of them is a problem.
+             */
+            const int savedRows = reply["savedRows"].is<int>() ? reply["savedRows"].as<int>() : -1;
+
             for (JsonVariantConst v : reply["acceptedRecordIds"].as<JsonArrayConst>()) {
                 const char *id = v.as<const char *>();
                 if (id == nullptr)
@@ -392,9 +399,34 @@ bool dataSendHandler::send_to_google_v2()
                             (unsigned)acceptedCount, (unsigned)count, (unsigned)(count - acceptedCount));
                 persistLive = true;
             } else {
-                Log.notice("GSheets v2: all %u records accepted (%u still queued).\r\n",
-                           (unsigned)acceptedCount, (unsigned)reading_queue.pendingCount());
+                Log.notice("GSheets v2: all %u records accepted, %d row%s written (%u still queued).\r\n",
+                           (unsigned)acceptedCount, savedRows, (savedRows == 1) ? "" : "s",
+                           (unsigned)reading_queue.pendingCount());
             }
+
+            /*
+             * Acknowledged, but the sheet gained nothing.
+             *
+             * The script answers "ok" and echoes every recordId when it recognises them as
+             * already processed - its duplicate suppression, keyed on recordId, doing exactly
+             * what it should. savedRows is then 0, and until now the firmware never read that
+             * field, so an upload that wrote nothing looked identical to one that wrote
+             * everything: "all 10 records accepted".
+             *
+             * Worth a warning rather than a shrug, because it means the queue was holding
+             * records the sheet already had. A backlog of those is not harmless: pendingCount
+             * stays above zero, so send_to_google_v2() keeps taking the drain path and the
+             * LIVE reading is never collected - current data waits behind records that are
+             * already safely stored.
+             *
+             * Seen on the production device on 2026-09-03, re-sending 366 records captured
+             * six days earlier and writing not one row.
+             */
+            if (savedRows == 0 && acceptedCount > 0)
+                Log.warning("GSheets v2: %u record%s acknowledged but NO rows written - the sheet already "
+                            "had them. The queue was holding delivered records, which keeps current "
+                            "readings behind a backlog that no longer needs sending.\r\n",
+                            (unsigned)acceptedCount, (acceptedCount == 1) ? " was" : "s were");
 
             queueUploadState = (reading_queue.pendingCount() > 0)
                              ? QueueUploadState::SENDING
