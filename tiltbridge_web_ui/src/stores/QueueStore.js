@@ -20,6 +20,8 @@ export const useQueueStore = defineStore("QueueStore", () => {
     const healthy = ref(true);
     const fsFreeBytes = ref(null);
     const uploadStatus = ref("IDLE");
+    // A "send backlog now" request the firmware has accepted but not started yet.
+    const backlogRequested = ref(false);
     const lastUploadSuccessAgeSec = ref(null);
 
     // Settings, as currently applied on the device
@@ -61,6 +63,7 @@ export const useQueueStore = defineStore("QueueStore", () => {
                 fsFreeBytes.value = response.fsFreeBytes ?? null;
                 uploadStatus.value = response.uploadStatus ?? "IDLE";
                 lastUploadSuccessAgeSec.value = response.lastUploadSuccessAgeSec ?? null;
+                backlogRequested.value = response.backlogRequested ?? false;
 
                 loaded.value = true;
                 queueError.value = false;
@@ -89,13 +92,17 @@ export const useQueueStore = defineStore("QueueStore", () => {
     }
 
     async function sendBacklogNow() {
-        // Optimistic: the firmware picks the request up on its next sender pass, so reflect
-        // it immediately rather than leaving the panel looking inert until the next poll.
-        uploadStatus.value = "SENDING";
+        /*
+         * Deliberately NOT an optimistic uploadStatus = "SENDING": the firmware only sets a
+         * flag, and send_to_google_v2() cannot act on it until it can take the sender lock.
+         * Claiming a send is under way was wrong whenever the request was made mid-retry, and
+         * the next poll then replaced it with RETRYING - which is what made the button look
+         * broken. Show the request as pending instead, and re-read the real state at once so
+         * backlogRequested comes from the device rather than from this guess.
+         */
+        backlogRequested.value = true;
         const ok = await postAction({ action: "sendBacklogNow" });
-        if (!ok) {
-            await getQueueStatus();
-        }
+        await getQueueStatus();
         return ok;
     }
 
@@ -161,6 +168,7 @@ export const useQueueStore = defineStore("QueueStore", () => {
         healthy,
         fsFreeBytes,
         uploadStatus,
+        backlogRequested,
         lastUploadSuccessAgeSec,
         maxRecords,
         maxRecordsSupported,

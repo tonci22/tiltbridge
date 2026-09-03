@@ -467,6 +467,8 @@
       "time_not_valid_title": "Time sync not established",
       "time_not_valid_desc": "The device clock has not been set, so readings queued now are marked TimestampValid: false and will be uploaded without a trustworthy capture time.",
       "send_backlog_button": "Send backlog now",
+      "send_backlog_pending": "Backlog upload queued",
+      "send_backlog_pending_desc": "The device will start this as soon as the sender is free. A Google Sheets upload takes tens of seconds per attempt, so this can sit here for a while - the queue count drops once the readings are acknowledged.",
       "clear_queue_button": "Clear queue",
       "action_failed": "The TiltBridge rejected that action. Please try again.",
       "load_failed": "Unable to read queue status from the TiltBridge."

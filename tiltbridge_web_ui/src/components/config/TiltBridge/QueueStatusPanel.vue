@@ -169,10 +169,10 @@
           <div class="flex flex-wrap gap-3">
             <button
                 type="button"
-                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                :disabled="queueStore.queuedReadings === 0"
+                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                :disabled="queueStore.queuedReadings === 0 || queueStore.backlogRequested"
                 @click="sendBacklog">
-              {{ $t('queue.status.send_backlog_button') }}
+              {{ queueStore.backlogRequested ? $t('queue.status.send_backlog_pending') : $t('queue.status.send_backlog_button') }}
             </button>
             <button
                 type="button"
@@ -182,6 +182,13 @@
               {{ $t('queue.status.clear_queue_button') }}
             </button>
           </div>
+
+          <!-- The firmware only sets a flag; send_to_google_v2() cannot act on it until it can
+               take the sender lock, and an Apps Script round trip is tens of seconds. Saying so
+               is the difference between "waiting" and "broken". -->
+          <p class="mt-3 text-sm text-gray-600" v-if="queueStore.backlogRequested">
+            {{ $t('queue.status.send_backlog_pending_desc') }}
+          </p>
 
           <p class="mt-3 text-sm text-red-700" v-if="queueStore.queueActionError">
             {{ $t('queue.status.action_failed') }}

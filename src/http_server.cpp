@@ -183,6 +183,17 @@ static void queue_json(JsonDocument &doc) {
     doc["uploadStatus"] = queueUploadStateName(data_sender.queueUploadState);
 
     /*
+     * Whether a "send backlog now" request is still waiting to be picked up.
+     *
+     * send_to_google_v2() takes the sender lock BEFORE it clears this flag and returns early
+     * without clearing it when the lock is held, so a request made mid-send is not lost - it
+     * is genuinely still pending until the next sender pass. The UI needs to be able to say
+     * that: without it the button looked dead when pressed during a retry, because an Apps
+     * Script round trip can take tens of seconds and nothing on the page changed.
+     */
+    doc["backlogRequested"] = data_sender.send_backlog_now;
+
+    /*
      * What the flash can actually hold, so the UI stops offering a maxQueuedRecords the
      * device cannot honour. 0 means the filesystem could not be queried; the UI should fall
      * back to the static ceiling rather than showing "0 supported".

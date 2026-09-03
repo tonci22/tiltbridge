@@ -954,6 +954,58 @@ That invalid secondary is a plausible cause of intermittent "connected, nothing 
 clients that fail over to it — though `dns=FAIL: 0` across the whole run does not support it
 either. The WAN-only pattern points upstream, at the ISP.
 
+### 9. A non-empty queue while the spreadsheet is complete is not duplication, and not data loss
+
+Reported on 2026-09-03: `lovric.local` showed **8 queued readings** while every Tilt's sheet
+already held every reading, `uploadStatus` sat on `RETRYING`, "Send backlog now" appeared to do
+nothing, and flushing eventually added one row per sheet only ~35 s after the previous one
+(16:23:59 then 16:24:34). All of that is the design working, plus one 60-second WiFi desync.
+
+**Why the queue filled at all.** A send failed *from the device's point of view* while Google
+had in fact processed it — `wifiDesyncEpisodes: 1, wifiDesyncLongestSec: 60` at the time.
+`docs/phase1/06-persistent-queue.md` names this case explicitly: "'Failed' includes a POST the
+server actually processed whose response was lost, and re-sending the identical `recordId` is
+what lets the script's duplicate suppression absorb that." The first failure persists **those
+exact records** rather than capturing fresh ones, precisely so the ids match on the retry.
+
+**Why 8 and not 4.** Four Tilts: the 4 originally-failed records plus one snapshot round of 4.
+Once a backlog exists the live path stands down and `take_queue_snapshot()` captures on
+`queueSnapshotIntervalSec` — `sendData.cpp:559` (`queuePersistenceNeeded()`) writes nothing
+until `pendingCount() > 0` or the network is unusable. `oldestReadingAgeSec` was 514 s against a
+600 s interval, i.e. exactly that one round.
+
+**Why the flush added an off-cadence row instead of 8 duplicates.** The two kinds of record
+behave differently, and both behaviours are correct:
+
+| record | on re-send |
+|---|---|
+| the originally-failed 4 | same `recordId`s the sheet already has, so `_processed_ids` suppresses them — no new rows. `post_tilt.gs:838`: the device deletes a record only when its id comes back in `acceptedRecordIds`; delivery is at-least-once with dedup in the script |
+| the snapshot 4 | `collectCurrentReadings()` took **fresh** values on the snapshot timer's own phase, not the `:xx:59` push cadence — new captures, new ids, so they legitimately add one row per Tilt at an odd timestamp |
+
+**Why it looked stuck.** `RETRYING` is honest: the POST → 302 leg of an Apps Script call alone
+is 6–22 s (entry 14 above), four Tilts write four different sheets, and the sender held the lock
+mid-request. It drained on its own about 20 minutes after the desync and returned to
+`queued=0, bytesUsed=0, IDLE, consecutiveSendFailures=0, droppedOverflow=0`.
+
+**"Send backlog now" doing nothing was real, and is fixed.** `http_server.cpp` only sets
+`data_sender.send_backlog_now`; `send_to_google_v2()` takes the sender lock *before* clearing it
+and returns early without clearing when the lock is held, so the request is never lost — but
+nothing on the page said so, and the store used to optimistically claim `uploadStatus =
+"SENDING"`, which the next poll replaced with `RETRYING`. `/api/queue/` now reports
+`backlogRequested`, and the panel disables the button and says the upload is queued until the
+firmware picks it up.
+
+**The residual wart, deliberately left.** A lost response is indistinguishable from a lost
+request, so the device treats a succeeded-but-unacknowledged send as an outage and samples into
+the queue. Those samples are genuine new readings, so flushing them adds slightly off-cadence
+rows carrying information the sheet already had. Closing that would need the script to be able
+to answer "did you already take id X" before the device decides to persist, which is another
+round trip on every failure. Not worth it: the cost today is one extra row per sheet per blip.
+
+**Do not** treat a non-empty queue with a complete spreadsheet as duplication, and do not clear
+the queue to "fix" it — the readings in it are either already-acknowledged ids that will be
+suppressed, or real captures that belong in the sheet.
+
 ---
 
 ## Verification discipline
