@@ -274,13 +274,21 @@ bool dataSendHandler::send_to_google_v2()
     const uint32_t startedMs = sh_millis();
 
     int16_t httpCode = 0;
+    /*
+     * Apps Script answers /exec with a 302 to a single-use script.googleusercontent.com echo
+     * URL, so httpCode below is the status of that second fetch, not of the submission. The
+     * hop count is what lets a 4xx on the echo leg be reported as "response unreadable"
+     * instead of "target not found" - the script has already run by then.
+     */
+    int redirectHops = 0;
     const sendResult res = http_request(config.scriptsURL, httpMethod::HTTP_POST,
                                         payloadStr, response, GSHEETS_V2_RESPONSE_SIZE,
-                                        options, &httpCode);
+                                        options, &httpCode, &redirectHops);
 
     const uint32_t elapsedMs = sh_millis() - startedMs;
     tilt_scanner.resumeScanning();
-    Log.notice("GSheets v2: request took %u ms (http %d).\r\n", (unsigned)elapsedMs, (int)httpCode);
+    Log.notice("GSheets v2: request took %u ms (http %d after %d redirect%s).\r\n",
+               (unsigned)elapsedMs, (int)httpCode, redirectHops, (redirectHops == 1) ? "" : "s");
 
     free(payloadStr);
 
@@ -299,7 +307,8 @@ bool dataSendHandler::send_to_google_v2()
                   (int)httpCode);
 
         setTargetStatus(TARGET_GOOGLE_SHEETS,
-                        httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+                        httpCode != 0 ? httpCodeToSendError(httpCode, redirectHops)
+                                      : SEND_ERR_CONNECTION_FAILED);
         queueUploadState = QueueUploadState::RETRYING;
 
         // Persisted by the shared block below, which is the single place that decides what
@@ -492,10 +501,19 @@ bool dataSendHandler::send_to_google_v2()
     free(sentIds);
     free(response);
 
-    // Drain a backlog quickly, but only when the last batch actually made progress -
-    // otherwise fall back to the normal cadence so a failing server is not hammered.
+    /*
+     * Drain a backlog quickly, but only when the last batch actually made progress -
+     * otherwise fall back to the normal cadence so a failing server is not hammered.
+     *
+     * `|| fromQueue` is why an emptied queue also re-arms fast. A drain pass sends queued
+     * records INSTEAD of taking a live reading (see the fromQueue branch above), so the pass
+     * that empties the queue owes the live cadence one reading. Waiting a full push interval
+     * there silently skipped a scheduled reading: every lost acknowledgement cost a 20-minute
+     * hole in the sheet rather than 10, observed three times in one day on the production
+     * device. Re-arming in seconds pays the reading back a few seconds late instead.
+     */
     const bool madeProgress = result && acceptedCount > 0;
-    if (madeProgress && reading_queue.pendingCount() > 0)
+    if (madeProgress && (reading_queue.pendingCount() > 0 || fromQueue))
         rearmGSheetsTimer(GSHEETS_V2_DRAIN_DELAY_SEC);
     else
         // Backoff applies only here: a run of failures (a stale Apps Script, a dead

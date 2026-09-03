@@ -520,6 +520,80 @@ pending.` then `Queue ready: 0 pending` after a restart. **Not verified**: the >
 itself after the fix — rebuilding it needs more than 64 acknowledged records against a pinned
 head, and the bench board could only see one Tilt.
 
+### 21. FIXED — every lost acknowledgement silently skipped a scheduled reading
+
+`src/targets/gsheets_v2.cpp`. Reported from the production sheet: three times in one day a
+normal 10-minute row was followed by an extra row 35-36 s later and then a **19.4-minute gap** —
+one whole slot missing. Every other interval across 116 rows was a clean 10 minutes.
+
+**Proven, and the shape is entirely mechanical.** With T the push tick:
+
+| | |
+|---|---|
+| T | live capture and send; the acknowledgement is lost, so the batch is persisted. The row lands anyway, because the server did process it |
+| T+36 s | the snapshot timer fires, sees a backlog, and captures fresh readings — the extra row |
+| T+600 | push tick. `fromQueue` is true, so it drains **instead of** taking a live reading (`gsheets_v2.cpp:123`). The T records are suppressed by recordId; the T+36 s ones land. **No live reading is taken for this slot** |
+| T+1200 | queue empty, live path resumes |
+
+The bug was the re-arm at the end:
+
+```cpp
+if (madeProgress && reading_queue.pendingCount() > 0)
+    rearmGSheetsTimer(GSHEETS_V2_DRAIN_DELAY_SEC);   // 5 s, keep draining
+else
+    rearmGSheetsTimer(backoffDelay(..., config.gsheetsPushEvery));   // a full interval
+```
+
+While a backlog *remained* it re-armed in 5 s and kept draining. The pass that **emptied** the
+queue fell into the `else` and waited a full push interval — even though that pass had taken no
+live reading. The cadence owed a reading and never paid it back. Now `|| fromQueue` sends any
+drain pass down the fast path, so the reading arrives seconds late instead of never.
+
+Note this is independent of the snapshot: *any* failed send cost a slot, with or without one.
+
+**Verified on hardware**, twice, against a mock Apps Script endpoint the test board was pointed
+at (`fail500` to build a backlog, then `ok`):
+
+```
+20:53:13  POST n=1  caps=[18:53:13Z]   fail500 -> persisted
+20:53:43  POST n=1  caps=[18:53:13Z]   the drain, old capture time, queue empties
+20:53:49  POST n=1  caps=[18:53:49Z]   6 s later, a FRESH live reading
+```
+
+That third request is the one that previously did not happen for another ten minutes.
+
+### 22. FIXED — a 404 while reading the response was reported as "target not found"
+
+`src/targets/send_json_str.cpp`, `src/sendData.cpp`, `src/sendData.h`. The UI told the user to
+check a Google Sheets URL that was correct, while readings were landing in the sheet.
+
+Apps Script answers in two legs (entry 14 above measured them): the POST to `/exec` **runs the
+script and writes the rows** — 6-22 s — then answers 302 with a `Location` to a single-use
+`script.googleusercontent.com/macros/echo?user_content_key=…`. The device follows that by hand
+(`disable_auto_redirect`, because the echo endpoint rejects POST with 405) to read the body.
+
+`httpCodeOut` was taken *after* the redirect loop, so it is the status of the **last** hop — the
+echo fetch — not of the submission. That key is short-lived, so a slow or briefly interrupted
+connection makes it 404. `httpCodeToSendError()` mapped that to `SEND_ERR_NOT_FOUND`, whose
+UI text is "Check that the URL is correct and the service is still available at that address" —
+advice for a problem the user did not have.
+
+The redirect loop now counts hops and reports them. `httpCodeToSendError(code, redirectHops)`
+returns the new `SEND_ERR_RESPONSE_UNREADABLE` (13) for any 4xx reached after at least one hop.
+The inference is sound: to be redirected at all, the first request had to be answered with a
+3xx, so the endpoint exists and took it. The new message says the outcome is unknown, that the
+URL is fine, and that the same ids will be re-sent and de-duplicated. It is still treated as a
+failed send, which is correct — nothing was acknowledged, so it must be retried.
+
+`redirectHops` defaults to 0, so every other target keeps its previous mapping exactly. Both
+Google Sheets paths pass it (the legacy one talks to the same endpoint and had the same fault).
+
+**Verified on hardware**: with the mock answering 302 -> 404, `/api/errors/` reported
+`error_code 13` where it previously reported 3, and the Sheets page rendered "Response could
+not be read (upload may have succeeded)" with the new explanation.
+
+---
+
 ---
 
 ## Firmware — unexplained
@@ -995,12 +1069,25 @@ nothing on the page said so, and the store used to optimistically claim `uploadS
 `backlogRequested`, and the panel disables the button and says the upload is queued until the
 firmware picks it up.
 
+**Two things reported alongside this turned out to be real bugs, now fixed.** They are why the
+symptom looked worse than it was, and they are worth knowing about when reading this entry:
+
+- The 404 the UI showed was on the *response* leg, not the submission, and it was mislabelled
+  as "target not found" — firmware entry 22.
+- The gap after the extra row was a genuinely skipped reading, because the pass that emptied
+  the queue waited a full push interval before taking a live one — firmware entry 21. That cost
+  a 20-minute hole rather than 10 every time an acknowledgement was lost.
+
 **The residual wart, deliberately left.** A lost response is indistinguishable from a lost
 request, so the device treats a succeeded-but-unacknowledged send as an outage and samples into
 the queue. Those samples are genuine new readings, so flushing them adds slightly off-cadence
-rows carrying information the sheet already had. Closing that would need the script to be able
-to answer "did you already take id X" before the device decides to persist, which is another
-round trip on every failure. Not worth it: the cost today is one extra row per sheet per blip.
+rows carrying information the sheet already had. Closing that would need the script to answer
+"did you already take id X" before the device decides to persist, which is another round trip on
+every failure. Not worth it: with 21 fixed, the whole cost of a blip is one extra row per sheet,
+landing close to the reading it nearly duplicates. Its placement is unlucky rather than wrong -
+the snapshot timer free-runs on its own period, and on the production device it has drifted to
+~36 s after the push timer, so the outage sample lands next to a live one instead of filling the
+interval. Offsetting the two phases would make it useful rather than redundant.
 
 **Do not** treat a non-empty queue with a complete spreadsheet as duplication, and do not clear
 the queue to "fix" it — the readings in it are either already-acknowledged ids that will be

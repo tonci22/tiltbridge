@@ -106,7 +106,15 @@ struct HttpRequestOptions {
  * @param response Buffer to store response body (can be nullptr if not needed)
  * @param response_size Size of the response buffer
  * @param options Request options (content type, cert validation, etc.)
+ * @param httpCodeOut Status of the FINAL request, i.e. after any redirects were followed
+ * @param redirectHopsOut How many redirects were followed to get there (optional)
  * @return sendResult::success on success, sendResult::failure on error, sendResult::retry if WiFi disconnected
+ *
+ * @note httpCodeOut is the status of the last hop, not of the original request. A 4xx there
+ *       after redirectHopsOut > 0 means the endpoint answered the submission with a 3xx and it
+ *       was the follow-up fetch of the response body that failed - a very different situation
+ *       from the configured URL being wrong. Pass redirectHopsOut if you need to tell them
+ *       apart; dataSendHandler::httpCodeToSendError() takes the hop count for exactly this.
  */
 sendResult http_request(
     const char* url,
@@ -115,7 +123,8 @@ sendResult http_request(
     char* response,
     size_t response_size,
     const HttpRequestOptions& options = HttpRequestOptions{},
-    int16_t* httpCodeOut = nullptr
+    int16_t* httpCodeOut = nullptr,
+    int* redirectHopsOut = nullptr
 );
 
 // Convenience overload for simple requests without response buffer

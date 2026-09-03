@@ -565,6 +565,7 @@
       "code_10": "Fermentrack: Malformed registration",
       "code_11": "Fermentrack: Registration invalid",
       "code_12": "Fermentrack: No brewhouse",
+      "code_13": "Response could not be read (upload may have succeeded)",
       "unknown": "Unknown error (code {code})"
     },
     "error_detail": {
@@ -580,6 +581,7 @@
       "code_10": "The registration request sent to Fermentrack was malformed. This usually means the TiltBridge firmware or the Fermentrack version is out of date. Try updating both and re-registering.",
       "code_11": "The device registration with Fermentrack is no longer valid. Try resetting the device ID on the Fermentrack configuration page to re-register.",
       "code_12": "The configured Fermentrack user does not have a brewhouse. Complete the brewhouse setup in Fermentrack before connecting TiltBridge.",
+      "code_13": "The target accepted the upload - it answered with a redirect - but the follow-up request for its response failed, so whether the readings were stored is unknown. Your URL is fine; there is nothing to change. Google Apps Script is the usual source: it runs your script and then redirects to a single-use response URL that can expire on a slow or briefly interrupted connection. TiltBridge re-sends the same readings with the same ids, and the script discards ones it already has, so this does not create duplicate rows.",
       "unknown": "An unexpected error occurred (code {code}). Check the settings for this target and ensure both TiltBridge and the target are up to date."
     }
   },

@@ -45,6 +45,12 @@ enum SendError : uint8_t {
     SEND_ERR_FT2_MALFORMED_REG = 10,        // Missing GUID / hardware type / firmware version / device ID
     SEND_ERR_FT2_REG_INVALID = 11,          // Registration invalid (device ID/API key rejected)
     SEND_ERR_FT2_NO_BREWHOUSE = 12,         // User has no brewhouse
+    // A 4xx on a request reached only by following a redirect. The endpoint answered the
+    // submission with a 3xx, so it exists and took the request - it was fetching the response
+    // BACK that failed, and whether the data was stored is unknown. Reporting these as 404
+    // told users to check a URL that was correct: Google Apps Script answers /exec with a 302
+    // to a single-use script.googleusercontent.com echo URL, and that URL can expire.
+    SEND_ERR_RESPONSE_UNREADABLE = 13,
 };
 
 // Tracks the most recent send result for each target
@@ -140,7 +146,10 @@ public:
     // Error tracking
     SendTargetStatus targetStatus[TARGET_COUNT];
     void setTargetStatus(SendTargetID target, SendError error);
-    static SendError httpCodeToSendError(int16_t httpCode);
+    // redirectHops is how many redirects were followed to reach httpCode (see
+    // http_request()). A 4xx after at least one hop is SEND_ERR_RESPONSE_UNREADABLE
+    // rather than the status's usual meaning. Defaulted so existing callers are unaffected.
+    static SendError httpCodeToSendError(int16_t httpCode, int redirectHops = 0);
 
     /**
      * @brief Effective retry delay for a target, applying exponential backoff once it has

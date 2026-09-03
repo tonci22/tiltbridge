@@ -88,9 +88,19 @@ uint32_t dataSendHandler::backoffDelay(SendTargetID target, uint32_t baseSeconds
     return (uint32_t)delay;
 }
 
-SendError dataSendHandler::httpCodeToSendError(int16_t httpCode) {
+SendError dataSendHandler::httpCodeToSendError(int16_t httpCode, int redirectHops) {
     if (httpCode >= 200 && httpCode <= 204) return SEND_OK;
     if (httpCode == -1) return SEND_ERR_CONNECTION_FAILED;
+
+    /*
+     * A 4xx we only reached by following a redirect is not the target being missing or
+     * refusing us: to redirect at all, the endpoint had to answer the submission with a 3xx.
+     * What failed was reading the response back, which leaves the outcome genuinely unknown -
+     * so say that instead of sending the user to check a URL that works.
+     */
+    if (redirectHops > 0 && httpCode >= 400 && httpCode < 500)
+        return SEND_ERR_RESPONSE_UNREADABLE;
+
     switch (httpCode) {
         case 400: return SEND_ERR_BAD_REQUEST;
         case 401:
@@ -940,6 +950,7 @@ bool dataSendHandler::send_to_google()
 
             tilt_scanner.drop_expired_tilts();
             int16_t httpCode = 0;
+            int redirectHops = 0;
             bool attempted = false;
 
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
@@ -981,8 +992,12 @@ bool dataSendHandler::send_to_google()
                     options.timeoutMs = 10000;  // 10 second timeout - Google Scripts can be slow
 
                     attempted = true;
+                    // Same endpoint as the v2 path, so the same 302-to-echo-URL behaviour:
+                    // the hop count is what keeps a 4xx on the response leg from being
+                    // reported as "target not found".
                     sendResult sendRes = http_request(config.scriptsURL, httpMethod::HTTP_POST,
-                                                      payload_string, response, sizeof(response), options, &httpCode);
+                                                      payload_string, response, sizeof(response), options,
+                                                      &httpCode, &redirectHops);
 
                     if (sendRes == sendResult::success) {
                         // POST success - parse response for doclongurl
@@ -1018,7 +1033,9 @@ bool dataSendHandler::send_to_google()
 
             Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
             if (attempted)
-                setTargetStatus(TARGET_GOOGLE_SHEETS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+                setTargetStatus(TARGET_GOOGLE_SHEETS,
+                                httpCode != 0 ? httpCodeToSendError(httpCode, redirectHops)
+                                              : SEND_ERR_CONNECTION_FAILED);
         }
         // Anchored, like the v2 path: same timer, same target, so the two must not disagree
         // about what "every gsheetsPushEvery seconds" means.

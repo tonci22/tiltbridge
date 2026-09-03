@@ -159,7 +159,7 @@ static bool buildResolvedUrl(const char* originalUrl, char* resolvedUrl, size_t 
 // =============================================================================
 // Unified HTTP Request Implementation
 // =============================================================================
-sendResult http_request(const char* url, httpMethod method, const char* payload, char* response, size_t response_size, const HttpRequestOptions& options, int16_t* httpCodeOut)
+sendResult http_request(const char* url, httpMethod method, const char* payload, char* response, size_t response_size, const HttpRequestOptions& options, int16_t* httpCodeOut, int* redirectHopsOut)
 {
     char userAgent[128];
     int httpResponseCode;
@@ -271,6 +271,11 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
     // Follow redirects by hand so the method can be downgraded correctly.
     // 301/302/303 -> GET without a body; 307/308 must preserve the method and body.
     constexpr int MAX_REDIRECTS = 3;
+    // Reported to the caller: a 4xx reached only after a hop means the submission itself was
+    // answered with a 3xx, so the endpoint exists and took the request - it was reading the
+    // response back that failed. Google Apps Script always does this: /exec runs the script,
+    // then 302s to a single-use script.googleusercontent.com echo URL that can expire.
+    int redirectHops = 0;
     for (int hop = 0; hop < MAX_REDIRECTS; hop++) {
         if (err != ESP_OK && err != ESP_ERR_NOT_SUPPORTED)
             break;
@@ -298,8 +303,12 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
 
         Log.verbose("http_request: following %d redirect as %s (hop %d).\r\n",
                     status, downgrade ? "GET" : "same method", hop + 1);
+        redirectHops++;
         err = esp_http_client_perform(client);
     }
+
+    if (redirectHopsOut != nullptr)
+        *redirectHopsOut = redirectHops;
 
     sender_health.noteRequestEnd();
 
