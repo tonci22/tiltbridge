@@ -1,7 +1,9 @@
 # Known issues and dead ends
 
-Open problems found by reading the code and by soaking a live four-Tilt device
-(ESP32-D0WD-V3, `esp32_headless`) for ~25 hours across three runs.
+Open problems found by reading the code and by soaking live four-Tilt devices
+(ESP32-D0WD-V3, `esp32_headless`) across many runs — latterly including a ~24 hour
+network-correlation study and several days on the production device, whose Google Sheets
+System Log is a second, independent record when the firmware's own logs are silent.
 
 Each entry says what is **proven** and what is only **suspected**, because several
 plausible-sounding theories in this file turned out to be wrong and were expensive to
@@ -415,6 +417,111 @@ firmware out of this; going through the component's own HTTP API bypasses that g
 
 ---
 
+### 17. FIXED — the captive portal answered DNS for the whole LAN
+
+`esp_wifi_config`'s captive DNS bound `INADDR_ANY:53`, so while the provisioning SoftAP was
+up the device also answered DNS on its **station** address — every name, any query type,
+with the portal's own `192.168.4.1` and a 60 s TTL. A provisioned device raising the portal
+was therefore a rogue resolver on the network it was a client of.
+
+**Proven on hardware.** With the AP forced up alongside the station (`POST /api/wifi/ap/start`):
+
+```
+dig example.com @192.168.1.56  ->  192.168.4.1   (malformed reply)
+dig google.com  @192.168.1.56  ->  192.168.4.1
+```
+
+It is not an exotic state: `provisioning_mode = WIFI_PROV_ON_FAILURE` raises the portal
+whenever a known network cannot be rejoined while the station netif may still hold a lease.
+The production device did it **ten times in one day**, in ~60 s windows, roughly hourly.
+
+Fixed in the fork (`tonci22/esp_wifi_config@1610265`, pinned from `src/idf_component.yml`) by
+binding to the SoftAP netif address instead. Verified both directions: the LAN query now
+times out, while a client on the SoftAP still gets `192.168.4.1` for every name and the
+portal page still serves.
+
+**Not fixed, deliberately**: the replies are malformed. `dns_build_response()` copies the
+query, forces `ancount = 1` and appends an A record whatever the question was, so a AAAA or
+TXT query is answered with an A record, and an EDNS OPT record in the additional section is
+overwritten while `arcount` still claims it. Harmless for a captive portal whose clients only
+need redirecting.
+
+**This was NOT the cause of the household internet dropouts** — see "Not bugs" #8.
+
+### 18. FIXED — an HTTP 200 saying "error" was read as success, and readings were dropped
+
+The Apps Script answers a batch it cannot process with **HTTP 200** and
+`{"status":"error","code":"WEBAPP_BUSY","acceptedRecordIds":[]}` — it could not take the
+spreadsheet lock within its ten-second budget. Its own comment states the contract: *"Nothing
+was persisted, so no record id is acknowledged and the device resends this batch unchanged
+with the same ids."*
+
+`send_to_google_v2()` broke that contract. It never read `status` or `code`, only that
+`acceptedRecordIds` was a well-formed array — and an empty array is still an array — so the
+refusal landed in the success branch: `result = true`, `setTargetStatus(SEND_OK)`, and
+`consecutiveFailures` reset to zero.
+
+The recovery could not work, for the same reason. The branch set `snapshot_due` so
+`take_queue_snapshot()` would persist the undelivered readings, but that function's first act
+is `queuePersistenceNeeded()`, which returns `consecutiveFailures > 0` when the network looks
+usable — and the `SEND_OK` three lines above had just zeroed it. The snapshot stored nothing,
+and the warning it left promised a retry that could never happen.
+
+**Observed on production, 2026-09-02 19:58.** The System Log's `WEBAPP_BUSY` entry names
+record ids `8F35BD-*-00000DB1`..`DB4`; the spreadsheet has no 19:58 row; the rows either side
+are sequence `0DAD` (19:48) and `0DB5` (20:08). Four ids minted, refused, dropped.
+
+Fixed by `statusIsAcknowledgement()` (accepts `ok` and `partial`, treats everything else as a
+refusal, and a reply with no `status` at all as acceptable so an older script still works), and
+by routing every undelivered path through one shared persistence block rather than a
+`snapshot_due` flag the success had already defeated. **Verified on hardware** against a
+stand-in endpoint returning that exact body: the reading was kept, resent under the same id,
+and delivered once the endpoint recovered.
+
+### 19. FIXED — a drained queue came back full on every reboot
+
+Termination was tracked as a head sequence plus a sparse table of at most
+`QUEUE_MAX_SPARSE_TERMINATED` (64) out-of-order entries. The head only advances through a
+**contiguous** run, so one never-acknowledged sequence pins it permanently — a record shed for
+space, a reading the server refused, any gap. Past that, those 64 slots are the only record of
+what was delivered, and `markTerminated()` discards the rest.
+
+`loadJournal()` replays every acknowledgement back through the same 64 slots on boot, so a
+queue that had genuinely drained came back full — and again on the next boot.
+
+**Reproduced on production, 2026-09-03.** Immediately before a restart: `queued 0,
+bytesUsed 0`. Immediately after: `Queue ready: 366 pending, segments 2u..7u, next sequence
+3517u`, followed by
+
+```
+W: Queue: sparse termination table full; sequence 287u may be resent.
+```
+
+for sequences 287, 288, 304-309, 352, 353 — records captured 27 Aug, written to the sheet
+1 Sep, resurrected ever since. Six days of re-sending them, refused every time as duplicates
+(`savedRows: 0`).
+
+**The expensive part is not the wasted uploads.** `pendingCount() > 0` puts
+`send_to_google_v2()` on the drain path every pass, so the LIVE reading is never collected:
+current readings wait behind a backlog the sheet already has. A plausible contributor to issue
+20, though not established as its cause.
+
+Fixed by `purgeTerminatedRecords()`: the segments are rewritten to physically drop delivered
+records, then termination state collapses to a single head below the lowest survivor and the
+sparse table is emptied. What remains on flash **is** the pending set, which survives a reboot
+with no journal replay. Every failure path is non-destructive — a failed rewrite leaves the
+original segment intact, costing a duplicate, never a loss.
+
+`QUEUE_MAX_SPARSE_TERMINATED` is still 64. Issue 16 was right that raising it would not have
+fixed this: the cap was never the defect, keeping the history in RAM was.
+
+**Verified on hardware**: `Queue: purged 1u delivered record from flash; head now 1u, 0
+pending.` then `Queue ready: 0 pending` after a restart. **Not verified**: the >64 overflow
+itself after the fix — rebuilding it needs more than 64 acknowledged records against a pinned
+head, and the bench board could only see one Tilt.
+
+---
+
 ## Firmware — unexplained
 
 ### 13. A 30-minute gap after changing the Google Sheets interval
@@ -445,6 +552,34 @@ If it recurs, the firmware prints the reason verbatim — capture serial and loo
 GSheets v2: upload failed (http N)...
 google_sheets backing off to 1800s after N consecutive failures.
 ```
+
+---
+
+### 20. A 2h43m hole on 2026-09-02 with no trace anywhere
+
+15:14:49 to 17:58:00, production, four Tilts. No rows in the sheet, nothing queued, and no
+explanation.
+
+What the record ids establish. `assignIdentity()` runs in `collectCurrentReadings()`
+(`sendData.cpp:411`), so an id proves a reading was collected. Sequence `0D3D` at 15:14:49 and
+`0D81` at 17:58:00 is `+68` — 17 batches of four — so **sixteen batches were collected during
+the gap and every one vanished**, reaching neither Google nor the queue.
+
+- The System Log shows **nothing arrived** in that window (the `DATA_GAP` entry at 17:58 reads
+  `previousCapturedReading: 15:14:49`), and no backlog was ever delivered afterwards.
+- The queue was empty at recovery, so the failure path either never ran or its appends were
+  refused. Both were silent at the time: persistence logged only `if (stored > 0)`.
+- Only `+4` per interval was consumed, not `+8`, so exactly one collection happened per
+  interval — not a live send *and* a snapshot.
+- No `WEBAPP_BUSY` in that window, so issue 18 does not explain it.
+
+Issue 19 is a plausible contributor: a stuck backlog keeps the sender on the drain path so the
+live reading is never collected. But the queue was *empty* at recovery, which that alone does
+not explain.
+
+**Deliberately left open.** Both silent paths now log — `GSheets v2: queue REFUSED n of m
+undelivered readings` and `Queue snapshot: queue REFUSED n of m readings` — so a recurrence
+names itself instead of vanishing. Do not theorise further without those lines.
 
 ---
 
@@ -557,6 +692,46 @@ A settings page left open holds the values it loaded and writes them back on sav
 reverting a change made elsewhere. Observed: an interval set to 600 via the API was overwritten
 with 900 eleven minutes later by a browser tab. Before the send-now fix, every such write also
 queued an upload.
+
+---
+
+### 8. TiltBridge is not causing the household internet dropouts
+
+Investigated at length on 2026-08-27/29 after the ESP32 was suspected. **It is not the cause**,
+and this was measured, not argued.
+
+A monitor sampled router reachability, WAN reachability (`1.1.1.1`) and DNS-through-the-router
+every 30 s for ~24 hours alongside the device's own state (`netwatch.log`). Across **2,768
+samples**:
+
+| | |
+|---|---|
+| `net=FAIL` (WAN) | 87 samples (3.1%) |
+| `router=FAIL` | **0** |
+| `dns=FAIL` | **0** |
+| `net=FAIL` while the rogue AP was up | **0** |
+
+Every failure was the WAN leg alone, with the LAN and the router's resolver working throughout.
+The AP was up for ~1.5% of samples; if outages and the AP were independent you would still
+expect an overlap or two, and there were none.
+
+Decisive single event: a **25-minute** flapping WAN outage on 2026-08-29 04:18-04:44, during
+which the device sat at −49 dBm with `ap=False` and its counters frozen at `out=57 roams=66
+desync=47` — completely idle while the internet fell over. Earlier, a 3-minute outage at
+23:55-23:58 with the same signature.
+
+Mechanisms checked and excluded:
+
+- **Rogue-AP auto-join** — needs `TiltBridgeAP` saved on the affected device; it is not, and it
+  would affect one client, not all of them.
+- **The DNS hijack of issue 17** — real, but the device ignores broadcast queries (tested: five
+  other LAN hosts answered `192.168.1.255:53`, the ESP32 did not) and LAN clients are handed
+  `192.168.1.1` as their resolver, so nothing asks it.
+
+**Where to look instead**: the router advertises `domain_name_server: {192.168.1.1, 0.0.0.0}`.
+That invalid secondary is a plausible cause of intermittent "connected, nothing loads" on
+clients that fail over to it — though `dns=FAIL: 0` across the whole run does not support it
+either. The WAN-only pattern points upstream, at the ISP.
 
 ---
 

@@ -477,3 +477,76 @@ protects against a hand-edited config file, and only the loader runs at boot.
 Watch the size: `serializeConfig()` refuses to write a config that measures over
 `JSON_CONFIG_BUFFER_SIZE` (8192 bytes) and **returns false rather than raising anything visible**,
 so an oversized config silently stops saving.
+
+## 11. The IDF component manager will undo your edits
+
+`thorrak/esp_wifi_config` is pinned to a git commit on a fork (`src/idf_component.yml`). Three
+things about that are not obvious, and each cost a build cycle to learn:
+
+**Editing `managed_components/` does nothing.** The manager verifies the component against the
+hash in `dependencies.lock` and restores the pristine copy on the next build. A patch made
+there is silently reverted — the build succeeds and your change is simply absent.
+
+**`override_path:` in the manifest was ignored** in this setup. It is the documented mechanism
+for local component development, and the build ran without ever re-resolving.
+
+**Changing the manifest alone does not trigger re-resolution.** PlatformIO only re-runs the
+manager when the lock and the component directory are missing:
+
+```sh
+rm -rf managed_components/thorrak__esp_wifi_config dependencies.lock
+~/.platformio/penv/bin/pio run -e esp32_headless
+```
+
+Two consequences worth knowing before you do that. Deleting the lock lets every **unpinned**
+dependency float — `espressif/mdns` went 1.11.3 → 1.12.0 that way and turned on
+`CONFIG_MDNS_ENABLE_BROWSE` in all six sdkconfigs. It is now pinned exactly for that reason.
+And to test a component change locally without touching the pin, drop the patched component in
+a project-level `components/<name>/` directory: IDF prefers it over `managed_components/`, and
+the build log will say `Compiling .pio/build/<env>/components/...` so you can confirm it took.
+
+### `dependencies.lock` flip-flops between `esp32` and `esp32s3`
+
+The `target:` field records whichever environment was resolved **last**, so it is build-order
+state, not a dependency fact. A full six-env build ends on `esp32_s3_small_tft` and writes
+`esp32s3` (the committed value); any single-env build or flash of an ESP32 board rewrites it to
+`esp32`. Reset it before committing:
+
+```sh
+git checkout -- dependencies.lock
+```
+
+## 12. Exercising the Google Sheets failure paths without Google
+
+The interesting bugs in `send_to_google_v2()` are in how it reads the *reply*, and the Apps
+Script's refusals are hard to provoke on demand. A stand-in endpoint on the development machine
+makes them deterministic — see issue 18 in KNOWN_ISSUES for what this caught.
+
+Point the device at a local HTTP server and have it return the exact body under test. The one
+that matters is the lock refusal, which arrives as **HTTP 200**:
+
+```json
+{"status":"error","code":"WEBAPP_BUSY",
+ "message":"The spreadsheet lock could not be acquired for a queued batch.",
+ "acceptedRecordIds":[]}
+```
+
+against a healthy control of `{"status":"ok","savedRows":N,"acceptedRecordIds":[...ids...]}`.
+
+Configuration notes, all learned the hard way:
+
+- `PUT /api/settings/targets/` with `scriptsURL`, `scriptsEmail`, `gsheetsPushEvery`,
+  `gsheetsV2Enabled`. The URL must be at least `GSCRIPTS_MIN_URL_LENGTH` (24) characters and
+  `gsheetsPushEvery` at least `PUSH_EVERY_MIN_SEC` (**600**) — a shorter interval is rejected and
+  the whole update fails with `{"status":"error"}`.
+- **Record the existing `scriptsURL` before overwriting it.** It is the only copy; recovering it
+  afterwards meant grepping old serial captures for `script.google.com`.
+- Force a send with `POST /api/queue/actions/ {"action":"sendBacklogNow"}` rather than waiting
+  out the interval. With an empty queue this takes the **live** path, which is what you want for
+  testing the drop-on-refusal behaviour. Note this is `/api/queue/actions/`, not `/api/actions/`.
+- A Tilt must be in range **and** have a `device_config` entry, or `collectCurrentReadings()`
+  skips it, `count` is 0, and nothing is sent or queued — silently. `hasDeviceConfig` in
+  `/api/json/` tells you.
+- `POST /api/wifi/ap/start` raises the SoftAP while the station stays connected, which is how the
+  issue-17 DNS behaviour was made reproducible instead of waiting for a real failure.
+- `clearQueue` requires `{"action":"clearQueue","confirm":true}`.
