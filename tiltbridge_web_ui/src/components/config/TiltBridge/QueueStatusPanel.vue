@@ -52,37 +52,37 @@
 
         <div class="flex flex-col">
           <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-            <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+            <div class="py-2 align-middle min-w-full sm:px-6 lg:px-8">
               <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
                 <table class="min-w-full divide-y divide-gray-200">
                   <tbody class="bg-white divide-y divide-gray-200">
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.queued_readings') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ queueStore.queuedReadings }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.oldest_reading') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="oldestAge">{{ $t('sitewide.age_ago', { age: oldestAge }) }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.none') }}</span>
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.storage_used') }}
                     </th>
-                    <td class="px-6 py-4 text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 text-sm font-medium text-gray-900">
                       <div class="flex items-center gap-3">
-                        <div class="w-40 bg-gray-200 rounded-full h-2.5">
+                        <div class="w-24 sm:w-40 bg-gray-200 rounded-full h-2.5">
                           <div class="h-2.5 rounded-full" :class="storageBarClass" :style="storageBarStyle"></div>
                         </div>
                         <span>{{ $t('queue.status.storage_percent', { percent: storagePercent }) }}</span>
@@ -94,66 +94,66 @@
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.maximum_records') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ queueStore.maxRecords }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.snapshot_interval') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ $t('queue.status.minutes', { minutes: snapshotIntervalMinutes }) }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.last_upload') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="lastUploadAge">{{ $t('sitewide.age_ago', { age: lastUploadAge }) }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.never') }}</span>
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.upload_status') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" :class="uploadStatusClass">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium" :class="uploadStatusClass">
                       {{ uploadStatusLabel }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.dropped_overflow') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm" :class="queueStore.droppedOverflow > 0 ? 'font-bold text-red-600' : 'font-medium text-gray-900'">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm" :class="queueStore.droppedOverflow > 0 ? 'font-bold text-red-600' : 'font-medium text-gray-900'">
                       <ExclamationTriangleIcon v-if="queueStore.droppedOverflow > 0" class="h-4 w-4 inline mr-1 text-red-600" aria-hidden="true" />
                       {{ queueStore.droppedOverflow }}
                     </td>
                   </tr>
 
                   <tr v-if="!queueStore.enabled">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.queue_state') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-500">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-500">
                       {{ $t('queue.status.queue_disabled') }}
                     </td>
                   </tr>
 
                   <tr v-if="queueStore.loaded && !queueStore.healthy">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.health') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-red-600">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-bold text-red-600">
                       {{ $t('queue.status.unhealthy') }}
                     </td>
                   </tr>

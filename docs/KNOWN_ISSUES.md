@@ -616,6 +616,132 @@ designed, and batching all readings into one request is already right.
 
 ---
 
+## Web UI — `tiltbridge_web_ui`
+
+Found by driving the built UI at a real 390 x 844 viewport, which is the first time it had been
+looked at below `md`. Both behavioural bugs made whole pages unreachable from a phone; neither
+is visible on a desktop, which is why they survived.
+
+### 1. FIXED — the mobile menu never closed, so it covered the page it had just opened
+
+`src/App.vue`. The small-screen sidebar is a full-screen `Dialog` overlay. Its links called the
+router-link `navigate` and nothing else, and no route hook closed the panel, so after tapping
+Configure or a cloud target the route changed underneath an overlay that stayed up. It read as
+"nothing happens".
+
+Now closed by a `router.afterEach`, which also covers the back button and the `CloudConfigView`
+→ `FermentrackConfig` redirect. The link handlers close it too, because re-tapping the row you
+are already on is a duplicate navigation that vue-router aborts, so `afterEach` never fires.
+
+### 2. FIXED — a parent nav item was an inert `<span>`, so the cloud targets were unreachable
+
+`src/App.vue`. The desktop sidebar rendered a group parent as a headlessui `Disclosure`; the
+mobile branch rendered it as a plain `<span>` with its children always expanded beneath it —
+and that `<span>` read an `isActive` that only exists inside a `router-link` slot, so the class
+binding was `undefined` on every render.
+
+Both branches are now the same route-driven accordion. Deliberately **not** `Disclosure` with
+`defaultOpen`: that prop is read once, and on a cold load of `/target/gsheets/` the read happens
+before vue-router has resolved the initial navigation, so `route.matched` is still empty and the
+group comes up collapsed. Expansion falls back to "expanded if the current route is inside it",
+with an explicit toggle recorded per section.
+
+### 3. FIXED — the Configure tab dropdown did nothing
+
+`src/components/sitewide/TabContainer.vue`. Two independent faults in the same six lines:
+
+- `function routeChange(e) { this.$router.push(e.target.value) }` inside `<script setup>`. A
+  module-scoped function invoked as an event handler has `this === undefined` under ESM strict
+  mode, so every pick threw `TypeError` before it could navigate. This is what made
+  Configure → Offline Queue inert.
+- The options were `<router-link custom>` wrappers rendering `<option>`. An `<option>` is not
+  clickable, so the link half was never going to fire either; only the `:value` it computed did
+  anything, and only because the change handler read it.
+
+Replaced by `MobileRouteSelect.vue` — a plain `<select>` with a `useRouter()` push, its selected
+option derived from `route.matched` so it still tracks the route when the sidebar or the desktop
+tabs navigate instead. `TablessContainer` takes the same component, which is how the eleven
+cloud targets became reachable on a phone without going back out to the menu.
+
+### 4. FIXED — layout that only fails below `sm`
+
+None of these break anything; all of them were wrong on a phone.
+
+- The Tilts table forced the page sideways, and the temperature column — half the reason for
+  the page — fell off the right edge. The table is now `max-w-full` inside an `overflow-x-auto`
+  wrapper, so it shrinks to the viewport first and only scrolls the table if a row still cannot
+  fit. Measured: 423 px of content in a 374 px box before, 374 px after.
+- `AddCalibrationPointModal` was a hard-coded `w-96` (384 px) offset with `top-20`: wider than
+  an iPhone 13 mini viewport, and pushed off the bottom in landscape. Both calibration modals
+  are now centred in a scrollable flex wrapper with a `max-w-*` box.
+- Key/value tables in About and the queue status panel were `px-6` per cell, which needed a
+  horizontal scroll to read a two-column table. Now `px-3 sm:px-6`.
+- `CheckboxField` put the description inline after the label, which reads as one run-on
+  sentence the moment they share a wrapped line. Now stacked.
+- The mobile top bar was a bare hamburger. It now names the current page, which is the only
+  place that information appears on the pages that have no `<h1>` (About).
+
+### 5. FIXED — a phone in landscape got the desktop sidebar, which cost it a third of its width
+
+`src/App.vue`, `src/components/TiltList.vue`. The permanent sidebar appeared at `md` (768 px).
+Every current handset in landscape is wider than that — 844 px on a 13/14, 932 px on a Pro Max —
+so turning the phone sideways swapped the hamburger for a fixed 256 px sidebar and left 540 px
+of content. The Tilts table needs 797 px for its landscape column set, so **gravity and
+temperature — the entire point of the page — sat off the right-hand edge** behind a scroll.
+
+The sidebar now appears at `lg` (1024 px), so 768–1023 px keeps the hamburger and the full
+width. Measured on the flashed test board: 844 x 390 gives a 796 px content box for a 797 px
+table, no scroll, and 932 px fits with room to spare.
+
+RSSI moved from `lg` to `sm` in the same pass, which is what makes it a landscape column: the
+smallest phone in landscape is 667 px, so `sm` (640 px) is the breakpoint that means "turned
+sideways". Portrait is untouched — 390 px still shows name, gravity and temperature only.
+Colour deliberately stayed at `md`: the row already carries its colour as the stripe down the
+left edge, so RSSI is worth more than a second copy of it.
+
+**Still scrolls at 1280 px.** Nine columns need 1188 px and the sidebar leaves 976, so the
+desktop table scrolls inside its own box. That is an improvement — before the wrapper existed
+it pushed the whole page sideways — but if it becomes annoying, moving `MAC` and `Model` to
+`2xl` fits the rest into a 1280 px laptop.
+
+**Verified** at 390 x 844 via CDP `Emulation.setDeviceMetricsOverride` — note that
+`--window-size` alone cannot go below ~500 px, so a `--screenshot` at `--window-size=390,844`
+is a 390 px crop of a 485 px layout and will invent overflow that is not there. Widths
+checked: 390, 667, 844, 932, 1280. Desktop re-checked at 1280 px: sidebar accordion, desktop
+tabs, and both mobile-only elements hidden. All of the above was then re-driven against the
+flashed `lovric-test` board rather than a mock.
+
+
+### 6. FIXED — the About tables needed a horizontal drag, and a mock hid it
+
+`about/UptimeStatsPanel.vue`, `about/WifiLinkPanel.vue`, `about/SenderHealthPanel.vue`,
+`config/TiltBridge/QueueStatusPanel.vue`. Reported from a phone: the values ran off the right
+edge and had to be dragged into view.
+
+Two causes, both in the shared key/value table markup:
+
+- The value cells were `whitespace-nowrap`. On the real device the firmware version renders as
+  `TiltBridge v2.0.0-beta5[phase1-reliability-and-offline-queue] (699953c)` — about 71
+  characters — and uptime, reset reason, heap and the RSSI range line are all long too. Now
+  `md:whitespace-nowrap`, so they wrap below 768 px and stay on one line above it.
+- The wrapper was `py-2 align-middle inline-block min-w-full`. `inline-block` is shrink-to-fit,
+  so the box grew to the table's max-content width (619 px against a 390 px phone) and the
+  table was never asked to shrink — the `overflow-x-auto` ancestor scrolled instead. Dropping
+  `inline-block` makes the box the viewport width, which is what lets the wrapping take effect.
+
+Measured on the flashed board: all three About tables and the queue status table are 390 px in a
+390 px scroll box, `mustScroll: false`, at 390/844/1280. Desktop is visually unchanged except
+that the tables now fill the card instead of ending short of its right edge.
+
+**This is the entry to read before trusting a mock.** The layout pass that produced entries 1-5
+verified About against a stub whose version, uptime, reset and WiFi fields were empty or
+`Loading...`, so the longest strings on the page never rendered and the overflow was invisible.
+The Tilts table was caught only because the mock happened to carry a long `friendlyName`. Point
+the dev proxy at a real device — `vite --config` with a one-file override is enough — or give
+the mock deliberately worst-case strings.
+
+---
+
 ## Not bugs — do not re-investigate
 
 ### 1. `0xFF` blocks in serial captures are a host artifact, not the device

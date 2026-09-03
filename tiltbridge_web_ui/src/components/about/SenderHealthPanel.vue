@@ -34,71 +34,71 @@
 
         <div class="flex flex-col">
           <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-            <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+            <div class="py-2 align-middle min-w-full sm:px-6 lg:px-8">
               <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
                 <table class="min-w-full divide-y divide-gray-200">
                   <tbody class="bg-white divide-y divide-gray-200">
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.state') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm" :class="stateClass">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm" :class="stateClass">
                       {{ stateLabel }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.current_target') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ targetLabel(SenderHealthStore.currentTarget) }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.heartbeat') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ $t('sitewide.age_ago', { age: formatAge(SenderHealthStore.heartbeatAgeSec) }) }}
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.send_lock') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ SenderHealthStore.lockHeld ? $t('about.sender.lock_held') : $t('about.sender.lock_free') }}
                     </td>
                   </tr>
 
                   <!-- Only shown while a lock is actually held, so the idle panel stays short. -->
                   <tr v-if="SenderHealthStore.lockHeld">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.request_age') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ formatAge(SenderHealthStore.requestAgeSec) }}
                     </td>
                   </tr>
 
                   <tr v-if="SenderHealthStore.lockHeld">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.lock_age') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       {{ formatAge(SenderHealthStore.lockAgeSec) }}
                     </td>
                   </tr>
 
                   <tr v-if="SenderHealthStore.consecutiveSendFailures > 0">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.consecutive_failures') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-orange-600">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-bold text-orange-600">
                       {{ SenderHealthStore.consecutiveSendFailures }}
                     </td>
                   </tr>
@@ -106,10 +106,10 @@
                   <!-- A climbing counter here confirms the stale wifi_cfg_is_connected()
                        diagnosis in docs/phase1/00-OVERVIEW.md. -->
                   <tr v-if="SenderHealthStore.wifiDesyncEpisodes > 0">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" :title="$t('about.sender.wifi_disagreements_tooltip')">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" :title="$t('about.sender.wifi_disagreements_tooltip')">
                       {{ $t('about.sender.wifi_disagreements') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-600" :title="$t('about.sender.wifi_disagreements_tooltip')">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-bold text-amber-600" :title="$t('about.sender.wifi_disagreements_tooltip')">
                       {{ $t('about.sender.wifi_disagreements_value', {
                            episodes: SenderHealthStore.wifiDesyncEpisodes,
                            longest: formatAge(SenderHealthStore.wifiDesyncLongestSec) }) }}
@@ -117,39 +117,39 @@
                   </tr>
 
                   <tr v-if="SenderHealthStore.staleEvents > 0">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.stale_events') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-600">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-bold text-amber-600">
                       {{ SenderHealthStore.staleEvents }}
                     </td>
                   </tr>
 
                   <tr class="bg-gray-50">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.google_last_success') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="googleAge">{{ $t('sitewide.age_ago', { age: googleAge }) }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.never') }}</span>
                     </td>
                   </tr>
 
                   <tr class="bg-gray-50">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.fermentrack_last_success') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="fermentrackAge">{{ $t('sitewide.age_ago', { age: fermentrackAge }) }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.never') }}</span>
                     </td>
                   </tr>
 
                   <tr class="bg-gray-50">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('about.sender.any_last_success') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="anyAge">{{ $t('sitewide.age_ago', { age: anyAge }) }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.never') }}</span>
                     </td>

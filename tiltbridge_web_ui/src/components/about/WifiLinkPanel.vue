@@ -45,16 +45,16 @@
 
         <div class="flex flex-col">
           <div class="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-            <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+            <div class="py-2 align-middle min-w-full sm:px-6 lg:px-8">
               <div class="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
                 <table class="min-w-full divide-y divide-gray-200">
                   <tbody class="bg-white divide-y divide-gray-200">
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('wifi.signal') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium">
                       <span v-if="store.associated" :class="qualityClass">
                         {{ $t('wifi.signal_with_quality', { dbm: store.rssiLatest, quality: store.rssiQuality }) }}
                       </span>
@@ -63,10 +63,10 @@
                   </tr>
 
                   <tr class="bg-gray-50">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('wifi.signal_range') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="store.rssiSamples > 0">
                         {{ $t('wifi.signal_range_value', {
                              average: store.rssiAverage,
@@ -80,10 +80,10 @@
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('wifi.network') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="store.ssid">{{ $t('wifi.network_value', { ssid: store.ssid, channel: store.channel }) }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.none') }}</span>
                     </td>
@@ -91,31 +91,31 @@
 
                   <!-- The row that matters on a repeated network: same SSID, different radio. -->
                   <tr class="bg-gray-50">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                         :title="$t('wifi.access_point_hint')">
                       {{ $t('wifi.access_point') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-mono text-gray-700">
                       <span v-if="store.bssid">{{ store.bssid }}</span>
                       <span v-else class="text-gray-500 font-sans">{{ $t('sitewide.none') }}</span>
                     </td>
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('wifi.ip_address') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-mono text-gray-700">
                       <span v-if="store.ip">{{ store.ip }}</span>
                       <span v-else class="text-gray-500 font-sans">{{ $t('sitewide.none') }}</span>
                     </td>
                   </tr>
 
                   <tr class="bg-gray-50">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ store.associated ? $t('wifi.connected_for') : $t('wifi.offline_since') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium"
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium"
                         :class="store.associated ? 'text-gray-900' : 'text-red-600'">
                       <span v-if="uptimeAge">{{ uptimeAge }}</span>
                       <span v-else class="text-gray-500">{{ $t('sitewide.unknown') }}</span>
@@ -123,10 +123,10 @@
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('wifi.dropouts') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium"
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium"
                         :class="store.outages > 0 ? 'text-orange-600' : 'text-gray-900'">
                       {{ store.outages }}
                     </td>
@@ -135,11 +135,11 @@
                   <!-- Only once it has happened; a permanent zero is noise on a network
                        with a single access point. -->
                   <tr class="bg-gray-50" v-if="store.roams > 0">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                         :title="$t('wifi.roams_hint')">
                       {{ $t('wifi.roams') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-orange-600"
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-bold text-orange-600"
                         :title="$t('wifi.roams_hint')">
                       {{ store.roams }}
                     </td>
@@ -148,11 +148,11 @@
                   <!-- Shown once anything has been ATTEMPTED, so a failing recovery is
                        visible rather than looking like one that never ran. -->
                   <tr v-if="store.roamAttempts > 0">
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                         :title="$t('wifi.recoveries_hint')">
                       {{ $t('wifi.recoveries') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium"
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium"
                         :class="roamHealthy ? 'text-gray-900' : 'text-orange-600'"
                         :title="$t('wifi.recoveries_hint')">
                       {{ $t('wifi.recoveries_value', {
@@ -166,10 +166,10 @@
                   </tr>
 
                   <tr>
-                    <th scope="row" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('wifi.last_dropout') }}
                     </th>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td class="px-3 py-4 sm:px-6 md:whitespace-nowrap text-sm font-medium text-gray-900">
                       <span v-if="lastOutageAge">
                         {{ $t('wifi.last_dropout_value', { age: lastOutageAge, duration: lastOutageDuration }) }}
                       </span>

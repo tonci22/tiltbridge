@@ -5,8 +5,10 @@
         <input :id="uid" v-model="value" :aria-describedby="uid + '-desc'" :name="uid" type="checkbox" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded" />
       </div>
       <div class="ml-3 text-sm">
-        <label :for="uid" class="font-medium text-gray-700"><slot name="FieldName"></slot></label>
-        <span :id="uid + '-desc'" class="text-gray-500 ml-3"><slot name="FieldDescription"></slot></span>
+        <!-- Description below the label, not beside it: inline it reads as one run-on
+             sentence as soon as the label and the description share a wrapped line. -->
+        <label :for="uid" class="block font-medium text-gray-700"><slot name="FieldName"></slot></label>
+        <p :id="uid + '-desc'" class="mt-0.5 text-gray-500"><slot name="FieldDescription"></slot></p>
       </div>
     </div>
   </div>

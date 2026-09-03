@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- The configuration landing page just wraps other elements which are shown when the configuration data loads -->
-    <TablessContainer v-if="configStore.loaded">
+    <TablessContainer :tabs="targets" v-if="configStore.loaded">
       <template v-slot:header>
         {{ $t('device_config.configure_tiltbridge_header') }}
       </template>
@@ -18,11 +18,15 @@ import { onMounted, onBeforeUnmount } from "vue";
 import { useConfigStore } from "@/stores/ConfigStore";
 import { useLoading } from 'vue-loading-overlay'
 import TablessContainer from "@/components/sitewide/TablessContainer.vue";
+import { cloudTargets } from "@/nav.js";
 
 const $loading = useLoading({
   // options
 });
 
+
+// Same list the sidebar shows, so the mobile picker cannot drift out of sync with it.
+const targets = cloudTargets();
 
 let intervalObject = null;
 const configStore = useConfigStore();

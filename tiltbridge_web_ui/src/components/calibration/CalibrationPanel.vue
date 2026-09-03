@@ -2,7 +2,7 @@
   <div>
     <header class="bg-white shadow">
       <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <h1 class="text-3xl font-bold text-gray-900">
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">
           {{ $t('calibration.header', { color: colorName }) }}
         </h1>
         <p class="mt-1 text-sm font-mono text-gray-500" v-if="deviceId">{{ deviceId }}</p>
@@ -133,7 +133,7 @@
 
       <!-- Calibration Points Table (original position for smaller screens) -->
       <div class="bg-white px-4 py-5 border-b border-gray-200 sm:px-6 2xl:hidden">
-        <div class="flex justify-between items-center mb-4">
+        <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
           <h3 class="text-lg leading-6 font-medium text-gray-900">
             {{ $t('calibration.calibration_points_title') }}
           </h3>
@@ -141,38 +141,42 @@
             {{ $t('calibration.add_calibration_point') }}
           </button>
         </div>
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ $t('calibration.table_raw_gravity') }}</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ $t('calibration.table_actual_gravity') }}</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">{{ $t('calibration.table_current_calibrated') }}</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">{{ $t('calibration.table_new_calibrated') }}</th>
-              <th scope="col" class="relative px-6 py-3"><span class="sr-only">{{ $t('calibration.table_actions') }}</span></th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
-            <tr v-for="(point, index) in calibrationStore.calibrationPoints" :key="index">
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ point[0] }}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ point[1] }}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-400 hidden lg:table-cell">{{ getOrigCalibratedGravity(point[0]) }}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-400 hidden md:table-cell">{{ getNewCalibratedGravity(point[0]) }}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                <button 
-                  @click="deletePoint(point[0])"
-                  class="text-red-600 hover:text-red-900"
-                >
-                  {{ $t('calibration.delete') }}
-                </button>
-              </td>
-            </tr>
-            <tr v-if="calibrationStore.calibrationPoints.length === 0">
-              <td colspan="5" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                {{ $t('calibration.no_calibration_points') }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <!-- Three nowrap columns at px-6 do not fit a phone; scroll the table rather than
+             the whole page. -->
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th scope="col" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ $t('calibration.table_raw_gravity') }}</th>
+                <th scope="col" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ $t('calibration.table_actual_gravity') }}</th>
+                <th scope="col" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">{{ $t('calibration.table_current_calibrated') }}</th>
+                <th scope="col" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">{{ $t('calibration.table_new_calibrated') }}</th>
+                <th scope="col" class="relative px-6 py-3"><span class="sr-only">{{ $t('calibration.table_actions') }}</span></th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              <tr v-for="(point, index) in calibrationStore.calibrationPoints" :key="index">
+                <td class="px-3 py-4 sm:px-6 whitespace-nowrap text-sm font-medium text-gray-900">{{ point[0] }}</td>
+                <td class="px-3 py-4 sm:px-6 whitespace-nowrap text-sm font-medium text-gray-900">{{ point[1] }}</td>
+                <td class="px-3 py-4 sm:px-6 whitespace-nowrap text-sm font-medium text-gray-400 hidden lg:table-cell">{{ getOrigCalibratedGravity(point[0]) }}</td>
+                <td class="px-3 py-4 sm:px-6 whitespace-nowrap text-sm font-medium text-gray-400 hidden md:table-cell">{{ getNewCalibratedGravity(point[0]) }}</td>
+                <td class="px-3 py-4 sm:px-6 whitespace-nowrap text-right text-sm font-medium">
+                  <button 
+                    @click="deletePoint(point[0])"
+                    class="text-red-600 hover:text-red-900"
+                  >
+                    {{ $t('calibration.delete') }}
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="calibrationStore.calibrationPoints.length === 0">
+                <td colspan="5" class="px-3 py-4 sm:px-6 whitespace-nowrap text-sm text-gray-500 text-center">
+                  {{ $t('calibration.no_calibration_points') }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
     </main>

@@ -1,104 +1,109 @@
 <template>
-  <div v-if="isVisible" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click="handleBackdropClick">
-    <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 xl:w-2/5 shadow-lg rounded-md bg-white">
-      <div class="mt-3">
-        <!-- Header -->
-        <div class="flex items-center justify-between pb-3">
-          <h3 class="text-lg font-medium text-gray-900">
-            {{ $t('calibration.manual_coefficient_modal.title') }}
-          </h3>
-          <button @click="closeModal" class="text-gray-400 hover:text-gray-600">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-            </svg>
-          </button>
-        </div>
+  <div v-if="isVisible" class="fixed inset-0 z-50 overflow-y-auto bg-gray-600 bg-opacity-50">
+    <!-- Centred in a scrollable flex wrapper rather than offset with top-20: on a short
+         (landscape, keyboard-up) viewport the offset pushed the buttons off the bottom.
+         The backdrop handler lives here so a tap beside the dialog still closes it. -->
+    <div class="flex min-h-full items-start justify-center p-4 sm:items-center" @click="handleBackdropClick">
+      <div class="w-full md:w-3/4 lg:w-1/2 xl:w-2/5 p-5 border shadow-lg rounded-md bg-white">
+        <div class="mt-3">
+          <!-- Header -->
+          <div class="flex items-center justify-between pb-3">
+            <h3 class="text-lg font-medium text-gray-900">
+              {{ $t('calibration.manual_coefficient_modal.title') }}
+            </h3>
+            <button @click="closeModal" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
 
-        <!-- Description -->
-        <p class="text-sm text-gray-600 mb-4">
-          {{ $t('calibration.manual_coefficient_modal.description') }}
-        </p>
+          <!-- Description -->
+          <p class="text-sm text-gray-600 mb-4">
+            {{ $t('calibration.manual_coefficient_modal.description') }}
+          </p>
 
-        <!-- Coefficient Input Fields -->
-        <div class="space-y-4 mb-6">
-          <div class="grid grid-cols-3 gap-4">
-            <div>
-              <label for="x0" class="block text-sm font-medium text-gray-700 mb-1">
-                {{ $t('calibration.manual_coefficient_modal.x0_label') }}
-              </label>
-              <input
-                id="x0"
-                v-model.number="localCoeffs.x0"
-                type="number"
-                step="any"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label for="x1" class="block text-sm font-medium text-gray-700 mb-1">
-                {{ $t('calibration.manual_coefficient_modal.x1_label') }}
-              </label>
-              <input
-                id="x1"
-                v-model.number="localCoeffs.x1"
-                type="number"
-                step="any"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label for="x2" class="block text-sm font-medium text-gray-700 mb-1">
-                {{ $t('calibration.manual_coefficient_modal.x2_label') }}
-              </label>
-              <input
-                id="x2"
-                v-model.number="localCoeffs.x2"
-                type="number"
-                step="any"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              />
+          <!-- Coefficient Input Fields -->
+          <div class="space-y-4 mb-6">
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <label for="x0" class="block text-sm font-medium text-gray-700 mb-1">
+                  {{ $t('calibration.manual_coefficient_modal.x0_label') }}
+                </label>
+                <input
+                  id="x0"
+                  v-model.number="localCoeffs.x0"
+                  type="number"
+                  step="any"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label for="x1" class="block text-sm font-medium text-gray-700 mb-1">
+                  {{ $t('calibration.manual_coefficient_modal.x1_label') }}
+                </label>
+                <input
+                  id="x1"
+                  v-model.number="localCoeffs.x1"
+                  type="number"
+                  step="any"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label for="x2" class="block text-sm font-medium text-gray-700 mb-1">
+                  {{ $t('calibration.manual_coefficient_modal.x2_label') }}
+                </label>
+                <input
+                  id="x2"
+                  v-model.number="localCoeffs.x2"
+                  type="number"
+                  step="any"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Preview Section -->
-        <div class="bg-gray-50 p-4 rounded-lg mb-6">
-          <h4 class="text-sm font-medium text-gray-900 mb-3">
-            {{ $t('calibration.manual_coefficient_modal.preview_title') }}
-          </h4>
+          <!-- Preview Section -->
+          <div class="bg-gray-50 p-4 rounded-lg mb-6">
+            <h4 class="text-sm font-medium text-gray-900 mb-3">
+              {{ $t('calibration.manual_coefficient_modal.preview_title') }}
+            </h4>
           
-          <div class="space-y-2 text-sm">
-            <div>
-              <span class="font-medium text-gray-700">{{ $t('calibration.manual_coefficient_modal.raw_gravity') }}:</span>
-              <span class="ml-2 text-gray-900">{{ staticRawGravity }}</span>
-            </div>
+            <div class="space-y-2 text-sm">
+              <div>
+                <span class="font-medium text-gray-700">{{ $t('calibration.manual_coefficient_modal.raw_gravity') }}:</span>
+                <span class="ml-2 text-gray-900">{{ staticRawGravity }}</span>
+              </div>
             
-            <div>
-              <span class="font-medium text-gray-700">{{ $t('calibration.manual_coefficient_modal.formula') }}:</span>
-              <span class="ml-2 text-gray-900 font-mono">{{ formulaText }}</span>
-            </div>
+              <div>
+                <span class="font-medium text-gray-700">{{ $t('calibration.manual_coefficient_modal.formula') }}:</span>
+                <span class="ml-2 text-gray-900 font-mono">{{ formulaText }}</span>
+              </div>
             
-            <div>
-              <span class="font-medium text-gray-700">{{ $t('calibration.manual_coefficient_modal.calibrated_gravity') }}:</span>
-              <span class="ml-2 text-gray-900">{{ calibratedGravity }}</span>
+              <div>
+                <span class="font-medium text-gray-700">{{ $t('calibration.manual_coefficient_modal.calibrated_gravity') }}:</span>
+                <span class="ml-2 text-gray-900">{{ calibratedGravity }}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Action Buttons -->
-        <div class="flex justify-end space-x-3">
-          <button
-            @click="closeModal"
-            class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
-          >
-            {{ $t('sitewide.cancel') }}
-          </button>
-          <button
-            @click="saveCoefficients"
-            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {{ $t('sitewide.save') }}
-          </button>
+          <!-- Action Buttons -->
+          <div class="flex justify-end space-x-3">
+            <button
+              @click="closeModal"
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+            >
+              {{ $t('sitewide.cancel') }}
+            </button>
+            <button
+              @click="saveCoefficients"
+              class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {{ $t('sitewide.save') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
