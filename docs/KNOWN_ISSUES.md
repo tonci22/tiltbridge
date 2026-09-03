@@ -594,6 +594,58 @@ not be read (upload may have succeeded)" with the new explanation.
 
 ---
 
+### 23. FIXED — an unconfigured target reported an error for ever
+
+`src/sendData.cpp`, `src/sendData.h`, and the four senders under `src/targets/`. Reported as
+"why do I get *One or more send targets are reporting errors — Google Sheets* when the URL isn't
+even set".
+
+`targetStatus[].lastError` had exactly two writers: a successful send, and a reboot. Every
+sender's "am I configured" check simply skipped the send without touching it:
+
+```cpp
+if (strlen(config.scriptsURL) < GSCRIPTS_MIN_URL_LENGTH || ...) {
+    queueUploadState = QueueUploadState::DISABLED;
+    rearmGSheetsTimer(config.gsheetsPushEvery);
+    return true;        // lastError untouched
+}
+```
+
+So once a target had failed, un-configuring it left the banner up permanently: with no
+configuration there can never be a successful send to clear it, and only a reboot would. The
+store flags any non-zero code (`Object.values(targets).some(t => t.error_code !== 0)`), so one
+inert target lit the warning on the Tilts page indefinitely. It also affected the ordinary case
+of *fixing* a bad key, where the stale error survived until the next successful push.
+
+Not specific to Google Sheets or to code 13 — that pair only came up because a 13 was left
+behind by the hardware testing for entry 22. Configure Brewfather with a bad key, get code 2,
+clear the key, and it complained about Brewfather for ever too.
+
+`clearTargetStatus()` now resets `lastError` and `consecutiveFailures` (so a reconfigured target
+is also not still serving a doubled backoff), and every sender calls it from its own
+not-configured branch — all eleven target ids, Google Sheets twice because the v2 and legacy
+paths each have one. Putting the call at each sender's existing check means there is no second
+copy of "is this configured" to drift out of step.
+
+**Deliberately not `setTargetStatus(target, SEND_OK)`**, which would have been the obvious reuse:
+that routes a SUCCESS into `sender_health.noteTargetResult()`, so an inert target would keep
+refreshing the last-success time the recovery watchdog reads and could mask a genuinely wedged
+sender. `lastAttemptTime` is left alone - that attempt really did happen, and with `lastError`
+back to `SEND_OK` nothing displays it.
+
+**Verified on hardware** by reproducing the report exactly: configure the target against a mock
+that 302s to a 404 (`error_code 13`), un-configure it (`13`, still stale - nothing has run yet),
+then let one Google Sheets pass happen (`0`). Regression-checked that a configured target still
+sends afterwards, because four of the eleven edits inverted an existing condition and swapped
+its branches.
+
+**One residual, accepted.** The clear happens on the target's next pass, not on the settings
+write, so the banner can persist for up to one push interval after un-configuring. Making it
+instant needs the dispatcher at `http_server.cpp:905` to know each branch's `SendTargetID`,
+which it does not, and that is a refactor of a working function for a case that now self-heals.
+
+---
+
 ---
 
 ## Firmware — unexplained

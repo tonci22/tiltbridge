@@ -63,6 +63,27 @@ void dataSendHandler::setTargetStatus(SendTargetID target, SendError error) {
     }
 }
 
+/*
+ * A target with no configuration is not in an error state.
+ *
+ * lastError is otherwise only ever cleared by a successful send, so un-configuring a target
+ * that had failed left the UI's "one or more send targets are reporting errors" banner up for
+ * ever: with no configuration there can be no successful send to clear it, and only a reboot
+ * would. Each caller sits at the target's own "am I configured" check, so there is no second
+ * copy of that logic to drift.
+ *
+ * lastAttemptTime is left as it is - the attempt it records really did happen, and with
+ * lastError back to SEND_OK nothing displays it.
+ */
+void dataSendHandler::clearTargetStatus(SendTargetID target) {
+    if (target < TARGET_COUNT) {
+        targetStatus[target].lastError = SEND_OK;
+        // Also drops any backoff the failures had earned, so a reconfigured target is
+        // attempted on its normal interval rather than a doubled one.
+        targetStatus[target].consecutiveFailures = 0;
+    }
+}
+
 uint32_t dataSendHandler::backoffDelay(SendTargetID target, uint32_t baseSeconds) const {
     if (target >= TARGET_COUNT)
         return baseSeconds;
@@ -682,6 +703,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         if (strlen(config.brewfatherKey) <= BREWFATHER_MIN_KEY_LENGTH)
         {
             Log.verbose("Brewfather key not populated. Returning.\r\n");
+            clearTargetStatus(TARGET_BREWFATHER);
             return false;
         }
         strcpy(url, "http://log.brewfather.net/stream?id=");
@@ -692,6 +714,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         if (strlen(config.brewersFriendKey) <= BREWERS_FRIEND_MIN_KEY_LENGTH)
         {
             Log.verbose("Brewer's Friend key not populated. Returning.\r\n");
+            clearTargetStatus(TARGET_BREWERS_FRIEND);
             return false;
         }
         strcpy(url, "https://log.brewersfriend.com/stream/");
@@ -702,6 +725,7 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         if (strlen(config.userTargetURL) <= USER_TARGET_MIN_URL_LENGTH)
         {
             Log.verbose("User target URL not populated. Returning.\r\n");
+            clearTargetStatus(TARGET_USER_TARGET);
             return false;
         }
         strcpy(url, config.userTargetURL);
@@ -796,6 +820,9 @@ bool dataSendHandler::send_to_grainfather()
         }
         if (attempted)
             setTargetStatus(TARGET_GRAINFATHER, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+        else
+            // No colour has a URL, so nothing was attempted.
+            clearTargetStatus(TARGET_GRAINFATHER);
         startTimer(grainfatherTimer, backoffDelay(TARGET_GRAINFATHER, config.grainfatherPushEvery)); // Set up subsequent send to Grainfather
     }
     return result;
@@ -807,6 +834,7 @@ bool dataSendHandler::send_to_taplistio()
 
     // Check if config.taplistioURL is set, and return if it's not
     if (strlen(config.taplistioURL) <= 10) {
+        clearTargetStatus(TARGET_TAPLISTIO);
         return false;
     }
 
@@ -880,7 +908,9 @@ bool dataSendHandler::send_to_brewstatus()
 
         // Brew Status
         send_brewStatus = false;
-        if (strlen(config.brewstatusURL) > BREWSTATUS_MIN_URL_LENGTH) {
+        if (strlen(config.brewstatusURL) <= BREWSTATUS_MIN_URL_LENGTH) {
+            clearTargetStatus(TARGET_BREW_STATUS);
+        } else {
             Log.verbose("Calling send to Brew Status.\r\n");
 
             // The payload should look like this when sent to Brewstatus:
@@ -944,7 +974,9 @@ bool dataSendHandler::send_to_google()
         int numSent = 0;
 
         // The google sheets handler only fires if we have both a Google Scripts URL to post to, and an email address.
-        if (strlen(config.scriptsURL) >= GSCRIPTS_MIN_URL_LENGTH && strlen(config.scriptsEmail) >= GSCRIPTS_MIN_EMAIL_LENGTH) {
+        if (strlen(config.scriptsURL) < GSCRIPTS_MIN_URL_LENGTH || strlen(config.scriptsEmail) < GSCRIPTS_MIN_EMAIL_LENGTH) {
+            clearTargetStatus(TARGET_GOOGLE_SHEETS);
+        } else {
             Log.verbose("Checking for any pending Google Sheets pushes.\r\n");
             printMem();
 
@@ -1057,7 +1089,11 @@ bool dataSendHandler::send_to_influxdb()
 
         send_influxdb = false;
 
-        if (strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && strlen(config.influxdbToken) > 0 && strlen(config.influxdbOrg) > 0 && strlen(config.influxdbBucket) > 0) 
+        if (!(strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH && strlen(config.influxdbToken) > 0 && strlen(config.influxdbOrg) > 0 && strlen(config.influxdbBucket) > 0))
+        {
+            clearTargetStatus(TARGET_INFLUXDB);
+        }
+        else
         {
 
             Log.verbose("Calling send to InfluxDB.\r\n");

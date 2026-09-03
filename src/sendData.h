@@ -146,6 +146,15 @@ public:
     // Error tracking
     SendTargetStatus targetStatus[TARGET_COUNT];
     void setTargetStatus(SendTargetID target, SendError error);
+    /*
+     * Clears a target's error state because it is not configured, so it will not be attempted.
+     *
+     * Deliberately NOT setTargetStatus(target, SEND_OK): that reports a SUCCESS to
+     * sender_health, and an inert target must never refresh the last-success time the
+     * recovery watchdog reads - it would mask a genuinely wedged sender.
+     */
+    void clearTargetStatus(SendTargetID target);
+
     // redirectHops is how many redirects were followed to reach httpCode (see
     // http_request()). A 4xx after at least one hop is SEND_ERR_RESPONSE_UNREADABLE
     // rather than the status's usual meaning. Defaulted so existing callers are unaffected.

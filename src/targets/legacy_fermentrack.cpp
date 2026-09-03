@@ -21,7 +21,9 @@ bool dataSendHandler::send_to_legacy_fermentrack()
         send_legacy_fermentrack = false;
 //        tilt_scanner.deinit();
 
-        if (strlen(config.legacyFermentrackURL) >= FERMENTRACK_MIN_URL_LENGTH) {
+        if (strlen(config.legacyFermentrackURL) < FERMENTRACK_MIN_URL_LENGTH) {
+            clearTargetStatus(TARGET_LEGACY_FERMENTRACK);
+        } else {
             Log.verbose("Calling send to Legacy Fermentrack.\r\n");
 
             /*

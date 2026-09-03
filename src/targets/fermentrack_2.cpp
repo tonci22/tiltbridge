@@ -144,6 +144,9 @@ bool dataSendHandler::send_to_fermentrack()
             } else if (ft2_is_registered()) {
                 setTargetStatus(TARGET_FERMENTRACK, SEND_OK);
             }
+        } else {
+            // No hostname, so nothing above was attempted: not configured is not an error.
+            clearTargetStatus(TARGET_FERMENTRACK);
         }
 
         // Set up for the next send

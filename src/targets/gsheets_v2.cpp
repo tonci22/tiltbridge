@@ -89,6 +89,7 @@ bool dataSendHandler::send_to_google_v2()
     if (strlen(config.scriptsURL) < GSCRIPTS_MIN_URL_LENGTH ||
         strlen(config.scriptsEmail) < GSCRIPTS_MIN_EMAIL_LENGTH) {
         queueUploadState = QueueUploadState::DISABLED;
+        clearTargetStatus(TARGET_GOOGLE_SHEETS);
         rearmGSheetsTimer(config.gsheetsPushEvery);
         return true;
     }

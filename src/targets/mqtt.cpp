@@ -142,6 +142,7 @@ bool dataSendHandler::send_to_mqtt() {
     bool result = false;
 
     if (strcmp(config.mqttBrokerHost, "") == 0 || strlen(config.mqttBrokerHost) == 0) {
+        clearTargetStatus(TARGET_MQTT);
         // No MQTT broker configured
         return false;
     }
