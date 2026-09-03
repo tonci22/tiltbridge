@@ -118,16 +118,33 @@ esp_err_t idf_static_serve_file(httpd_req_t *req, const char *file_path) {
     }
 
     /*
-     * Cache the UI, never the configuration.
+     * Three tiers, and they have to agree with tiltbridge_web_ui/vite.config.js.
      *
-     * Everything under /conf/ is live device state - the calibration point files the web UI
-     * re-reads immediately after changing them. Serving those with max-age meant the browser
-     * answered the reload from cache and showed the OLD contents, so a calibration point that
-     * had genuinely been deleted stayed on screen and the delete button looked dead.
+     * no-store - /conf/ and any HTML.
      *
-     * The UI assets are still cached: they only change when the filesystem is reflashed.
+     *   Everything under /conf/ is live device state: the calibration point files the web UI
+     *   re-reads immediately after changing them. Serving those with max-age meant the browser
+     *   answered the reload from cache and showed the OLD contents, so a calibration point
+     *   that had genuinely been deleted stayed on screen and the delete button looked dead.
+     *
+     *   HTML is index.html, which every SPA route hands back. It names the hashed asset files,
+     *   so a cached copy of it is a copy naming assets that an uploadfs may have deleted. This
+     *   was the "why is the help page empty" bug: the previous build wrote unhashed names, a
+     *   browser kept the OLD chunks under the NEW build's names, a chunk the new build no
+     *   longer emitted 404'd, and the lazy route's dynamic import() rejected leaving a blank
+     *   page with nothing in the console. index.html must always come from the device.
+     *
+     * immutable - assets/, which Vite writes with a content hash in every filename.
+     *
+     *   A given URL there can only ever have one body, so it is safe to cache for a year and
+     *   there is no revalidation to pay on a device this slow. A new build is a new filename,
+     *   picked up by the freshly-fetched index.html.
+     *
+     * max-age - everything else: the favicons and site.webmanifest at the root, and the
+     *   esp_wifi_config UI under wifiui/. None of those carry a hash, so they keep the short
+     *   window rather than being pinned for a year.
      */
-    char cache_control[32];
+    char cache_control[64];
 
     // file_path arrives without a leading slash here (the separator is added when full_path
     // is built), but tolerate one so this cannot silently stop matching.
@@ -137,8 +154,16 @@ esp_err_t idf_static_serve_file(httpd_req_t *req, const char *file_path) {
 
     const bool is_config = (strncmp(rel, "conf/", 5) == 0);
 
-    if (is_config) {
+    const char *dot = strrchr(rel, '.');
+    const bool is_html = (dot != NULL) &&
+                         (strcasecmp(dot, ".html") == 0 || strcasecmp(dot, ".htm") == 0);
+
+    const bool is_hashed_asset = (strncmp(rel, "assets/", 7) == 0);
+
+    if (is_config || is_html) {
         strlcpy(cache_control, "no-store", sizeof(cache_control));
+    } else if (is_hashed_asset) {
+        strlcpy(cache_control, "max-age=31536000, immutable", sizeof(cache_control));
     } else {
         snprintf(cache_control, sizeof(cache_control), "max-age=%d", STATIC_CACHE_MAX_AGE);
     }
@@ -315,6 +340,10 @@ esp_err_t idf_static_register_spa_routes(void) {
         "/target/influxdb/",
         "/help/",
         "/about/",
+        // Wildcard: the Vue route is /calibrate/:color/, so there is no fixed path to match.
+        // Registered before the "/*" catch-all (http_server.cpp calls spa_routes first), and
+        // esp_http_server matches handlers in registration order, so this wins.
+        "/calibrate/*",
         NULL
     };
 

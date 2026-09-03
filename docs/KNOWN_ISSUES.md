@@ -740,6 +740,101 @@ The Tilts table was caught only because the mock happened to carry a long `frien
 the dev proxy at a real device — `vite --config` with a one-file override is enough — or give
 the mock deliberately worst-case strings.
 
+### 7. FIXED — a flashed UI came up blank in an already-open browser, because chunk names carried no hash
+
+`tiltbridge_web_ui/vite.config.js`, `src/idf_static_files.cpp`. Reported as "why is the help
+page empty" immediately after an `uploadfs`. The whole chain was observed:
+
+- `vite.config.js` set `entryFileNames`/`chunkFileNames` to `[name].js` — **no content hash**,
+  so every build wrote `index.js`, `HelpPage.js`, … over the same URLs.
+- `idf_static_files.cpp` served everything outside `conf/` with `max-age=600`. Its comment said
+  "The UI assets are still cached: they only change when the filesystem is reflashed" — which is
+  the assumption that fails, because a reflash is exactly when they change.
+- So for ten minutes after a flash a browser could hold OLD chunks under the NEW build's names.
+  The old `HelpPage.js` began `import{_ as r}from"./_plugin-vue_export-helper.js"`; that build
+  inlined the helper away, so the device returned **404** for it. The dynamic `import()` behind
+  the lazy route rejected and `router-view` rendered nothing — blank, with no visible error.
+- Tilts was unaffected because `router/index.js` imports `TiltList.vue` statically, so it lives
+  inside `index.js`. Every other route is lazy.
+
+**The fix is two halves that have to agree with each other.** Hashing alone is not enough: a
+cached `index.html` still names files the flash deleted.
+
+1. Assets are content-hashed and moved under `assets/` (`assets/[name]-[hash].js`).
+2. Three cache tiers in `idf_static_files.cpp`, keyed off that path:
+   `conf/` and **any HTML** → `no-store`; `assets/` → `max-age=31536000, immutable`;
+   everything else (root favicons, `wifiui/`) → the old short `max-age`.
+
+`no-store` on HTML is the half that matters, because every SPA route hands back `index.html`.
+It is now always fetched from the device, so it always names assets that exist.
+
+**Verified on the flashed board**, headers and behaviour: `/`, `/index.html`, `/help/`,
+`/about/`, `/calibrate/Red/` all `no-store`; hashed assets `immutable`; `/favicon.ico` and
+`/site.webmanifest` `max-age=600`; `/conf/…` `no-store`; a missing `/assets/nope-1234.js` still
+404s rather than silently returning `index.html`. On a second page load Chrome refetched the
+navigation (990 bytes, `transferSize` non-zero) and served all 141 KB of hashed assets from
+cache (`transferSize: 0`) — so this is also *less* traffic than before, where the full 141 KB
+was re-downloaded every ten minutes with no revalidation.
+
+### 8. mklittlefs silently drops files it cannot add, and PlatformIO still reports SUCCESS
+
+Found by the fix for 7, which walked straight into it. **This is the entry to read first when
+the UI misbehaves after a flash.**
+
+`mklittlefs` enforces LittleFS's `LFS_NAME_MAX` of **32 characters** on a filename. Hashing the
+chunk names pushed one over: `SendTargetErrorMsg-DYduZCLE.js.gz` is 33. mklittlefs printed
+
+```
+unable to open '/assets/SendTargetErrorMsg-DYduZCLE.js.gz.
+error adding file!
+Error for adding content from assets!
+```
+
+then **abandoned the rest of that directory** — and `pio` still ended in `[SUCCESS]`. Four of
+the twenty-four assets never reached the image, `esptool`'s "Hash of data verified" only proved
+the *incomplete* image had been written faithfully, and every cloud target page went blank:
+`Brewfather-*.js` statically imports `SendTargetErrorMsg-*.js`, and a 404 on a static import
+fails the whole dynamic import, so the error names the chunk you asked for rather than the one
+that is missing.
+
+Confirmed by `grep`-ing the generated `littlefs.bin` for each filename: 20 present, 4 absent.
+32 characters is the exact boundary — `PushIntervalField-CrB3-cmf.js.gz` (32) survived,
+the 33 did not.
+
+Three things now stand in the way of it recurring:
+
+- `fsSafeName()` in `vite.config.js` truncates the stem to whatever is left after the hash and
+  both extensions (`.gz` included, since vite-plugin-compression appends it), so a UI chunk
+  name cannot exceed 32 whatever a component is called.
+- `_check_name_lengths()` in `tools/build_ui.py` fails the build before mklittlefs runs, and
+  covers `public/` files, which bypass the naming above.
+- `verify_fs_image()` is a post-action on the image node: it checks every file in `data/`
+  appears in the built `littlefs.bin` and exits non-zero otherwise. This is the backstop for
+  *any* silent mklittlefs failure, not just long names — a full filesystem would behave the
+  same way. A good build now prints
+  `Filesystem image verified: all 43 files from data/ are present.`
+
+Both guards were negative-tested (a 33-character name and a file withheld from a synthetic
+image each exit 1), not just observed passing.
+
+### 9. FIXED — /calibrate/<id>/ returned 404, so the page could not be opened or refreshed by URL
+
+`src/idf_static_files.cpp`. `idf_static_register_spa_routes()` held a hardcoded list of Vue
+paths, and the parameterised calibration route was not in it — there is no fixed path to match.
+The `/*` catch-all then tried to open `calibrate/Red/` as a file and returned 404. Clicking
+through from the Tilts page worked, because that navigation never leaves the SPA; a refresh or a
+bookmark did not.
+
+Fixed by registering `/calibrate/*`. Order matters and holds: `http_server.cpp` calls
+`register_spa_routes()` before `register_catchall()`, and `esp_http_server` matches handlers in
+registration order. Verified on the board: `/calibrate/Red/` and
+`/calibrate/C7:A5:3F:7A:33:13/` both return `index.html` and render "Calibrating Red Tilt".
+
+**The list is still hand-maintained**, and `router/index.js` carries a comment saying these
+paths must be kept in sync with the firmware. A route added to the Vue router and not here will
+work when clicked and 404 on refresh. Serving `index.html` for any extension-less path would
+remove the class of bug, and was left alone as a wider change than this fix needed.
+
 ---
 
 ## Not bugs — do not re-investigate
