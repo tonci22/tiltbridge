@@ -29,10 +29,17 @@
       "blue": "Blue",
       "yellow": "Yellow",
       "pink": "Pink"
-    }
+    },
+    "none": "None",
+    "never": "Never",
+    "age_ago": "{age} ago",
+    "specific_gravity": "Specific Gravity",
+    "plato": "Plato",
+    "brix": "Brix"
   },
   "navigation": {
-    "general_settings": "General Settings"
+    "general_settings": "General Settings",
+    "offline_queue": "Offline Queue"
   },
   "about": {
     "uptime": {
@@ -59,7 +66,7 @@
       },
       "reset_device": {
         "title": "Reset Device",
-        "description": "Perform a complete factory reset. All settings (including WiFi settings) and calibration data will be lost.",
+        "description": "Perform a complete factory reset. Everything stored on the device is erased: all settings, WiFi credentials, per-Tilt configurations (names, sheet names and calibration) and any readings still waiting in the offline queue.",
         "button": "Reset Device"
       },
       "confirm_modal": {
@@ -69,20 +76,61 @@
         },
         "device": {
           "title": "Confirm Device Reset",
-          "message": "Are you sure you want to perform a factory reset? This will erase ALL settings, calibration data, and configuration. This action cannot be undone."
+          "message": "Are you sure you want to perform a factory reset? This erases every setting, your WiFi credentials, every per-Tilt configuration including calibration, and any readings still queued for upload. Queued readings have not reached your targets yet and cannot be recovered. This action cannot be undone."
         },
         "confirm_button": "Yes, Reset"
       },
       "reset_modal": {
         "wifi": {
           "title": "Resetting WiFi...",
-          "message": "The device is resetting WiFi settings and will restart. You will need to connect to the TiltBridge setup network to reconfigure WiFi access."
+          "message": "The device is resetting WiFi settings and will restart. You will need to connect to the TiltBridge setup network to reconfigure WiFi access.",
+          "success_title": "WiFi Reset Sent",
+          "success_message": "The WiFi reset command was accepted. The device will restart shortly. You will need to connect to the TiltBridge setup network to reconfigure WiFi access.",
+          "failed_title": "WiFi Reset Failed",
+          "failed_message": "The WiFi reset command could not be sent. Please check your connection to the device and try again."
         },
         "device": {
           "title": "Resetting Device...",
-          "message": "The device is performing a factory reset and will restart. All settings and data have been erased. You will need to reconfigure the device (including WiFi access) from scratch."
+          "message": "The device is performing a factory reset and will restart. All settings, per-Tilt configurations and queued readings have been erased. You will need to reconfigure the device (including WiFi access) from scratch.",
+          "success_title": "Device Reset Sent",
+          "success_message": "The factory reset command was accepted. The device will erase everything and restart shortly. You will need to reconfigure the device (including WiFi access) from scratch.",
+          "failed_title": "Device Reset Failed",
+          "failed_message": "The factory reset command could not be sent. Please check your connection to the device and try again."
         }
       }
+    },
+    "sender": {
+      "header": "Outbound Sender",
+      "state": "State",
+      "states": {
+        "idle": "IDLE",
+        "sending": "SENDING",
+        "stale": "STALE"
+      },
+      "current_target": "Current target",
+      "heartbeat": "Sender heartbeat",
+      "send_lock": "Send lock",
+      "lock_held": "Held",
+      "lock_free": "Free",
+      "request_age": "Request age",
+      "lock_age": "Send lock age",
+      "consecutive_failures": "Consecutive failures",
+      "wifi_disagreements": "Wi-Fi flag desync",
+      "wifi_disagreements_value": "{episodes} episode(s), longest {longest}",
+      "wifi_disagreements_tooltip": "Spells where the Wi-Fi library reported 'disconnected' while the network interface was demonstrably up. Uploads continue during these, because the firmware trusts the interface over the library - so a short episode is harmless. This previously reported a per-poll counter, which made one minute look like thousands of faults.",
+      "stale_events": "Stale sender events",
+      "google_last_success": "Google Sheets - last success",
+      "fermentrack_last_success": "Fermentrack - last success",
+      "any_last_success": "Any target - last success",
+      "last_recovery_title": "Automatic recovery performed",
+      "last_recovery_line": "The device restarted itself because the {reason} (target at the time: {target}).",
+      "last_recovery_detail": "Heartbeat age {heartbeat}, send lock age {lock}, uptime at restart {uptime}, boot count {boot}.",
+      "recovery_reasons": {
+        "sender_heartbeat_stale": "sender heartbeat went stale",
+        "sender_lock_stuck": "send lock was stuck",
+        "unknown": "sender stopped responding"
+      },
+      "load_failed": "Unable to read sender status from the TiltBridge."
     }
   },
   "device_config": {
@@ -111,7 +159,11 @@
       "success_message": "TiltBridge updated successfully",
       "fail_header": "Update Failed",
       "fail_message": "Unable to connect to the TiltBridge or the update was rejected. Please recheck the information provided and reattempt."
-    }
+    },
+    "gravity_unit_name": "Gravity Units",
+    "gravity_unit_desc": "Units for displaying gravity readings",
+    "combine_tilts_name": "Combine Tilts of the same color",
+    "combine_tilts_desc": "Combines all readings received from Tilts of the same color, and overwrites their unique identifiers with the MAC address of this TiltBridge. Use this if you use Tilt \"repeaters\" to prevent duplication of the same Tilt."
   },
   "cloud_config": {
     "fermentrack": {
@@ -125,7 +177,7 @@
       "url_desc": "URL of the target system",
       "push_frequency": "Push Frequency",
       "push_frequency_desc": "Frequency to send data (in seconds)",
-      "push_frequency_out_of_range": "Push frequency must be a number between 30 and 43200",
+      "push_frequency_out_of_range": "Push frequency must be a number between {min} and {max}",
       "push_frequency_invalid": "@:cloud_config.fermentrack.push_frequency_out_of_range",
       "url_invalid": "URLs must start with either http:// or https://",
       "fermentrack_settings_set_sr": "Select a Fermentrack 2 target type",
@@ -170,7 +222,9 @@
       "email": "Google Script Email Address",
       "email_desc": "Email address used to create the targeted script",
       "color_sheet_tilt_name": "{color} Tilt Sheet Name",
-      "color_sheet_tilt_name_desc": "The spreadsheet name to place data for the {color} tilt on"
+      "color_sheet_tilt_name_desc": "The spreadsheet name to place data for the {color} tilt on",
+      "v2_enabled": "Use the v2 Google Sheets protocol",
+      "v2_enabled_desc": "Sends the capture time with each reading so backlogged readings land under the time they were taken rather than the time they were uploaded. Requires an updated Apps Script."
     },
     "brewers_friend": {
       "header": "Configure Brewers Friend",
@@ -178,7 +232,8 @@
       "about_text": "These settings control how TiltBridge talks to Brewer's Friend. With a premium account, Brewer's Friend supports logging from gravity sensors such as the Tilt Hydrometer. To find your API key, log into your Brewer's Friend account and go to Profile > Account. Your API key will be a string of letters and numbers (not a URL).",
       "api_key": "API Key",
       "api_key_desc": "API key from your Brewers Friend account settings",
-      "error_missing_api_key": "API key cannot be empty"
+      "error_missing_api_key": "API key cannot be empty",
+      "error_api_key_too_short": "API key must be greater than 12 characters"
     },
     "brewfather": {
       "header": "Configure Brewfather",
@@ -187,7 +242,8 @@
       "api_key": "Stream Key",
       "api_key_desc": "Stream key from your Brewfather account settings",
       "error_missing_api_key": "Stream key cannot be empty",
-      "error_invalid_stream_key": "Stream key is a series of letters and numbers - not a URL. Please check the key and try again."
+      "error_invalid_stream_key": "Stream key is a series of letters and numbers - not a URL. Please check the key and try again.",
+      "error_api_key_too_short": "Stream key must be greater than 5 characters"
     },
     "grainfather": {
       "header": "Configure Grainfather",
@@ -241,8 +297,8 @@
       "about_text": "This target allows you to send a generic JSON payload containing your Tilt data to a service that TiltBridge otherwise does not support",
       "generic_target_url": "Generic Target URL",
       "generic_target_url_desc": "The URL to which to push a payload containing JSON data covering your Tilts",
-      "push_frequency": "@:cloud_config.mqtt.mqtt_push_every",
-      "push_frequency_desc": "@:cloud_config.mqtt.mqtt_push_every_desc"
+      "push_frequency": "@:cloud_config.push_interval.label",
+      "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
     "influxdb": {
       "header": "Configure InfluxDB",
@@ -264,6 +320,9 @@
       "error_missing_bucket": "Bucket is required",
       "error_invalid_url": "Please enter a valid URL starting with http:// or https://",
       "error_invalid_push_frequency": "Push frequency must be between 60 and 86400 seconds (1 minute to 24 hours)"
+    },
+    "push_interval": {
+      "error_out_of_range": "Push frequency must be between {min} and {max} seconds."
     }
   },
   "tilt_list": {
@@ -275,7 +334,16 @@
     "gravity_column": "Gravity",
     "temperature_column": "Temperature",
     "battery_age_week_count": "{weeks} weeks",
-    "no_tilts_detected": "No Tilts have been detected"
+    "no_tilts_detected": "No Tilts have been detected",
+    "name_column": "Name",
+    "mac_column": "MAC",
+    "model_column": "Model",
+    "rssi_value": "({dbm} dBm) {quality}",
+    "rssi_tooltip": "Average {average} dBm, min {minimum} dBm, max {maximum} dBm over {samples} samples",
+    "calibrate_button": "Calibrate this Tilt",
+    "configure_button": "Configure this Tilt",
+    "configure_button_unconfigured": "Configure this Tilt (currently using the shared color settings)",
+    "combine_tilts_notice": "\"Combine Tilts of the same color\" is enabled, so readings from same-color Tilts are merged into one entry and per-device configuration is unavailable. Turn it off in General Settings to configure each physical Tilt separately."
   },
   "help_page": {
     "header": "TiltBridge Support",
@@ -336,6 +404,215 @@
       "raw_gravity": "Raw Gravity",
       "formula": "Formula",
       "calibrated_gravity": "Calibrated Gravity"
+    }
+  },
+  "wifi": {
+    "panel_header": "WiFi Link",
+    "signal": "Signal",
+    "signal_value": "{dbm} dBm",
+    "signal_with_quality": "{dbm} dBm ({quality})",
+    "signal_range": "Signal Range",
+    "signal_range_value": "avg {average}, min {minimum}, max {maximum} dBm over {samples} samples in the last {window}",
+    "no_samples": "No samples collected yet",
+    "network": "Network",
+    "network_value": "{ssid} (channel {channel})",
+    "network_line": "{ssid} · ch {channel}",
+    "access_point": "Access Point",
+    "access_point_hint": "The BSSID of the radio this device is attached to. On a network with a repeater the SSID is shared, so this is the only field that tells the repeater and the router's own access point apart.",
+    "ip_address": "IP Address",
+    "connected_for": "Connected For",
+    "offline_since": "Offline For",
+    "offline": "WiFi offline",
+    "offline_for": "for {age}",
+    "dropouts": "Dropouts Since Boot",
+    "roams": "Access Point Changes",
+    "roams_hint": "Times the access point changed under this device. On a repeated network a high count means it keeps being handed between the repeater and the router, which costs a reconnect each time even when the signal looks strong.",
+    "busy_scanning": "Checking access points",
+    "busy_reconnecting": "Reconnecting",
+    "busy_detail": "The device is moving off a weak access point. Tilt scanning and uploads pause for up to about half a minute while this happens, and readings are queued to flash meanwhile.",
+    "recoveries": "Access Point Moves",
+    "recoveries_value": "{landed} of {attempts} succeeded, last result {result}",
+    "recoveries_hint": "Attempts to move off a weak access point onto a materially stronger one on the same network. These moves are deliberate, so they are not counted as dropouts. NO_CANDIDATE means the scan found nothing better and SAME_AP means the reconnect came back to the same radio - both healthy outcomes that changed nothing. REASSOC_TIMEOUT means the link had not returned when the wait ran out.",
+    "last_dropout": "Last Dropout",
+    "last_dropout_value": "{age} ago, lasted {duration}",
+    "no_dropouts": "None since boot",
+    "tooltip": "Average {average} dBm, min {minimum} dBm, max {maximum} dBm over {samples} samples in the last {window}. {outages} dropout(s) since boot.",
+    "tooltip_no_samples": "No signal samples collected yet",
+    "tooltip_offline": "Not connected to WiFi. {outages} dropout(s) since boot. Readings are being queued to flash.",
+    "desynced_short": "Desynced",
+    "desynced_title": "WiFi manager is out of sync with the interface",
+    "desynced_detail": "The device is associated with an access point, but its WiFi manager reports being disconnected. Uploads keep working because the firmware trusts the interface over the manager, but /api/wifi/status reads blank meanwhile. The firmware drops the association to resynchronise it after five minutes.",
+    "desynced_for": "Out of step for {age}; {episodes} episode(s) since boot."
+  },
+  "tilt_device_config": {
+    "header": "Tilt Device Configuration",
+    "description": "These settings are attached to this physical Tilt (by MAC address), not to its color. Anything left blank falls back to the shared color settings.",
+    "mac_label": "MAC address",
+    "detected_color_label": "Detected color",
+    "detected_model_label": "Detected model",
+    "friendly_name": "Friendly Name",
+    "friendly_name_desc": "Name shown in the Tilt list and sent to targets that support it. Maximum 32 characters.",
+    "gsheets_name": "Google Sheets Name",
+    "gsheets_name_desc": "Spreadsheet tab name used for this Tilt. Overrides the color-wide sheet name. Maximum 25 characters.",
+    "model_label": "Manual Model Label",
+    "model_label_desc": "Overrides the automatically detected model. Leave blank to keep the detected value. Maximum 16 characters.",
+    "notes": "Notes",
+    "notes_desc": "Free-form note for your own reference. Maximum 64 characters.",
+    "notes_placeholder": "Fermenter 3, second batch",
+    "alias_one": "Repeater Alias 1",
+    "alias_two": "Repeater Alias 2",
+    "alias_desc": "MAC address of a repeater that rebroadcasts this Tilt. Readings from the alias are treated as coming from this device. Optional.",
+    "enabled": "Enabled",
+    "enabled_desc": "When unchecked, this Tilt stays visible in the list but its readings are not sent to any target.",
+    "calibration_link": "Calibrate this Tilt",
+    "calibration_link_desc": "Opens the calibration page for this specific device rather than for the whole color.",
+    "reset_header": "Reset to color defaults",
+    "reset_desc": "Deletes this device's stored configuration. The Tilt keeps reporting, but goes back to using the shared settings for its color.",
+    "reset_button": "Reset to color defaults",
+    "reset_confirm_button": "Yes, delete this device configuration",
+    "errors": {
+      "missing_device_id": "This Tilt has no MAC address, so per-device settings cannot be saved. Update the TiltBridge firmware.",
+      "friendly_name_too_long": "Friendly name must be 32 characters or fewer",
+      "gsheets_name_too_long": "Google Sheets name must be 25 characters or fewer",
+      "model_label_too_long": "Model label must be 16 characters or fewer",
+      "notes_too_long": "Notes must be 64 characters or fewer",
+      "invalid_alias": "Repeater aliases must be MAC addresses in the form 88:C2:55:AC:26:81"
+    }
+  },
+  "queue": {
+    "upload_status": {
+      "idle": "Idle",
+      "sending": "Sending",
+      "retrying": "Retrying",
+      "disabled": "Disabled"
+    },
+    "status": {
+      "header": "Offline Queue",
+      "description": "Readings captured while the TiltBridge cannot reach Google Sheets are stored on the device and uploaded when the connection returns. This queue serves Google Sheets in enhanced (v2) mode only - every other cloud target sends live readings and does not retry a failed upload.",
+      "queued_readings": "Queued readings",
+      "oldest_reading": "Oldest reading",
+      "storage_used": "Storage used",
+      "storage_percent": "{percent}%",
+      "storage_bytes": "{bytes} bytes used, {record} bytes per record",
+      "maximum_records": "Maximum records",
+      "snapshot_interval": "Snapshot interval",
+      "minutes": "{minutes} min",
+      "last_upload": "Last successful upload",
+      "upload_status": "Upload status",
+      "dropped_overflow": "Dropped due to overflow",
+      "queue_state": "Queue state",
+      "queue_disabled": "Disabled - readings are not being stored while offline",
+      "uploads_off": "Uploads",
+      "disabled_legacy_mode": "Off - Google Sheets is in legacy mode. The offline queue only uploads in enhanced (v2) mode, so nothing is being stored or sent. Enable enhanced mode on the Google Sheets page to use it.",
+      "disabled_not_configured": "Off - no Google Sheets script URL and email are configured, so there is nowhere to upload to.",
+      "health": "Queue health",
+      "unhealthy": "The queue file could not be read or written. Check the device storage.",
+      "dropped_warning_title": "{count} readings were discarded because the queue was full",
+      "dropped_warning_desc": "Raise the maximum queued records, shorten the snapshot interval, or fix the connection to Google Sheets. The count resets when the queue is cleared or the device restarts.",
+      "time_not_valid_title": "Time sync not established",
+      "time_not_valid_desc": "The device clock has not been set, so readings queued now are marked TimestampValid: false and will be uploaded without a trustworthy capture time.",
+      "send_backlog_button": "Send backlog now",
+      "send_backlog_pending": "Backlog upload queued",
+      "send_backlog_pending_desc": "The device will start this as soon as the sender is free. A Google Sheets upload takes tens of seconds per attempt, so this can sit here for a while - the queue count drops once the readings are acknowledged.",
+      "clear_queue_button": "Clear queue",
+      "action_failed": "The TiltBridge rejected that action. Please try again.",
+      "load_failed": "Unable to read queue status from the TiltBridge."
+    },
+    "clear_modal": {
+      "title": "Permanently delete queued readings?",
+      "message": "{count} stored readings will be permanently destroyed and can never be uploaded.",
+      "irreversible": "This cannot be undone. If you only want to retry the upload, use \"Send backlog now\" instead.",
+      "acknowledge": "I understand that {count} readings will be permanently deleted",
+      "confirm_button": "Delete all queued readings"
+    },
+    "settings": {
+      "header": "Offline Queue Settings",
+      "description": "Two independent knobs: how often the queue is written to flash, and how much it can hold.",
+      "interval_group": "Reading frequency",
+      "interval_group_desc": "How often TiltBridge captures a reading from each Tilt and writes it to flash. This is the sampling rate: it decides how many rows reach your spreadsheet, and how much a sudden power cut can lose. Sampling more often also consumes flash write cycles faster.",
+      "snapshot_interval": "Reading / Snapshot Interval",
+      "snapshot_interval_desc": "How often a reading is captured and stored. Not the same as a target's push frequency, which only decides how long a captured reading waits before being uploaded.",
+      "minutes_option": "{minutes} minutes",
+      "custom_option": "Custom...",
+      "custom_interval": "Custom Interval (minutes)",
+      "custom_interval_desc": "Valid range is 1 to 360 minutes. The TiltBridge clamps values outside that range.",
+      "capacity_group": "Storage capacity",
+      "capacity_group_desc": "How many readings can be held before the oldest are dropped. This sets how long an outage can last without losing data bound for Google Sheets.",
+      "max_records": "Maximum queued records",
+      "max_records_desc": "Valid range is 100 to {max}, which is what this device's flash can actually hold. At the current record size this reserves roughly {bytes} bytes.",
+      "batch_size": "Batch size (advanced)",
+      "batch_size_desc": "How many queued readings are uploaded per attempt. Valid range is 1 to 50. Lower this if uploads time out.",
+      "enable_queue": "Enable offline queue",
+      "enable_queue_desc": "When unchecked, readings taken while offline are discarded instead of being stored for Google Sheets. Other cloud targets are unaffected either way - they never retry.",
+      "runway": "With {tilts} Tilt(s) reporting, a total outage would fill the queue in about {duration}.",
+      "runway_hours": "{hours} hours",
+      "runway_days": "{days} days",
+      "persist_faster_than_push": "Note: you are persisting every {persist} min but only sending every {push} min. While sending works nothing is stored, so this only makes an outage record finer than normal operation, and fills the queue faster."
+    },
+    "recovery": {
+      "header": "Sender Recovery",
+      "description": "An independent watchdog restarts the TiltBridge if the outbound sender stops responding while Bluetooth and the network are still working. Repeated send failures alone never trigger a restart.",
+      "stale_reboot_sec": "Stale sender timeout (seconds)",
+      "stale_reboot_sec_desc": "How long the sender heartbeat may go without an update before the device restarts itself. Valid range is 60 to 600 seconds.",
+      "enable_recovery": "Enable automatic sender recovery",
+      "enable_recovery_desc": "Uncheck to report a stale sender on the About page without restarting the device.",
+      "enable_wifi_roam": "Move off a weak access point",
+      "enable_wifi_roam_desc": "When the average signal has been poor for ten minutes and a materially stronger access point exists on the same network, briefly drop the connection to move onto it. Useful where a repeater shares the SSID with the router, because the device otherwise associates with whichever it hears first and never reconsiders. Leave this off if you only have one access point - there is nothing to move to."
+    },
+    "errors": {
+      "invalid_interval": "Snapshot interval must be between 1 and 360 minutes",
+      "invalid_max_records": "Maximum queued records must be between 100 and {max}",
+      "invalid_batch_size": "Batch size must be between 1 and 50",
+      "invalid_stale_reboot": "Stale sender timeout must be between 60 and 600 seconds"
+    }
+  },
+  "send_errors": {
+    "banner_title": "One or more send targets are reporting errors",
+    "config_error_title": "Send Error",
+    "targets": {
+      "legacy_fermentrack": "Legacy Fermentrack",
+      "fermentrack": "Fermentrack",
+      "brewers_friend": "Brewer's Friend",
+      "brewfather": "Brewfather",
+      "user_target": "Generic Target",
+      "grainfather": "Grainfather",
+      "brew_status": "Brewstatus",
+      "taplistio": "Taplist.IO",
+      "google_sheets": "Google Sheets",
+      "mqtt": "MQTT",
+      "influxdb": "InfluxDB"
+    },
+    "error_short": {
+      "code_1": "Connection failed",
+      "code_2": "Authentication failed",
+      "code_3": "Target not found (404)",
+      "code_4": "Server error (5xx)",
+      "code_5": "Bad request / missing config",
+      "code_6": "Rate limited",
+      "code_7": "Other error",
+      "code_8": "MQTT broker disconnected",
+      "code_9": "Fermentrack: Invalid user or API key",
+      "code_10": "Fermentrack: Malformed registration",
+      "code_11": "Fermentrack: Registration invalid",
+      "code_12": "Fermentrack: No brewhouse",
+      "code_13": "Response could not be read (upload may have succeeded)",
+      "unknown": "Unknown error (code {code})"
+    },
+    "error_detail": {
+      "code_1": "TiltBridge was unable to connect to this target. This could be caused by a DNS resolution failure, the server being unreachable, a connection timeout, or the connection being refused. Check that the target address is correct and that the server is accessible from the TiltBridge's network.",
+      "code_2": "The target rejected the request due to invalid or missing credentials. Check that your API key, username, or password are correct and have not expired.",
+      "code_3": "The target URL was not found. Check that the URL is correct and the service is still available at that address.",
+      "code_4": "The target server encountered an internal error. This is usually a temporary issue on the target's side. If it persists, check the target service's status page.",
+      "code_5": "The target rejected the request or required configuration is missing. Check that all configuration fields are filled in correctly.",
+      "code_6": "The target is rate limiting requests from TiltBridge. Try increasing the push frequency interval in the settings.",
+      "code_7": "An unexpected error occurred while communicating with this target. Check the target service's documentation or status page for details.",
+      "code_8": "TiltBridge was disconnected from the MQTT broker. Check that the broker address and port are correct, the broker is running, and any authentication credentials are valid.",
+      "code_9": "The configured username or API key was rejected by Fermentrack. Check that the username and API key are correct and match a valid account on the target Fermentrack install.",
+      "code_10": "The registration request sent to Fermentrack was malformed. This usually means the TiltBridge firmware or the Fermentrack version is out of date. Try updating both and re-registering.",
+      "code_11": "The device registration with Fermentrack is no longer valid. Try resetting the device ID on the Fermentrack configuration page to re-register.",
+      "code_12": "The configured Fermentrack user does not have a brewhouse. Complete the brewhouse setup in Fermentrack before connecting TiltBridge.",
+      "code_13": "The target accepted the upload - it answered with a redirect - but the follow-up request for its response failed, so whether the readings were stored is unknown. Your URL is fine; there is nothing to change. Google Apps Script is the usual source: it runs your script and then redirects to a single-use response URL that can expire on a slow or briefly interrupted connection. TiltBridge re-sends the same readings with the same ids, and the script discards ones it already has, so this does not create duplicate rows.",
+      "unknown": "An unexpected error occurred (code {code}). Check the settings for this target and ensure both TiltBridge and the target are up to date."
     }
   }
 }

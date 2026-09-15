@@ -8,11 +8,17 @@
     "warning": "Waarschuwing",
     "unused": "Niet gebruikt",
     "unknown": "Onbekend",
+    "none": "Geen",
+    "never": "Nooit",
+    "age_ago": "{age} geleden",
     "close_sidebar": "Zijbalk sluiten",
     "open_sidebar": "Zijbalk openen",
     "validation_error": "Validatiefout",
     "celsius": "Celsius",
     "fahrenheit": "Fahrenheit",
+    "specific_gravity": "Soortelijk gewicht",
+    "plato": "Plato",
+    "brix": "Brix",
     "translation_message": "Deze toepassing is vertaald door gebruikers zoals jij! Zie je items die niet vertaald zijn (of heb je suggesties voor verbeteringen)? Dien ze dan in op GitHub.",
     "tab_container_sr_text": "Selecteer een groep instellingen om te bewerken",
     "sidebar_options": {
@@ -32,7 +38,8 @@
     }
   },
   "navigation": {
-    "general_settings": "Algemene instellingen"
+    "general_settings": "Algemene instellingen",
+    "offline_queue": "Offlinewachtrij"
   },
   "about": {
     "uptime": {
@@ -49,6 +56,39 @@
       "loading_version": "Bezig met laden van build-/versie-informatie...",
       "error_loading_version": "Fout bij het laden van build-/versie-informatie"
     },
+    "sender": {
+      "header": "Uitgaande verzender",
+      "state": "Status",
+      "states": {
+        "idle": "INACTIEF",
+        "sending": "VERZENDEN",
+        "stale": "VEROUDERD"
+      },
+      "current_target": "Huidig doel",
+      "heartbeat": "Hartslag van de verzender",
+      "send_lock": "Verzendvergrendeling",
+      "lock_held": "Vastgehouden",
+      "lock_free": "Vrij",
+      "request_age": "Leeftijd van het verzoek",
+      "lock_age": "Leeftijd van de verzendvergrendeling",
+      "consecutive_failures": "Opeenvolgende fouten",
+      "wifi_disagreements": "WiFi-status niet synchroon",
+      "wifi_disagreements_value": "{episodes} episode(s), langste {longest}",
+      "wifi_disagreements_tooltip": "Perioden waarin de WiFi-bibliotheek 'verbroken' meldde terwijl de netwerkinterface aantoonbaar actief was. Uploads gaan hierbij gewoon door, omdat de firmware de interface meer vertrouwt dan de bibliotheek – een korte episode is dus onschuldig. Vroeger stond hier een teller per peiling, waardoor één minuut op duizenden fouten leek.",
+      "stale_events": "Gebeurtenissen met verouderde verzender",
+      "google_last_success": "Google Sheets – laatste succes",
+      "fermentrack_last_success": "Fermentrack – laatste succes",
+      "any_last_success": "Willekeurig doel – laatste succes",
+      "last_recovery_title": "Automatisch herstel uitgevoerd",
+      "last_recovery_line": "Het apparaat heeft zichzelf opnieuw opgestart omdat {reason} (doel op dat moment: {target}).",
+      "last_recovery_detail": "Leeftijd hartslag {heartbeat}, leeftijd verzendvergrendeling {lock}, bedrijfstijd bij herstart {uptime}, aantal starts {boot}.",
+      "recovery_reasons": {
+        "sender_heartbeat_stale": "de hartslag van de verzender verouderd was",
+        "sender_lock_stuck": "de verzendvergrendeling vastzat",
+        "unknown": "de verzender niet meer reageerde"
+      },
+      "load_failed": "Kan de status van de verzender niet uitlezen van de TiltBridge."
+    },
     "reset_actions": {
       "header": "Resetacties voor apparaat",
       "description": "Deze acties zullen delen van uw TiltBridge-configuratie resetten. Gebruik met voorzichtigheid.",
@@ -59,7 +99,7 @@
       },
       "reset_device": {
         "title": "Apparaat resetten",
-        "description": "Voer een volledige fabrieksreset uit. Alle instellingen (inclusief WiFi-instellingen) en kalibratiegegevens worden verwijderd.",
+        "description": "Voer een volledige fabrieksreset uit. Alles wat op het apparaat is opgeslagen wordt gewist: alle instellingen, uw WiFi-gegevens, alle Tilt-configuraties (namen, werkbladnamen en kalibratie) en alle metingen die nog in de offlinewachtrij staan.",
         "button": "Apparaat resetten"
       },
       "confirm_modal": {
@@ -69,18 +109,26 @@
         },
         "device": {
           "title": "Apparaatreset bevestigen",
-          "message": "Weet u zeker dat u een fabrieksreset wilt uitvoeren? Dit zal ALLE instellingen, kalibratiegegevens en configuratie wissen. Deze actie kan niet ongedaan worden gemaakt."
+          "message": "Weet u zeker dat u een fabrieksreset wilt uitvoeren? Dit wist alle instellingen, uw WiFi-gegevens, elke Tilt-configuratie inclusief kalibratie, en alle metingen die nog wachten om te worden geüpload. Die metingen hebben uw doelen nog niet bereikt en kunnen niet worden hersteld. Deze actie kan niet ongedaan worden gemaakt."
         },
         "confirm_button": "Ja, resetten"
       },
       "reset_modal": {
         "wifi": {
           "title": "WiFi wordt opnieuw ingesteld...",
-          "message": "Het apparaat stelt de WiFi-instellingen opnieuw in en zal opnieuw opstarten. U moet verbinding maken met het TiltBridge-configuratienetwerk om de WiFi-toegang opnieuw te configureren."
+          "message": "Het apparaat stelt de WiFi-instellingen opnieuw in en zal opnieuw opstarten. U moet verbinding maken met het TiltBridge-configuratienetwerk om de WiFi-toegang opnieuw te configureren.",
+          "success_title": "WiFi-reset verzonden",
+          "success_message": "De opdracht voor een WiFi-reset is geaccepteerd. Het apparaat start binnenkort opnieuw op. U moet verbinding maken met het TiltBridge-instelnetwerk om de WiFi-toegang opnieuw in te stellen.",
+          "failed_title": "WiFi-reset mislukt",
+          "failed_message": "De opdracht voor een WiFi-reset kon niet worden verzonden. Controleer uw verbinding met het apparaat en probeer het opnieuw."
         },
         "device": {
           "title": "Apparaat wordt gereset...",
-          "message": "Het apparaat voert een fabrieksreset uit en zal opnieuw opstarten. Alle instellingen en gegevens zijn gewist. U moet het apparaat vanaf nul opnieuw configureren (inclusief WiFi-toegang)."
+          "message": "Het apparaat voert een fabrieksreset uit en zal opnieuw opstarten. Alle instellingen, Tilt-configuraties en metingen in de wachtrij zijn gewist. U moet het apparaat (inclusief WiFi-toegang) vanaf nul opnieuw configureren.",
+          "success_title": "Apparaatreset verzonden",
+          "success_message": "De opdracht voor een fabrieksreset is geaccepteerd. Het apparaat wist alles en start binnenkort opnieuw op. U moet het apparaat (inclusief WiFi-toegang) vanaf nul opnieuw configureren.",
+          "failed_title": "Apparaatreset mislukt",
+          "failed_message": "De opdracht voor een fabrieksreset kon niet worden verzonden. Controleer uw verbinding met het apparaat en probeer het opnieuw."
         }
       }
     }
@@ -95,11 +143,15 @@
     "tz_offset_desc": "Tijdzone-offset ten opzichte van GMT (in uren). Gebruikt voor Google Sheets.",
     "temp_unit_name": "Standaard temperatuureenheden",
     "temp_unit_desc": "Standaard eenheden voor temperatuurweergave",
+    "gravity_unit_name": "Dichtheidseenheden",
+    "gravity_unit_desc": "Eenheden voor het weergeven van dichtheidsmetingen",
     "smooth_factor_name": "Gemiddelde van specifieke zwaartekracht",
     "smooth_factor_desc": "Het geldige bereik is 0 tot 99. Deze instelling beïnvloedt de tijdconstante van het exponentieel gewogen voortschrijdend gemiddelde dat op de meting van de specifieke zwaartekracht wordt toegepast. Als reactie op een stapverandering zou de gefilterde waarde na ongeveer 5 tijdconstanten in steady state moeten komen. Een instelling van 0 geeft geen smoothing (filtering uit), terwijl hogere waarden meer smoothing geven. Een instelling van 60 geeft een tijdconstante van iets meer dan 5 seconden, terwijl 99 resulteert in ongeveer 5 minuten.",
     "hardware_options_header": "Hardware-opties",
     "invert_tft_name": "TFT-display omkeren",
     "invert_tft_desc": " - Gebruik als het scherm ondersteboven is",
+    "combine_tilts_name": "Tilts van dezelfde kleur combineren",
+    "combine_tilts_desc": "Combineert alle metingen van Tilts met dezelfde kleur en overschrijft hun unieke identificatie met het MAC-adres van deze TiltBridge. Gebruik dit als u Tilt-'repeaters' gebruikt, om duplicatie van dezelfde Tilt te voorkomen.",
     "errors": {
       "mdns_invalid_chars": "mDNS ID mag alleen bestaan uit de letters a-z, een koppelteken of cijfers, en mag niet beginnen of eindigen met een koppelteken",
       "mdns_invalid_length": "mDNS ID moet tussen 1 en 31 tekens lang zijn",
@@ -173,6 +225,8 @@
       "email_desc": "E-mailadres dat werd gebruikt om het gerichte script te maken",
       "color_sheet_tilt_name": "{color} Tilt Sheet Naam",
       "color_sheet_tilt_name_desc": "De naam van het spreadsheet om gegevens voor de {color} tilt op te plaatsen",
+      "v2_enabled": "Het v2-protocol van Google Sheets gebruiken",
+      "v2_enabled_desc": "Stuurt de meettijd mee met elke meting, zodat achterstallige metingen onder de tijd terechtkomen waarop ze zijn gedaan in plaats van de tijd waarop ze zijn geüpload. Vereist een bijgewerkt Apps Script.",
       "push_frequency": "@:cloud_config.push_interval.label",
       "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
@@ -183,6 +237,7 @@
       "api_key": "API-sleutel",
       "api_key_desc": "API-sleutel uit je Brewers Friend accountinstellingen",
       "error_missing_api_key": "API-sleutel mag niet leeg zijn",
+      "error_api_key_too_short": "De API-sleutel moet langer zijn dan 12 tekens",
       "push_frequency": "@:cloud_config.push_interval.label",
       "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
@@ -194,6 +249,7 @@
       "api_key_desc": "Streamsleutel uit je Brewfather accountinstellingen",
       "error_missing_api_key": "Streamsleutel mag niet leeg zijn",
       "error_invalid_stream_key": "Streamsleutel is een reeks letters en cijfers - geen URL. Controleer de sleutel en probeer het opnieuw.",
+      "error_api_key_too_short": "De streamsleutel moet langer zijn dan 5 tekens",
       "push_frequency": "@:cloud_config.push_interval.label",
       "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
@@ -283,13 +339,55 @@
       "hours_option": "{hours} uur",
       "custom_option": "Aangepast...",
       "custom_interval": "Aangepast interval (minuten)",
-      "custom_interval_desc": "Geldig bereik is {min} tot {max} minuten."
+      "custom_interval_desc": "Geldig bereik is {min} tot {max} minuten.",
+      "error_out_of_range": "De verzendfrequentie moet tussen {min} en {max} seconden liggen."
     }
+  },
+  "wifi": {
+    "panel_header": "WiFi-verbinding",
+    "signal": "Signaal",
+    "signal_value": "{dbm} dBm",
+    "signal_with_quality": "{dbm} dBm ({quality})",
+    "signal_range": "Signaalbereik",
+    "signal_range_value": "gem. {average}, min. {minimum}, max. {maximum} dBm over {samples} metingen in de laatste {window}",
+    "no_samples": "Nog geen metingen verzameld",
+    "network": "Netwerk",
+    "network_value": "{ssid} (kanaal {channel})",
+    "network_line": "{ssid} · kan. {channel}",
+    "access_point": "Toegangspunt",
+    "access_point_hint": "Het BSSID van de radio waarmee dit apparaat verbonden is. In een netwerk met een repeater wordt de SSID gedeeld, dus dit is het enige veld dat de repeater en het toegangspunt van de router zelf uit elkaar houdt.",
+    "ip_address": "IP-adres",
+    "connected_for": "Verbonden gedurende",
+    "offline_since": "Offline gedurende",
+    "offline": "WiFi offline",
+    "offline_for": "gedurende {age}",
+    "dropouts": "Verbroken verbindingen sinds start",
+    "roams": "Wisselingen van toegangspunt",
+    "roams_hint": "Het aantal keren dat het toegangspunt onder dit apparaat is gewisseld. In een netwerk met repeaters betekent een hoog aantal dat het apparaat steeds heen en weer wordt doorgegeven tussen de repeater en de router, wat elke keer een herverbinding kost, ook als het signaal sterk lijkt.",
+    "busy_scanning": "Toegangspunten controleren",
+    "busy_reconnecting": "Opnieuw verbinden",
+    "busy_detail": "Het apparaat verlaat een zwak toegangspunt. Het scannen van Tilts en de uploads pauzeren daarbij tot ongeveer een halve minuut, en metingen worden ondertussen in het flashgeheugen bewaard.",
+    "recoveries": "Verplaatsingen van toegangspunt",
+    "recoveries_value": "{landed} van {attempts} geslaagd, laatste resultaat {result}",
+    "recoveries_hint": "Pogingen om van een zwak toegangspunt over te stappen naar een duidelijk sterker toegangspunt in hetzelfde netwerk. Deze overstappen zijn bewust, dus ze tellen niet als verbroken verbindingen. NO_CANDIDATE betekent dat de scan niets beters vond en SAME_AP dat de herverbinding op dezelfde radio uitkwam – beide gezonde uitkomsten die niets hebben veranderd. REASSOC_TIMEOUT betekent dat de verbinding nog niet terug was toen de wachttijd verstreek.",
+    "last_dropout": "Laatste verbreking",
+    "last_dropout_value": "{age} geleden, duurde {duration}",
+    "no_dropouts": "Geen sinds de start",
+    "tooltip": "Gemiddeld {average} dBm, min. {minimum} dBm, max. {maximum} dBm over {samples} metingen in de laatste {window}. {outages} verbroken verbinding(en) sinds de start.",
+    "tooltip_no_samples": "Nog geen signaalmetingen verzameld",
+    "tooltip_offline": "Niet verbonden met WiFi. {outages} verbroken verbinding(en) sinds de start. Metingen worden in het flashgeheugen bewaard.",
+    "desynced_short": "Niet synchroon",
+    "desynced_title": "De WiFi-manager loopt niet synchroon met de interface",
+    "desynced_detail": "Het apparaat is verbonden met een toegangspunt, maar de WiFi-manager meldt dat de verbinding verbroken is. Uploads blijven werken omdat de firmware de interface meer vertrouwt dan de manager, maar /api/wifi/status leest ondertussen leeg. De firmware verbreekt de verbinding na vijf minuten om alles weer synchroon te krijgen.",
+    "desynced_for": "Al {age} niet synchroon; {episodes} episode(s) sinds de start."
   },
   "tilt_list": {
     "header": "Beschikbare Tilt Hydrometers",
     "detected_tilts": "Gedetecteerde Tilts",
+    "name_column": "Naam",
     "color_column": "Kleur",
+    "mac_column": "MAC",
+    "model_column": "Model",
     "rssi_column": "RSSI",
     "battery_age_column": "Batterijleeftijd",
     "gravity_column": "Soortelijk gewicht",
@@ -297,7 +395,135 @@
     "battery_age_week_count": "{weeks} weken",
     "no_tilts_detected": "Er zijn geen Tilts gedetecteerd",
     "last_received_column": "Laatst ontvangen",
-    "last_received_ago": "{seconds}s geleden"
+    "last_received_ago": "{seconds}s geleden",
+    "rssi_value": "({dbm} dBm) {quality}",
+    "rssi_tooltip": "Gemiddeld {average} dBm, min. {minimum} dBm, max. {maximum} dBm over {samples} metingen",
+    "calibrate_button": "Deze Tilt kalibreren",
+    "configure_button": "Deze Tilt configureren",
+    "configure_button_unconfigured": "Deze Tilt configureren (gebruikt nu de gedeelde kleurinstellingen)",
+    "combine_tilts_notice": "'Tilts van dezelfde kleur combineren' staat aan, dus metingen van Tilts met dezelfde kleur worden samengevoegd tot één regel en configuratie per apparaat is niet beschikbaar. Zet het uit bij Algemene instellingen om elke fysieke Tilt afzonderlijk te configureren."
+  },
+  "tilt_device_config": {
+    "header": "Configuratie van Tilt-apparaat",
+    "description": "Deze instellingen horen bij deze fysieke Tilt (via het MAC-adres), niet bij de kleur. Alles wat leeg blijft valt terug op de gedeelde kleurinstellingen.",
+    "mac_label": "MAC-adres",
+    "detected_color_label": "Gedetecteerde kleur",
+    "detected_model_label": "Gedetecteerd model",
+    "friendly_name": "Weergavenaam",
+    "friendly_name_desc": "Naam die in de Tilt-lijst wordt getoond en wordt verzonden naar doelen die dit ondersteunen. Maximaal 32 tekens.",
+    "gsheets_name": "Google Sheets-naam",
+    "gsheets_name_desc": "Naam van het werkblad voor deze Tilt. Overschrijft de bladnaam voor de hele kleur. Maximaal 25 tekens.",
+    "model_label": "Handmatig modellabel",
+    "model_label_desc": "Overschrijft het automatisch gedetecteerde model. Laat leeg om de gedetecteerde waarde te behouden. Maximaal 16 tekens.",
+    "notes": "Notities",
+    "notes_desc": "Vrije notitie voor uw eigen administratie. Maximaal 64 tekens.",
+    "notes_placeholder": "Gistvat 3, tweede brouwsel",
+    "alias_one": "Repeater-alias 1",
+    "alias_two": "Repeater-alias 2",
+    "alias_desc": "MAC-adres van een repeater die deze Tilt opnieuw uitzendt. Metingen van de alias worden behandeld alsof ze van dit apparaat komen. Optioneel.",
+    "enabled": "Ingeschakeld",
+    "enabled_desc": "Als dit niet is aangevinkt blijft deze Tilt zichtbaar in de lijst, maar worden zijn metingen naar geen enkel doel verzonden.",
+    "calibration_link": "Deze Tilt kalibreren",
+    "calibration_link_desc": "Opent de kalibratiepagina voor dit specifieke apparaat in plaats van voor de hele kleur.",
+    "reset_header": "Terugzetten naar kleurstandaard",
+    "reset_desc": "Verwijdert de opgeslagen configuratie van dit apparaat. De Tilt blijft doorgeven, maar gebruikt weer de gedeelde instellingen van zijn kleur.",
+    "reset_button": "Terugzetten naar kleurstandaard",
+    "reset_confirm_button": "Ja, deze apparaatconfiguratie verwijderen",
+    "errors": {
+      "missing_device_id": "Deze Tilt heeft geen MAC-adres, dus instellingen per apparaat kunnen niet worden opgeslagen. Werk de TiltBridge-firmware bij.",
+      "friendly_name_too_long": "De weergavenaam mag maximaal 32 tekens lang zijn",
+      "gsheets_name_too_long": "De Google Sheets-naam mag maximaal 25 tekens lang zijn",
+      "model_label_too_long": "Het modellabel mag maximaal 16 tekens lang zijn",
+      "notes_too_long": "Notities mogen maximaal 64 tekens lang zijn",
+      "invalid_alias": "Repeater-aliassen moeten MAC-adressen zijn in de vorm 88:C2:55:AC:26:81"
+    }
+  },
+  "queue": {
+    "upload_status": {
+      "idle": "Inactief",
+      "sending": "Verzenden",
+      "retrying": "Opnieuw proberen",
+      "disabled": "Uitgeschakeld"
+    },
+    "status": {
+      "header": "Offlinewachtrij",
+      "description": "Metingen die worden gedaan terwijl de TiltBridge Google Sheets niet kan bereiken, worden op het apparaat bewaard en geüpload zodra de verbinding terug is. Deze wachtrij werkt uitsluitend voor Google Sheets in de uitgebreide modus (v2) – elk ander clouddoel verzendt live en probeert een mislukte upload niet opnieuw.",
+      "queued_readings": "Metingen in de wachtrij",
+      "oldest_reading": "Oudste meting",
+      "storage_used": "Gebruikte opslag",
+      "storage_percent": "{percent}%",
+      "storage_bytes": "{bytes} bytes gebruikt, {record} bytes per record",
+      "maximum_records": "Maximum aantal records",
+      "snapshot_interval": "Opslaginterval",
+      "minutes": "{minutes} min",
+      "last_upload": "Laatste geslaagde upload",
+      "upload_status": "Uploadstatus",
+      "dropped_overflow": "Verworpen door overloop",
+      "queue_state": "Status van de wachtrij",
+      "queue_disabled": "Uitgeschakeld – metingen worden niet bewaard terwijl er geen verbinding is",
+      "uploads_off": "Uploads",
+      "disabled_legacy_mode": "Uit – Google Sheets staat in de oude modus. De offlinewachtrij uploadt alleen in de uitgebreide modus (v2), dus er wordt niets bewaard of verzonden. Schakel de uitgebreide modus in op de Google Sheets-pagina om hem te gebruiken.",
+      "disabled_not_configured": "Uit – er zijn geen Google Sheets-script-URL en e-mailadres ingesteld, dus er is geen bestemming om naartoe te uploaden.",
+      "health": "Gezondheid van de wachtrij",
+      "unhealthy": "Het wachtrijbestand kon niet worden gelezen of geschreven. Controleer de opslag van het apparaat.",
+      "dropped_warning_title": "{count} metingen zijn verworpen omdat de wachtrij vol was",
+      "dropped_warning_desc": "Verhoog het maximum aantal records in de wachtrij, verkort het opslaginterval of herstel de verbinding met Google Sheets. De teller wordt gereset wanneer de wachtrij wordt geleegd of het apparaat opnieuw opstart.",
+      "time_not_valid_title": "Tijdsynchronisatie niet tot stand gebracht",
+      "time_not_valid_desc": "De klok van het apparaat is niet ingesteld, dus metingen die nu in de wachtrij komen worden gemarkeerd met TimestampValid: false en worden geüpload zonder betrouwbare meettijd.",
+      "send_backlog_button": "Achterstand nu verzenden",
+      "send_backlog_pending": "Upload van achterstand in de wachtrij",
+      "send_backlog_pending_desc": "Het apparaat begint hiermee zodra de verzender vrij is. Een upload naar Google Sheets duurt tientallen seconden per poging, dus dit kan even blijven staan – het aantal in de wachtrij daalt zodra de metingen zijn bevestigd.",
+      "clear_queue_button": "Wachtrij legen",
+      "action_failed": "De TiltBridge heeft die actie geweigerd. Probeer het opnieuw.",
+      "load_failed": "Kan de status van de wachtrij niet uitlezen van de TiltBridge."
+    },
+    "clear_modal": {
+      "title": "Metingen in de wachtrij definitief verwijderen?",
+      "message": "{count} bewaarde metingen worden definitief vernietigd en kunnen nooit meer worden geüpload.",
+      "irreversible": "Dit kan niet ongedaan worden gemaakt. Als u de upload alleen opnieuw wilt proberen, gebruik dan 'Achterstand nu verzenden'.",
+      "acknowledge": "Ik begrijp dat {count} metingen definitief worden verwijderd",
+      "confirm_button": "Alle metingen in de wachtrij verwijderen"
+    },
+    "settings": {
+      "header": "Instellingen offlinewachtrij",
+      "description": "Twee onafhankelijke knoppen: hoe vaak de wachtrij naar het flashgeheugen wordt geschreven, en hoeveel erin past.",
+      "interval_group": "Meetfrequentie",
+      "interval_group_desc": "Hoe vaak de TiltBridge een meting van elke Tilt vastlegt en naar het flashgeheugen schrijft. Dit is de bemonsteringsfrequentie: die bepaalt hoeveel regels uw spreadsheet bereiken en hoeveel een plotselinge stroomuitval kan kosten. Vaker bemonsteren verbruikt ook sneller de schrijfcycli van het flashgeheugen.",
+      "snapshot_interval": "Meet-/opslaginterval",
+      "snapshot_interval_desc": "Hoe vaak een meting wordt vastgelegd en bewaard. Niet hetzelfde als de verzendfrequentie van een doel, die alleen bepaalt hoe lang een vastgelegde meting wacht voordat hij wordt geüpload.",
+      "minutes_option": "{minutes} minuten",
+      "custom_option": "Aangepast…",
+      "custom_interval": "Aangepast interval (minuten)",
+      "custom_interval_desc": "Geldig bereik is 1 tot 360 minuten. De TiltBridge begrenst waarden buiten dat bereik.",
+      "capacity_group": "Opslagcapaciteit",
+      "capacity_group_desc": "Hoeveel metingen bewaard kunnen worden voordat de oudste worden verwijderd. Dit bepaalt hoe lang een storing kan duren zonder dat er voor Google Sheets bestemde gegevens verloren gaan.",
+      "max_records": "Maximum aantal records in de wachtrij",
+      "max_records_desc": "Geldig bereik is 100 tot {max}, wat het flashgeheugen van dit apparaat werkelijk aankan. Bij de huidige recordgrootte reserveert dit ongeveer {bytes} bytes.",
+      "batch_size": "Batchgrootte (geavanceerd)",
+      "batch_size_desc": "Hoeveel metingen uit de wachtrij per poging worden geüpload. Geldig bereik is 1 tot 50. Verlaag dit als uploads een time-out krijgen.",
+      "enable_queue": "Offlinewachtrij inschakelen",
+      "enable_queue_desc": "Als dit niet is aangevinkt worden metingen die offline worden gedaan verworpen in plaats van bewaard voor Google Sheets. Andere clouddoelen worden hoe dan ook niet beïnvloed – die proberen het nooit opnieuw.",
+      "runway": "Met {tilts} Tilt(s) die doorgeven, zou een volledige storing de wachtrij in ongeveer {duration} vullen.",
+      "runway_hours": "{hours} uur",
+      "runway_days": "{days} dagen",
+      "persist_faster_than_push": "Let op: u bewaart elke {persist} min, maar verzendt slechts elke {push} min. Zolang het verzenden werkt wordt er niets bewaard, dus dit maakt de registratie van een storing alleen fijnmaziger dan bij normaal gebruik, en vult de wachtrij sneller."
+    },
+    "recovery": {
+      "header": "Herstel van de verzender",
+      "description": "Een onafhankelijke waakhond start de TiltBridge opnieuw op als de uitgaande verzender niet meer reageert terwijl Bluetooth en het netwerk nog werken. Herhaalde verzendfouten alleen leiden nooit tot een herstart.",
+      "stale_reboot_sec": "Time-out voor verouderde verzender (seconden)",
+      "stale_reboot_sec_desc": "Hoe lang de hartslag van de verzender zonder update mag blijven voordat het apparaat zichzelf opnieuw opstart. Geldig bereik is 60 tot 600 seconden.",
+      "enable_recovery": "Automatisch herstel van de verzender inschakelen",
+      "enable_recovery_desc": "Vink dit uit om een verouderde verzender op de Info-pagina te melden zonder het apparaat opnieuw op te starten.",
+      "enable_wifi_roam": "Een zwak toegangspunt verlaten",
+      "enable_wifi_roam_desc": "Wanneer het gemiddelde signaal tien minuten lang slecht is geweest en er in hetzelfde netwerk een duidelijk sterker toegangspunt bestaat, wordt de verbinding kort verbroken om daarnaartoe over te stappen. Handig wanneer een repeater de SSID deelt met de router, omdat het apparaat zich anders verbindt met degene die het eerst hoort en dat nooit heroverweegt. Laat dit uit als u maar één toegangspunt hebt – er is dan niets om naartoe te gaan."
+    },
+    "errors": {
+      "invalid_interval": "Het opslaginterval moet tussen 1 en 360 minuten liggen",
+      "invalid_max_records": "Het maximum aantal records in de wachtrij moet tussen 100 en {max} liggen",
+      "invalid_batch_size": "De batchgrootte moet tussen 1 en 50 liggen",
+      "invalid_stale_reboot": "De time-out voor een verouderde verzender moet tussen 60 en 600 seconden liggen"
+    }
   },
   "help_page": {
     "header": "TiltBridge Ondersteuning",
@@ -313,6 +539,55 @@
     "issue_bug_feature_request": "issue, bug of functieverzoek",
     "homebrewtalk_link": "Krijg ondersteuning of chat met andere gebruikers op de {hbt_link}",
     "homebrewtalk_thread": "HomeBrewTalk-draad"
+  },
+  "send_errors": {
+    "banner_title": "Een of meer verzenddoelen melden fouten",
+    "config_error_title": "Verzendfout",
+    "targets": {
+      "legacy_fermentrack": "Legacy Fermentrack",
+      "fermentrack": "Fermentrack",
+      "brewers_friend": "Brewer's Friend",
+      "brewfather": "Brewfather",
+      "user_target": "Algemeen doel",
+      "grainfather": "Grainfather",
+      "brew_status": "Brewstatus",
+      "taplistio": "Taplist.IO",
+      "google_sheets": "Google Sheets",
+      "mqtt": "MQTT",
+      "influxdb": "InfluxDB"
+    },
+    "error_short": {
+      "code_1": "Verbinding mislukt",
+      "code_2": "Verificatie mislukt",
+      "code_3": "Doel niet gevonden (404)",
+      "code_4": "Serverfout (5xx)",
+      "code_5": "Ongeldig verzoek / ontbrekende configuratie",
+      "code_6": "Snelheidslimiet bereikt",
+      "code_7": "Andere fout",
+      "code_8": "MQTT-broker verbroken",
+      "code_9": "Fermentrack: ongeldige gebruiker of API-sleutel",
+      "code_10": "Fermentrack: onjuist gevormde registratie",
+      "code_11": "Fermentrack: registratie ongeldig",
+      "code_12": "Fermentrack: geen brouwerij",
+      "code_13": "Antwoord kon niet worden gelezen (upload is mogelijk geslaagd)",
+      "unknown": "Onbekende fout (code {code})"
+    },
+    "error_detail": {
+      "code_1": "De TiltBridge kon geen verbinding maken met dit doel. Dit kan komen door een mislukte DNS-resolutie, een onbereikbare server, een time-out bij het verbinden of een geweigerde verbinding. Controleer of het adres van het doel klopt en of de server bereikbaar is vanaf het netwerk van de TiltBridge.",
+      "code_2": "Het doel heeft het verzoek geweigerd wegens ongeldige of ontbrekende inloggegevens. Controleer of uw API-sleutel, gebruikersnaam of wachtwoord kloppen en niet zijn verlopen.",
+      "code_3": "De URL van het doel is niet gevonden. Controleer of de URL klopt en of de dienst nog beschikbaar is op dat adres.",
+      "code_4": "De doelserver liep tegen een interne fout aan. Dit is meestal een tijdelijk probleem aan de kant van het doel. Als het aanhoudt, raadpleeg dan de statuspagina van de dienst.",
+      "code_5": "Het doel heeft het verzoek geweigerd of er ontbreekt vereiste configuratie. Controleer of alle configuratievelden correct zijn ingevuld.",
+      "code_6": "Het doel beperkt de snelheid van verzoeken van de TiltBridge. Probeer het interval van de verzendfrequentie in de instellingen te verhogen.",
+      "code_7": "Er is een onverwachte fout opgetreden bij de communicatie met dit doel. Raadpleeg de documentatie of de statuspagina van de dienst voor meer informatie.",
+      "code_8": "De verbinding van de TiltBridge met de MQTT-broker is verbroken. Controleer of het adres en de poort van de broker kloppen, of de broker draait en of eventuele inloggegevens geldig zijn.",
+      "code_9": "De ingestelde gebruikersnaam of API-sleutel is door Fermentrack geweigerd. Controleer of de gebruikersnaam en API-sleutel kloppen en horen bij een geldig account op de Fermentrack-installatie van het doel.",
+      "code_10": "Het registratieverzoek dat naar Fermentrack is gestuurd was onjuist gevormd. Dit betekent meestal dat de TiltBridge-firmware of de versie van Fermentrack verouderd is. Werk beide bij en registreer opnieuw.",
+      "code_11": "De registratie van het apparaat bij Fermentrack is niet meer geldig. Probeer de apparaat-ID op de configuratiepagina van Fermentrack terug te zetten om opnieuw te registreren.",
+      "code_12": "De ingestelde Fermentrack-gebruiker heeft geen brouwerij. Rond de installatie van de brouwerij in Fermentrack af voordat u de TiltBridge verbindt.",
+      "code_13": "Het doel heeft de upload geaccepteerd – het antwoordde met een omleiding – maar het vervolgverzoek om het antwoord op te halen is mislukt, dus of de metingen zijn opgeslagen is onbekend. Uw URL is in orde; er valt niets te veranderen. Google Apps Script is de gebruikelijke oorzaak: het voert uw script uit en leidt daarna om naar een eenmalige antwoord-URL die kan verlopen bij een trage of kort onderbroken verbinding. De TiltBridge verstuurt dezelfde metingen opnieuw met dezelfde id's, en het script verwerpt de metingen die het al heeft, dus dit levert geen dubbele regels op.",
+      "unknown": "Er is een onverwachte fout opgetreden (code {code}). Controleer de instellingen voor dit doel en zorg dat zowel de TiltBridge als het doel up-to-date zijn."
+    }
   },
   "calibration": {
     "header": "Kalibratie van de {color} Tilt",

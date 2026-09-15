@@ -8,11 +8,17 @@
     "warning": "Aviso",
     "unused": "Não utilizado",
     "unknown": "Desconhecido",
+    "none": "Nenhum",
+    "never": "Nunca",
+    "age_ago": "há {age}",
     "close_sidebar": "Fechar Barra Lateral",
     "open_sidebar": "Abrir Barra Lateral",
     "validation_error": "Erro de Validação",
     "celsius": "Celsius",
     "fahrenheit": "Fahrenheit",
+    "specific_gravity": "Densidade específica",
+    "plato": "Plato",
+    "brix": "Brix",
     "translation_message": "Este aplicativo é traduzido por usuários como você! Se você ver itens que não estão traduzidos (ou tiver sugestões para melhorias!) por favor, sugira melhorias no GitHub.",
     "tab_container_sr_text": "Selecione um grupo de configurações para editar",
     "sidebar_options": {
@@ -32,7 +38,8 @@
     }
   },
   "navigation": {
-    "general_settings": "Configurações Gerais"
+    "general_settings": "Configurações Gerais",
+    "offline_queue": "Fila offline"
   },
   "about": {
     "uptime": {
@@ -49,6 +56,39 @@
       "loading_version": "Carregando informações de versão/construção...",
       "error_loading_version": "Erro ao carregar informações de versão/construção"
     },
+    "sender": {
+      "header": "Emissor de saída",
+      "state": "Estado",
+      "states": {
+        "idle": "OCIOSO",
+        "sending": "ENVIANDO",
+        "stale": "DESATUALIZADO"
+      },
+      "current_target": "Destino atual",
+      "heartbeat": "Pulso do emissor",
+      "send_lock": "Bloqueio de envio",
+      "lock_held": "Retido",
+      "lock_free": "Livre",
+      "request_age": "Idade da requisição",
+      "lock_age": "Idade do bloqueio de envio",
+      "consecutive_failures": "Falhas consecutivas",
+      "wifi_disagreements": "Dessincronização do estado do Wi-Fi",
+      "wifi_disagreements_value": "{episodes} episódio(s), o mais longo {longest}",
+      "wifi_disagreements_tooltip": "Períodos em que a biblioteca de Wi-Fi informava «desconectado» enquanto a interface de rede estava comprovadamente ativa. Os envios continuam durante esses períodos, porque o firmware confia mais na interface do que na biblioteca — então um episódio curto é inofensivo. Antes isso mostrava um contador por sondagem, o que fazia um minuto parecer milhares de falhas.",
+      "stale_events": "Eventos de emissor desatualizado",
+      "google_last_success": "Google Sheets — último sucesso",
+      "fermentrack_last_success": "Fermentrack — último sucesso",
+      "any_last_success": "Qualquer destino — último sucesso",
+      "last_recovery_title": "Recuperação automática realizada",
+      "last_recovery_line": "O dispositivo reiniciou sozinho porque {reason} (destino no momento: {target}).",
+      "last_recovery_detail": "Idade do pulso {heartbeat}, idade do bloqueio de envio {lock}, tempo ligado ao reiniciar {uptime}, contagem de inicializações {boot}.",
+      "recovery_reasons": {
+        "sender_heartbeat_stale": "o pulso do emissor ficou desatualizado",
+        "sender_lock_stuck": "o bloqueio de envio travou",
+        "unknown": "o emissor parou de responder"
+      },
+      "load_failed": "Não foi possível ler o estado do emissor do TiltBridge."
+    },
     "reset_actions": {
       "header": "Ações de Reinicialização do Dispositivo",
       "description": "Essas ações irão redefinir partes da configuração do seu TiltBridge. Use com cautela.",
@@ -59,7 +99,7 @@
       },
       "reset_device": {
         "title": "Redefinir Dispositivo",
-        "description": "Realizar uma restauração de fábrica completa. Todas as configurações (incluindo as de Wi-Fi) e os dados de calibração serão perdidos.",
+        "description": "Realizar uma restauração de fábrica completa. Tudo o que está guardado no dispositivo é apagado: todas as configurações, as credenciais de Wi-Fi, todas as configurações por Tilt (nomes, nomes de folha e calibração) e quaisquer leituras ainda à espera na fila offline.",
         "button": "Redefinir Dispositivo"
       },
       "confirm_modal": {
@@ -69,18 +109,26 @@
         },
         "device": {
           "title": "Confirmar Redefinição do Dispositivo",
-          "message": "Tem certeza de que deseja realizar uma restauração de fábrica? Isso apagará TODAS as configurações, os dados de calibração e a configuração. Esta ação não pode ser desfeita."
+          "message": "Tem certeza de que deseja realizar uma restauração de fábrica? Isso apaga todas as configurações, as suas credenciais de Wi-Fi, todas as configurações por Tilt incluindo a calibração, e quaisquer leituras ainda em fila para envio. Essas leituras ainda não chegaram aos seus destinos e não podem ser recuperadas. Esta ação não pode ser desfeita."
         },
         "confirm_button": "Sim, Redefinir"
       },
       "reset_modal": {
         "wifi": {
           "title": "Redefinindo Wi‑Fi...",
-          "message": "O dispositivo está redefinindo as configurações de Wi‑Fi e será reiniciado. Você precisará conectar-se à rede de configuração do TiltBridge para reconfigurar o acesso Wi‑Fi."
+          "message": "O dispositivo está redefinindo as configurações de Wi‑Fi e será reiniciado. Você precisará conectar-se à rede de configuração do TiltBridge para reconfigurar o acesso Wi‑Fi.",
+          "success_title": "Redefinição de Wi-Fi enviada",
+          "success_message": "O comando de redefinição de Wi-Fi foi aceito. O dispositivo será reiniciado em breve. Você precisará se conectar à rede de configuração do TiltBridge para reconfigurar o acesso Wi-Fi.",
+          "failed_title": "Falha na redefinição de Wi-Fi",
+          "failed_message": "Não foi possível enviar o comando de redefinição de Wi-Fi. Verifique sua conexão com o dispositivo e tente novamente."
         },
         "device": {
           "title": "Redefinindo o Dispositivo...",
-          "message": "O dispositivo está realizando uma restauração de fábrica e será reiniciado. Todas as configurações e dados foram apagados. Você precisará reconfigurar o dispositivo (incluindo o acesso Wi‑Fi) do zero."
+          "message": "O dispositivo está realizando uma restauração de fábrica e será reiniciado. Todas as configurações, as configurações por Tilt e as leituras em fila foram apagadas. Você precisará reconfigurar o dispositivo (incluindo o acesso Wi-Fi) do zero.",
+          "success_title": "Redefinição do dispositivo enviada",
+          "success_message": "O comando de restauração de fábrica foi aceito. O dispositivo apagará tudo e será reiniciado em breve. Você precisará reconfigurar o dispositivo (incluindo o acesso Wi-Fi) do zero.",
+          "failed_title": "Falha na redefinição do dispositivo",
+          "failed_message": "Não foi possível enviar o comando de restauração de fábrica. Verifique sua conexão com o dispositivo e tente novamente."
         }
       }
     }
@@ -95,11 +143,15 @@
     "tz_offset_desc": "Deslocamento do fuso horário em relação ao GMT (em horas). Usado para o Google Sheets.",
     "temp_unit_name": "Unidades de Temperatura Padrão",
     "temp_unit_desc": "Unidades de temperatura padrão a serem exibidas",
+    "gravity_unit_name": "Unidades de densidade",
+    "gravity_unit_desc": "Unidades para exibir as leituras de densidade",
     "smooth_factor_name": "Média de Gravidade Específica",
     "smooth_factor_desc": "O intervalo válido é de 0 a 99. A configuração afeta a constante de tempo do filtro de média móvel ponderada exponencialmente aplicado à leitura da gravidade específica. Em resposta a uma mudança abrupta, o valor filtrado deve atingir o estado estacionário após ~ 5 constantes de tempo. Uma configuração de 0 não oferece suavização (filtro desligado), enquanto valores mais altos significam mais suavização. Uma configuração de 60 dá uma constante de tempo de pouco mais de 5 segundos, enquanto 99 resulta em ~ 5 minutos.",
     "hardware_options_header": "Opções de Hardware",
     "invert_tft_name": "Inverter a exibição do TFT",
     "invert_tft_desc": " - Use se a tela estiver de cabeça para baixo",
+    "combine_tilts_name": "Combinar Tilts da mesma cor",
+    "combine_tilts_desc": "Combina todas as leituras recebidas de Tilts da mesma cor e sobrescreve seus identificadores únicos com o endereço MAC deste TiltBridge. Use isso se você utiliza «repetidores» de Tilt, para evitar a duplicação do mesmo Tilt.",
     "errors": {
       "mdns_invalid_chars": "O ID mDNS só pode conter as letras a-z, hífens ou números, e não deve começar nem terminar com um hífen",
       "mdns_invalid_length": "O ID mDNS deve ter entre 1 e 31 caracteres",
@@ -173,6 +225,8 @@
       "email_desc": "Endereço de email usado para criar o script alvo",
       "color_sheet_tilt_name": "{color} Nome da Planilha do Tilt",
       "color_sheet_tilt_name_desc": "O nome da planilha onde serão colocados os dados do Tilt {color}",
+      "v2_enabled": "Usar o protocolo v2 do Google Sheets",
+      "v2_enabled_desc": "Envia o horário da captura com cada leitura, para que leituras acumuladas sejam registradas no horário em que foram feitas, e não no horário do envio. Requer um Apps Script atualizado.",
       "push_frequency": "@:cloud_config.push_interval.label",
       "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
@@ -183,6 +237,7 @@
       "api_key": "Chave API",
       "api_key_desc": "Chave API das configurações da sua conta do Brewers Friend",
       "error_missing_api_key": "A chave API não pode estar vazia",
+      "error_api_key_too_short": "A chave de API deve ter mais de 12 caracteres",
       "push_frequency": "@:cloud_config.push_interval.label",
       "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
@@ -194,6 +249,7 @@
       "api_key_desc": "Chave de stream das configurações da sua conta do Brewfather",
       "error_missing_api_key": "A chave de stream não pode estar vazia",
       "error_invalid_stream_key": "A chave de stream é uma sequência de letras e números - não uma URL. Por favor, verifique a chave e tente novamente.",
+      "error_api_key_too_short": "A chave de stream deve ter mais de 5 caracteres",
       "push_frequency": "@:cloud_config.push_interval.label",
       "push_frequency_desc": "@:cloud_config.push_interval.label_desc"
     },
@@ -283,13 +339,55 @@
       "hours_option": "{hours} horas",
       "custom_option": "Personalizado...",
       "custom_interval": "Intervalo personalizado (minutos)",
-      "custom_interval_desc": "O intervalo válido é de {min} a {max} minutos."
+      "custom_interval_desc": "O intervalo válido é de {min} a {max} minutos.",
+      "error_out_of_range": "A frequência de envio deve estar entre {min} e {max} segundos."
     }
+  },
+  "wifi": {
+    "panel_header": "Conexão Wi-Fi",
+    "signal": "Sinal",
+    "signal_value": "{dbm} dBm",
+    "signal_with_quality": "{dbm} dBm ({quality})",
+    "signal_range": "Faixa de sinal",
+    "signal_range_value": "média {average}, mín. {minimum}, máx. {maximum} dBm em {samples} amostras nos últimos {window}",
+    "no_samples": "Nenhuma amostra coletada ainda",
+    "network": "Rede",
+    "network_value": "{ssid} (canal {channel})",
+    "network_line": "{ssid} · canal {channel}",
+    "access_point": "Ponto de acesso",
+    "access_point_hint": "O BSSID do rádio ao qual este dispositivo está conectado. Em uma rede com repetidor o SSID é compartilhado, então este é o único campo que distingue o repetidor do ponto de acesso do próprio roteador.",
+    "ip_address": "Endereço IP",
+    "connected_for": "Conectado há",
+    "offline_since": "Offline há",
+    "offline": "Wi-Fi offline",
+    "offline_for": "há {age}",
+    "dropouts": "Quedas desde a inicialização",
+    "roams": "Trocas de ponto de acesso",
+    "roams_hint": "Quantas vezes o ponto de acesso mudou sob este dispositivo. Em uma rede com repetidor, um número alto significa que o dispositivo fica sendo passado entre o repetidor e o roteador, o que custa uma reconexão a cada vez, mesmo quando o sinal parece forte.",
+    "busy_scanning": "Verificando pontos de acesso",
+    "busy_reconnecting": "Reconectando",
+    "busy_detail": "O dispositivo está saindo de um ponto de acesso fraco. A varredura de Tilts e os envios pausam por até cerca de meio minuto enquanto isso acontece, e as leituras são guardadas na memória flash nesse meio-tempo.",
+    "recoveries": "Mudanças de ponto de acesso",
+    "recoveries_value": "{landed} de {attempts} com sucesso, último resultado {result}",
+    "recoveries_hint": "Tentativas de sair de um ponto de acesso fraco para outro nitidamente mais forte na mesma rede. Essas mudanças são deliberadas, portanto não contam como quedas. NO_CANDIDATE significa que a varredura não encontrou nada melhor e SAME_AP que a reconexão voltou ao mesmo rádio — ambos resultados saudáveis que não mudaram nada. REASSOC_TIMEOUT significa que a conexão ainda não havia retornado quando a espera se esgotou.",
+    "last_dropout": "Última queda",
+    "last_dropout_value": "há {age}, durou {duration}",
+    "no_dropouts": "Nenhuma desde a inicialização",
+    "tooltip": "Média {average} dBm, mín. {minimum} dBm, máx. {maximum} dBm em {samples} amostras nos últimos {window}. {outages} queda(s) desde a inicialização.",
+    "tooltip_no_samples": "Nenhuma amostra de sinal coletada ainda",
+    "tooltip_offline": "Não conectado ao Wi-Fi. {outages} queda(s) desde a inicialização. As leituras estão sendo guardadas na memória flash.",
+    "desynced_short": "Dessincronizado",
+    "desynced_title": "O gerenciador de Wi-Fi está fora de sincronia com a interface",
+    "desynced_detail": "O dispositivo está associado a um ponto de acesso, mas seu gerenciador de Wi-Fi informa estar desconectado. Os envios continuam funcionando porque o firmware confia mais na interface do que no gerenciador, mas /api/wifi/status fica vazio nesse meio-tempo. O firmware derruba a associação para ressincronizá-la após cinco minutos.",
+    "desynced_for": "Fora de sincronia há {age}; {episodes} episódio(s) desde a inicialização."
   },
   "tilt_list": {
     "header": "Hidrômetros Tilt Disponíveis",
     "detected_tilts": "Tilts Detectados",
+    "name_column": "Nome",
     "color_column": "Cor",
+    "mac_column": "MAC",
+    "model_column": "Modelo",
     "rssi_column": "RSSI",
     "battery_age_column": "Idade da Bateria",
     "gravity_column": "Gravidade",
@@ -297,7 +395,135 @@
     "battery_age_week_count": "{weeks} semanas",
     "no_tilts_detected": "Nenhum Tilt foi detectado",
     "last_received_column": "Última recepção",
-    "last_received_ago": "há {seconds}s"
+    "last_received_ago": "há {seconds}s",
+    "rssi_value": "({dbm} dBm) {quality}",
+    "rssi_tooltip": "Média {average} dBm, mín. {minimum} dBm, máx. {maximum} dBm em {samples} amostras",
+    "calibrate_button": "Calibrar este Tilt",
+    "configure_button": "Configurar este Tilt",
+    "configure_button_unconfigured": "Configurar este Tilt (atualmente usando as configurações compartilhadas da cor)",
+    "combine_tilts_notice": "«Combinar Tilts da mesma cor» está ativado, portanto as leituras de Tilts da mesma cor são mescladas em uma única entrada e a configuração por dispositivo fica indisponível. Desative essa opção nas Configurações gerais para configurar cada Tilt físico separadamente."
+  },
+  "tilt_device_config": {
+    "header": "Configuração do dispositivo Tilt",
+    "description": "Estas configurações pertencem a este Tilt físico (pelo endereço MAC), não à sua cor. Tudo o que for deixado em branco volta a usar as configurações compartilhadas da cor.",
+    "mac_label": "Endereço MAC",
+    "detected_color_label": "Cor detectada",
+    "detected_model_label": "Modelo detectado",
+    "friendly_name": "Nome amigável",
+    "friendly_name_desc": "Nome exibido na lista de Tilts e enviado aos destinos que o suportam. Máximo de 32 caracteres.",
+    "gsheets_name": "Nome no Google Sheets",
+    "gsheets_name_desc": "Nome da aba da planilha usada para este Tilt. Substitui o nome de planilha de toda a cor. Máximo de 25 caracteres.",
+    "model_label": "Rótulo de modelo manual",
+    "model_label_desc": "Substitui o modelo detectado automaticamente. Deixe em branco para manter o valor detectado. Máximo de 16 caracteres.",
+    "notes": "Notas",
+    "notes_desc": "Nota livre para sua própria referência. Máximo de 64 caracteres.",
+    "notes_placeholder": "Fermentador 3, segunda leva",
+    "alias_one": "Alias de repetidor 1",
+    "alias_two": "Alias de repetidor 2",
+    "alias_desc": "Endereço MAC de um repetidor que retransmite este Tilt. As leituras do alias são tratadas como vindas deste dispositivo. Opcional.",
+    "enabled": "Ativado",
+    "enabled_desc": "Quando desmarcado, este Tilt continua visível na lista, mas suas leituras não são enviadas a nenhum destino.",
+    "calibration_link": "Calibrar este Tilt",
+    "calibration_link_desc": "Abre a página de calibração deste dispositivo específico, em vez da cor inteira.",
+    "reset_header": "Restaurar os padrões da cor",
+    "reset_desc": "Exclui a configuração armazenada deste dispositivo. O Tilt continua reportando, mas volta a usar as configurações compartilhadas da sua cor.",
+    "reset_button": "Restaurar os padrões da cor",
+    "reset_confirm_button": "Sim, excluir esta configuração de dispositivo",
+    "errors": {
+      "missing_device_id": "Este Tilt não tem endereço MAC, portanto as configurações por dispositivo não podem ser salvas. Atualize o firmware do TiltBridge.",
+      "friendly_name_too_long": "O nome amigável deve ter no máximo 32 caracteres",
+      "gsheets_name_too_long": "O nome do Google Sheets deve ter no máximo 25 caracteres",
+      "model_label_too_long": "O rótulo de modelo deve ter no máximo 16 caracteres",
+      "notes_too_long": "As notas devem ter no máximo 64 caracteres",
+      "invalid_alias": "Os aliases de repetidor devem ser endereços MAC no formato 88:C2:55:AC:26:81"
+    }
+  },
+  "queue": {
+    "upload_status": {
+      "idle": "Ocioso",
+      "sending": "Enviando",
+      "retrying": "Tentando novamente",
+      "disabled": "Desativado"
+    },
+    "status": {
+      "header": "Fila offline",
+      "description": "As leituras capturadas enquanto o TiltBridge não consegue alcançar o Google Sheets são armazenadas no dispositivo e enviadas quando a conexão retorna. Esta fila atende exclusivamente ao Google Sheets no modo aprimorado (v2) — todos os outros destinos na nuvem enviam leituras ao vivo e não repetem um envio que falhou.",
+      "queued_readings": "Leituras na fila",
+      "oldest_reading": "Leitura mais antiga",
+      "storage_used": "Armazenamento usado",
+      "storage_percent": "{percent}%",
+      "storage_bytes": "{bytes} bytes usados, {record} bytes por registro",
+      "maximum_records": "Máximo de registros",
+      "snapshot_interval": "Intervalo de gravação",
+      "minutes": "{minutes} min",
+      "last_upload": "Último envio bem-sucedido",
+      "upload_status": "Estado do envio",
+      "dropped_overflow": "Descartadas por estouro",
+      "queue_state": "Estado da fila",
+      "queue_disabled": "Desativada — as leituras não são armazenadas enquanto está offline",
+      "uploads_off": "Envios",
+      "disabled_legacy_mode": "Desligados — o Google Sheets está no modo antigo. A fila offline só envia no modo aprimorado (v2), portanto nada está sendo armazenado nem enviado. Ative o modo aprimorado na página do Google Sheets para utilizá-la.",
+      "disabled_not_configured": "Desligados — não há uma URL de script e um e-mail do Google Sheets configurados, portanto não há para onde enviar.",
+      "health": "Saúde da fila",
+      "unhealthy": "O arquivo da fila não pôde ser lido ou gravado. Verifique o armazenamento do dispositivo.",
+      "dropped_warning_title": "{count} leituras foram descartadas porque a fila estava cheia",
+      "dropped_warning_desc": "Aumente o máximo de registros na fila, encurte o intervalo de gravação ou corrija a conexão com o Google Sheets. A contagem é zerada quando a fila é limpa ou o dispositivo reinicia.",
+      "time_not_valid_title": "Sincronização de horário não estabelecida",
+      "time_not_valid_desc": "O relógio do dispositivo não foi acertado, portanto as leituras colocadas na fila agora são marcadas com TimestampValid: false e serão enviadas sem um horário de captura confiável.",
+      "send_backlog_button": "Enviar pendências agora",
+      "send_backlog_pending": "Envio das pendências na fila",
+      "send_backlog_pending_desc": "O dispositivo começará assim que o emissor estiver livre. Um envio ao Google Sheets leva dezenas de segundos por tentativa, então isso pode ficar aqui um tempo — a contagem da fila cai assim que as leituras são confirmadas.",
+      "clear_queue_button": "Limpar a fila",
+      "action_failed": "O TiltBridge rejeitou essa ação. Tente novamente.",
+      "load_failed": "Não foi possível ler o estado da fila do TiltBridge."
+    },
+    "clear_modal": {
+      "title": "Excluir permanentemente as leituras na fila?",
+      "message": "{count} leituras armazenadas serão destruídas permanentemente e nunca poderão ser enviadas.",
+      "irreversible": "Isso não pode ser desfeito. Se você só quer tentar o envio novamente, use «Enviar pendências agora».",
+      "acknowledge": "Eu entendo que {count} leituras serão excluídas permanentemente",
+      "confirm_button": "Excluir todas as leituras na fila"
+    },
+    "settings": {
+      "header": "Configurações da fila offline",
+      "description": "Dois ajustes independentes: com que frequência a fila é gravada na memória flash e quanto ela comporta.",
+      "interval_group": "Frequência de leitura",
+      "interval_group_desc": "Com que frequência o TiltBridge captura uma leitura de cada Tilt e a grava na memória flash. Esta é a taxa de amostragem: ela decide quantas linhas chegam à sua planilha e quanto uma queda de energia repentina pode custar. Amostrar com mais frequência também consome os ciclos de gravação da flash mais rápido.",
+      "snapshot_interval": "Intervalo de leitura/gravação",
+      "snapshot_interval_desc": "Com que frequência uma leitura é capturada e armazenada. Não é o mesmo que a frequência de envio de um destino, que só decide quanto tempo uma leitura já capturada espera antes de ser enviada.",
+      "minutes_option": "{minutes} minutos",
+      "custom_option": "Personalizado…",
+      "custom_interval": "Intervalo personalizado (minutos)",
+      "custom_interval_desc": "A faixa válida é de 1 a 360 minutos. O TiltBridge limita valores fora dessa faixa.",
+      "capacity_group": "Capacidade de armazenamento",
+      "capacity_group_desc": "Quantas leituras podem ser mantidas antes que as mais antigas sejam descartadas. Isso define quanto tempo uma interrupção pode durar sem perder dados destinados ao Google Sheets.",
+      "max_records": "Máximo de registros na fila",
+      "max_records_desc": "A faixa válida é de 100 a {max}, que é o que a memória flash deste dispositivo realmente comporta. Com o tamanho de registro atual, isso reserva cerca de {bytes} bytes.",
+      "batch_size": "Tamanho do lote (avançado)",
+      "batch_size_desc": "Quantas leituras da fila são enviadas por tentativa. A faixa válida é de 1 a 50. Reduza se os envios atingirem o tempo limite.",
+      "enable_queue": "Ativar a fila offline",
+      "enable_queue_desc": "Quando desmarcado, as leituras feitas offline são descartadas em vez de armazenadas para o Google Sheets. Os outros destinos na nuvem não são afetados de nenhuma forma — eles nunca tentam novamente.",
+      "runway": "Com {tilts} Tilt(s) reportando, uma interrupção total encheria a fila em cerca de {duration}.",
+      "runway_hours": "{hours} horas",
+      "runway_days": "{days} dias",
+      "persist_faster_than_push": "Observação: você está gravando a cada {persist} min, mas enviando apenas a cada {push} min. Enquanto o envio funciona nada é armazenado, então isso apenas torna o registro de uma interrupção mais detalhado do que na operação normal, e enche a fila mais rápido."
+    },
+    "recovery": {
+      "header": "Recuperação do emissor",
+      "description": "Um vigia independente reinicia o TiltBridge se o emissor de saída parar de responder enquanto o Bluetooth e a rede continuam funcionando. Falhas de envio repetidas, por si só, nunca provocam um reinício.",
+      "stale_reboot_sec": "Tempo limite do emissor desatualizado (segundos)",
+      "stale_reboot_sec_desc": "Por quanto tempo o pulso do emissor pode ficar sem atualização antes que o dispositivo se reinicie sozinho. A faixa válida é de 60 a 600 segundos.",
+      "enable_recovery": "Ativar a recuperação automática do emissor",
+      "enable_recovery_desc": "Desmarque para relatar um emissor desatualizado na página Sobre sem reiniciar o dispositivo.",
+      "enable_wifi_roam": "Sair de um ponto de acesso fraco",
+      "enable_wifi_roam_desc": "Quando o sinal médio estiver ruim por dez minutos e existir um ponto de acesso nitidamente mais forte na mesma rede, a conexão é brevemente derrubada para mudar para ele. Útil quando um repetidor compartilha o SSID com o roteador, porque caso contrário o dispositivo se associa ao primeiro que ouvir e nunca reconsidera. Deixe desligado se você tem apenas um ponto de acesso — não há para onde ir."
+    },
+    "errors": {
+      "invalid_interval": "O intervalo de gravação deve estar entre 1 e 360 minutos",
+      "invalid_max_records": "O máximo de registros na fila deve estar entre 100 e {max}",
+      "invalid_batch_size": "O tamanho do lote deve estar entre 1 e 50",
+      "invalid_stale_reboot": "O tempo limite do emissor desatualizado deve estar entre 60 e 600 segundos"
+    }
   },
   "help_page": {
     "header": "Suporte do TiltBridge",
@@ -313,6 +539,55 @@
     "issue_bug_feature_request": "problema, bug ou solicitação de recurso",
     "homebrewtalk_link": "Obtenha suporte ou converse com outros usuários no {hbt_link}",
     "homebrewtalk_thread": "tópico do HomeBrewTalk"
+  },
+  "send_errors": {
+    "banner_title": "Um ou mais destinos de envio estão relatando erros",
+    "config_error_title": "Erro de envio",
+    "targets": {
+      "legacy_fermentrack": "Fermentrack antigo",
+      "fermentrack": "Fermentrack",
+      "brewers_friend": "Brewer's Friend",
+      "brewfather": "Brewfather",
+      "user_target": "Destino genérico",
+      "grainfather": "Grainfather",
+      "brew_status": "Brewstatus",
+      "taplistio": "Taplist.IO",
+      "google_sheets": "Google Sheets",
+      "mqtt": "MQTT",
+      "influxdb": "InfluxDB"
+    },
+    "error_short": {
+      "code_1": "Falha na conexão",
+      "code_2": "Falha na autenticação",
+      "code_3": "Destino não encontrado (404)",
+      "code_4": "Erro do servidor (5xx)",
+      "code_5": "Requisição inválida / configuração ausente",
+      "code_6": "Limite de taxa atingido",
+      "code_7": "Outro erro",
+      "code_8": "Broker MQTT desconectado",
+      "code_9": "Fermentrack: usuário ou chave de API inválidos",
+      "code_10": "Fermentrack: registro malformado",
+      "code_11": "Fermentrack: registro inválido",
+      "code_12": "Fermentrack: sem cervejaria",
+      "code_13": "Não foi possível ler a resposta (o envio pode ter funcionado)",
+      "unknown": "Erro desconhecido (código {code})"
+    },
+    "error_detail": {
+      "code_1": "O TiltBridge não conseguiu se conectar a este destino. Isso pode ser causado por falha na resolução de DNS, por o servidor estar inacessível, por tempo limite de conexão esgotado ou por a conexão ter sido recusada. Verifique se o endereço do destino está correto e se o servidor é acessível a partir da rede do TiltBridge.",
+      "code_2": "O destino rejeitou a requisição devido a credenciais inválidas ou ausentes. Verifique se sua chave de API, usuário ou senha estão corretos e não expiraram.",
+      "code_3": "A URL do destino não foi encontrada. Verifique se a URL está correta e se o serviço ainda está disponível nesse endereço.",
+      "code_4": "O servidor de destino encontrou um erro interno. Normalmente é um problema temporário do lado do destino. Se persistir, consulte a página de status do serviço.",
+      "code_5": "O destino rejeitou a requisição ou falta alguma configuração obrigatória. Verifique se todos os campos de configuração estão preenchidos corretamente.",
+      "code_6": "O destino está limitando a taxa de requisições do TiltBridge. Tente aumentar o intervalo da frequência de envio nas configurações.",
+      "code_7": "Ocorreu um erro inesperado ao se comunicar com este destino. Consulte a documentação ou a página de status do serviço para mais detalhes.",
+      "code_8": "O TiltBridge foi desconectado do broker MQTT. Verifique se o endereço e a porta do broker estão corretos, se o broker está em execução e se as credenciais de autenticação são válidas.",
+      "code_9": "O usuário ou a chave de API configurados foram rejeitados pelo Fermentrack. Verifique se o usuário e a chave de API estão corretos e correspondem a uma conta válida na instalação do Fermentrack de destino.",
+      "code_10": "A requisição de registro enviada ao Fermentrack estava malformada. Isso geralmente significa que o firmware do TiltBridge ou a versão do Fermentrack está desatualizada. Atualize ambos e registre novamente.",
+      "code_11": "O registro do dispositivo no Fermentrack não é mais válido. Tente redefinir o ID do dispositivo na página de configuração do Fermentrack para registrá-lo novamente.",
+      "code_12": "O usuário do Fermentrack configurado não possui uma cervejaria. Conclua a configuração da cervejaria no Fermentrack antes de conectar o TiltBridge.",
+      "code_13": "O destino aceitou o envio — respondeu com um redirecionamento —, mas a requisição seguinte para obter sua resposta falhou, portanto não se sabe se as leituras foram armazenadas. Sua URL está correta; não há nada a alterar. O Google Apps Script é a causa habitual: ele executa seu script e depois redireciona para uma URL de resposta de uso único que pode expirar em uma conexão lenta ou brevemente interrompida. O TiltBridge reenvia as mesmas leituras com os mesmos ids, e o script descarta as que já possui, portanto isso não cria linhas duplicadas.",
+      "unknown": "Ocorreu um erro inesperado (código {code}). Verifique as configurações deste destino e certifique-se de que tanto o TiltBridge quanto o destino estejam atualizados."
+    }
   },
   "calibration": {
     "header": "Calibrando o Tilt {color}",
