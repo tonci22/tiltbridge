@@ -362,6 +362,8 @@ sendResult http_request(const char* url, httpMethod method, const char* payload,
 }
 
 // Convenience overload for simple requests without response buffer
-sendResult http_request(const char* url, httpMethod method, const char* payload, int16_t* httpCodeOut) {
-    return http_request(url, method, payload, nullptr, 0, HttpRequestOptions{}, httpCodeOut);
+sendResult http_request(const char* url, httpMethod method, const char* payload,
+                        int16_t* httpCodeOut, int* redirectHopsOut) {
+    return http_request(url, method, payload, nullptr, 0, HttpRequestOptions{}, httpCodeOut,
+                        redirectHopsOut);
 }

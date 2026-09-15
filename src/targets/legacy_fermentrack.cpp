@@ -79,7 +79,9 @@ bool dataSendHandler::send_to_legacy_fermentrack()
 
             if (payload_ok) {
                 int16_t httpCode = 0;
-                if (http_request(config.legacyFermentrackURL, httpMethod::HTTP_POST, tilt_data, &httpCode) == sendResult::success)
+                int redirectHops = 0;
+                if (http_request(config.legacyFermentrackURL, httpMethod::HTTP_POST, tilt_data,
+                                 &httpCode, &redirectHops) == sendResult::success)
                 {
                     Log.notice("Completed send to Legacy Fermentrack.\r\n");
                 }
@@ -88,7 +90,13 @@ bool dataSendHandler::send_to_legacy_fermentrack()
                     result = false; // There was an error with the previous send
                     Log.verbose("Error sending to Legacy Fermentrack.\r\n");
                 }
-                data_sender.setTargetStatus(TARGET_LEGACY_FERMENTRACK, dataSendHandler::httpCodeToSendError(httpCode));
+                // The httpCode != 0 test is the idiom every other sender uses: a zero means
+                // http_request() bailed before any response, which is a connection failure, not
+                // the SEND_ERR_OTHER that mapping a zero status produces.
+                data_sender.setTargetStatus(TARGET_LEGACY_FERMENTRACK,
+                                            httpCode != 0
+                                                ? dataSendHandler::httpCodeToSendError(httpCode, redirectHops)
+                                                : SEND_ERR_CONNECTION_FAILED);
                 free(tilt_data);
             } else {
                 // Nothing was sent, so this counts as a failed cycle like any other.

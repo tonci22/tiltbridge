@@ -86,12 +86,21 @@ extern const char* const sendTargetNames[TARGET_COUNT];
 #define HTTP_TIMEOUT_GSHEETS_MS 10000   // Google Scripts can be slow
 #define HTTP_TIMEOUT_FERMENTRACK_MS (3 * HTTP_TIMEOUT_DEFAULT_MS)  // register + status + messages
 
+// MQTT reconnect backoff. The retry this paces is reached on every process() pass rather than
+// from a timer, so without it an unreachable broker is retried at loop speed - 1,939 attempts
+// in 8 seconds, measured on hardware. Doubles from the base to the ceiling, and resets the
+// moment a connection is established.
+#define MQTT_RECONNECT_BASE_SEC 5
+#define MQTT_RECONNECT_MAX_SEC (5 * 60)
+
 #define BREWFATHER_MIN_KEY_LENGTH 5
 #define BREWERS_FRIEND_MIN_KEY_LENGTH 12
 #define BF_SIZE 192
 #define GF_SIZE 256
 #define FERMENTRACK_MIN_URL_LENGTH 9
 #define BREWSTATUS_MIN_URL_LENGTH 12
+#define TAPLISTIO_MIN_URL_LENGTH 10
+#define USER_TARGET_MIN_URL_LENGTH 12
 #define GSCRIPTS_MIN_URL_LENGTH 24
 #define GSCRIPTS_MIN_EMAIL_LENGTH 7
 #define GSHEETS_JSON 512
@@ -235,6 +244,11 @@ private:
     esp_mqtt_client_handle_t mqtt_client = nullptr;
     bool mqtt_alreadyinit = false;
     bool mqtt_connected = false;
+
+    // sh_millis() deadline for the next reconnect attempt, and the failure count that sets the
+    // gap. Zero means "attempt on the next pass". See send_to_mqtt().
+    uint32_t mqtt_nextReconnectMs = 0;
+    uint16_t mqtt_reconnectFailures = 0;
 
     static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 

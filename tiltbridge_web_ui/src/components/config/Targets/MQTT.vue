@@ -98,6 +98,7 @@ import FormErrorMsg from '@/components/generic/FormErrorMsg.vue';
 import SendTargetErrorMsg from "@/components/generic/SendTargetErrorMsg.vue";
 import UpdateSuccessfulModal from '@/components/config/UpdateSuccessfulModal.vue';
 import { useLoading } from 'vue-loading-overlay';
+import { validatePushEverySeconds } from '@/pushInterval';
 
 const configStore = useConfigStore();
 const mqttBrokerHost = ref(configStore.mqttBrokerHost);
@@ -116,17 +117,27 @@ const $loading = useLoading();
 async function submitForm() {
   form_error_message.value = '';
 
-  // TODO - Add validation checks here
+  const pushEvery = validatePushEverySeconds(mqttPushEvery.value);
+  if (pushEvery.error) {
+    form_error_message.value = pushEvery.error;
+    return;
+  }
 
   let loader = $loading.show({});
 
+  /*
+   * Both numbers go up as Numbers, not as the Strings the text inputs hold.
+   * mqttBrokerPort and mqttPushEvery are uint16_t on the device and are read with
+   * is<uint16_t>(), which a quoted "1883" fails - so editing either field used to fail the
+   * whole MQTT save, including the fields the user had actually come to change.
+   */
   await configStore.updateMQTTConfig(
       mqttBrokerHost.value,
-      mqttBrokerPort.value,
+      parseInt(mqttBrokerPort.value, 10),
       mqttUsername.value,
       mqttPassword.value,
       mqttTopic.value,
-      mqttPushEvery.value
+      pushEvery.seconds
   );
 
   loader.hide();

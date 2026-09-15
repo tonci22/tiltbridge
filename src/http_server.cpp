@@ -180,7 +180,38 @@ static const char* queueUploadStateName(dataSendHandler::QueueUploadState s) {
 static void queue_json(JsonDocument &doc) {
     reading_queue.to_json(doc);
 
-    doc["uploadStatus"] = queueUploadStateName(data_sender.queueUploadState);
+    /*
+     * uploadStatus is whatever the last sender pass set - EXCEPT in legacy mode, where no pass
+     * ever runs. send_to_google_v2() is the only writer of queueUploadState, and process()
+     * does not call it when gsheetsV2Enabled is false, so the field kept its IDLE initialiser
+     * and the panel showed "Idle" with 0 queued: indistinguishable from a healthy empty queue
+     * while the whole feature was inert. Legacy mode is a property of the configuration rather
+     * than of any send, so it is derived here instead of waiting for a sender to report it.
+     */
+    const bool queueLegacyMode = !config.gsheetsV2Enabled;
+    const bool queueNotConfigured = strlen(config.scriptsURL) < GSCRIPTS_MIN_URL_LENGTH ||
+                                    strlen(config.scriptsEmail) < GSCRIPTS_MIN_EMAIL_LENGTH;
+
+    /*
+     * BOTH conditions are derived, not just legacy mode. They are properties of the
+     * configuration, knowable the moment it is saved, whereas queueUploadState only changes
+     * when a sender pass runs - which is up to a full push interval away. Deriving one and not
+     * the other let the panel say "Upload status: Idle" directly above "Uploads: off, no script
+     * URL configured", which is worse than either alone.
+     */
+    if (queueLegacyMode || queueNotConfigured)
+        doc["uploadStatus"] = "DISABLED";
+    else
+        doc["uploadStatus"] = queueUploadStateName(data_sender.queueUploadState);
+
+    /*
+     * Which kind of "disabled" this is. Both mean nothing will be uploaded, but they need
+     * different things done about them, and "Disabled" on its own said neither.
+     */
+    if (queueLegacyMode)
+        doc["uploadDisabledReason"] = "legacy_mode";
+    else if (queueNotConfigured)
+        doc["uploadDisabledReason"] = "not_configured";
 
     /*
      * Whether a "send backlog now" request is still waiting to be picked up.
@@ -310,6 +341,67 @@ static bool applyPushEvery(const JsonDocument& json, const char* key, uint16_t& 
     configVar = (uint16_t)value;
     Log.notice("Settings update, [%s]:(%d) applied.\r\n", key, (int)value);
     return true;
+}
+
+/**
+ * @brief True when `json` carries `key` and its value differs from what `current` holds.
+ *
+ * Must be called BEFORE the field is overwritten - the whole point is to tell "the user saved
+ * this panel again" apart from "the user changed the credential", and after the copy there is
+ * nothing left to compare against. An absent key is not a change.
+ *
+ * Every target's immediate send is gated on this. Firing one on any write to the endpoint meant
+ * that changing only the push interval queued an upload too, and because the previous interval's
+ * timer was still counting down, that produced two uploads seconds apart followed by a gap.
+ */
+static bool credentialChanged(const JsonDocument& json, const char* key, const char* current) {
+    return json[key].is<const char*>() &&
+           strcmp(json[key].as<const char*>(), current) != 0;
+}
+
+/**
+ * @brief Re-arm a target's push timer when its interval changed, measured from the last upload.
+ *
+ * startTimer() is otherwise reached only at the end of a completed send, so a changed interval
+ * did not take effect until one more upload had gone out on the OLD schedule - the previous
+ * countdown simply kept running. backoffDelay() is applied for the same reason the send path
+ * applies it: changing an interval must not reset a target that is deliberately backing off
+ * from a failing endpoint.
+ *
+ * The new period is measured from the LAST UPLOAD, not from this request, so consecutive
+ * readings really are the configured interval apart. Re-arming with the full period here instead
+ * would add however long ago the last upload was: changing 10 -> 15 shortly after an upload
+ * produced a 15-minute wait on top of that, so the first gap was longer than 15 minutes and only
+ * later ones were right.
+ *
+ * If the new interval has already elapsed - shortening 15 -> 5 twelve minutes in - the send is
+ * due now, and goes out on a short delay rather than instantly so it cannot race config.save().
+ *
+ * One copy for all eleven targets. This arithmetic was written for Google Sheets and verified
+ * there; the other targets had no re-arm at all, and duplicating it per handler is exactly how
+ * the two faults it fixes came to differ between them in the first place.
+ */
+static void rearmPushTimer(SendTargetID target, TimerHandle_t timer, const char* label,
+                           uint16_t previousPushEvery, uint16_t newPushEvery) {
+    if(newPushEvery == previousPushEvery)
+        return;
+
+    const uint32_t period = data_sender.backoffDelay(target, newPushEvery);
+    // sh_millis()/1000, matching what setTargetStatus() stores. NOT uptimeSeconds(), which
+    // returns the 0..59 seconds component and made this silently fall back to the full
+    // period whenever the two readings straddled a minute boundary.
+    const uint32_t lastAttempt = data_sender.targetStatus[target].lastAttemptTime;
+    const uint32_t now = sh_millis() / 1000;
+
+    uint32_t remaining = period;
+    if(lastAttempt > 0 && now >= lastAttempt) {
+        const uint32_t elapsed = now - lastAttempt;
+        remaining = (elapsed >= period) ? PUSH_INTERVAL_DUE_NOW_SEC : (period - elapsed);
+    }
+
+    data_sender.startTimer(timer, remaining);
+    Log.notice("%s interval %u -> %us; next upload in %us.\r\n", label,
+               (unsigned)previousPushEvery, (unsigned)newPushEvery, (unsigned)remaining);
 }
 
 static bool processTiltBridgeSettingsJson(const JsonDocument& json, bool triggerUpstreamUpdate) {
@@ -521,6 +613,9 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
     bool update_legacy = false;
     bool update_ft2 = false;
 
+    const uint16_t previousLegacyPushEvery = config.legacyFermentrackPushEvery;
+    const uint16_t previousFt2PushEvery = config.fermentrackPushEvery;
+
     /*
      * The FT2 push interval is applied outside the branch below, and its presence must never
      * be what selects a branch: the FT2 branch clears the device id and API key to force
@@ -536,13 +631,14 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
         if(!updateJsonSetting(json, FermentrackSettings::legacyFermentrackURL, config.legacyFermentrackURL, 256))
             failCount++;
 
-        if(!updateJsonSetting(json, FermentrackSettings::legacyFermentrackPushEvery, config.legacyFermentrackPushEvery))
+        /*
+         * The hand-rolled 30..43200 that used to be here is exactly PUSH_EVERY_FAST_MIN_SEC to
+         * PUSH_EVERY_MAX_SEC. It also clamped the field to 30 on a bad value, which did nothing:
+         * the failure it recorded makes json_put_wrapper() roll the whole config back anyway.
+         */
+        if(!applyPushEvery(json, FermentrackSettings::legacyFermentrackPushEvery,
+                           config.legacyFermentrackPushEvery, PUSH_EVERY_FAST_MIN_SEC))
             failCount++;
-        if(config.legacyFermentrackPushEvery < 30 || config.legacyFermentrackPushEvery > 43200) {
-            Log.warning("Settings update error, [legacyFermentrackPushEvery]:(%d) not valid.\r\n", config.legacyFermentrackPushEvery);
-            config.legacyFermentrackPushEvery = 30;
-            failCount++;
-        }
     } else if (json[FermentrackSettings::fermentrackHostname].is<const char*>()) {
         Log.info("Received FT2 settings.\r\n");
         update_ft2 = true;
@@ -574,6 +670,18 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
                 startSendNowTimer(sendNowLegacyFTTimer, "SendLegacyFT", sendNowLegacyFTCallback, 3);
             if(update_ft2)
                 startSendNowTimer(sendNowFTTimer, "SendFT", sendNowFTCallback, 5);
+
+            /*
+             * Both targets are named, not just the branch that ran. The FT2 interval is applied
+             * outside the branch above - a payload carrying only fermentrackPushEvery changes a
+             * schedule without selecting either branch - and rearmPushTimer() returns
+             * immediately when an interval did not change, so naming both costs nothing.
+             */
+            rearmPushTimer(TARGET_LEGACY_FERMENTRACK, data_sender.legacyFermentrackTimer,
+                           "Legacy Fermentrack", previousLegacyPushEvery,
+                           config.legacyFermentrackPushEvery);
+            rearmPushTimer(TARGET_FERMENTRACK, data_sender.fermentrackTimer, "Fermentrack",
+                           previousFt2PushEvery, config.fermentrackPushEvery);
         }
     }
 
@@ -583,21 +691,10 @@ static bool processFermentrackSettings(const JsonDocument& json, bool triggerUps
 static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
-    /*
-     * Whether the credentials actually changed must be decided BEFORE they are overwritten.
-     *
-     * The immediate send below used to fire on every write to this endpoint, so changing
-     * only the push interval queued one too - and because the previous interval's timer was
-     * still counting down, that produced two uploads seconds apart followed by a gap.
-     * A new URL or email is the only thing worth confirming straight away.
-     */
-    const bool urlChanged =
-        json[GoogleSheetsSettings::scriptsURL].is<const char*>() &&
-        strcmp(json[GoogleSheetsSettings::scriptsURL].as<const char*>(), config.scriptsURL) != 0;
-
-    const bool emailChanged =
-        json[GoogleSheetsSettings::scriptsEmail].is<const char*>() &&
-        strcmp(json[GoogleSheetsSettings::scriptsEmail].as<const char*>(), config.scriptsEmail) != 0;
+    // Both decided before the fields below are overwritten. See credentialChanged().
+    const bool credsChanged =
+        credentialChanged(json, GoogleSheetsSettings::scriptsURL, config.scriptsURL) ||
+        credentialChanged(json, GoogleSheetsSettings::scriptsEmail, config.scriptsEmail);
 
     const uint16_t previousPushEvery = config.gsheetsPushEvery;
 
@@ -605,16 +702,6 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
         failCount++;
     if(!updateJsonSetting(json, GoogleSheetsSettings::scriptsEmail, config.scriptsEmail, 256))
         failCount++;
-
-    /*
-     * Gated on the sender's own minimums rather than the 26/5 that used to be here, which
-     * disagreed with them: a 6-character email passed this check and was then rejected by
-     * send_to_google_v2(), queueing a send that could only mark the target DISABLED.
-     */
-    if((urlChanged || emailChanged) &&
-       strlen(config.scriptsURL) >= GSCRIPTS_MIN_URL_LENGTH &&
-       strlen(config.scriptsEmail) >= GSCRIPTS_MIN_EMAIL_LENGTH)
-        startSendNowTimer(sendNowGSheetsTimer, "SendGSheets", sendNowGSheetsCallback, 5);
 
     /*
      * Per-colour sheet names are OPTIONAL in the payload.
@@ -643,60 +730,40 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
     if(!applyPushEvery(json, GoogleSheetsSettings::gsheetsPushEvery, config.gsheetsPushEvery))
         failCount++;
 
-    /*
-     * Re-arm against the new interval now.
-     *
-     * startTimer() is otherwise reached only at the end of a completed send, so a changed
-     * interval did not take effect until one more upload had gone out on the OLD schedule -
-     * the previous countdown simply kept running. backoffDelay() is applied for the same
-     * reason the send path applies it: changing an interval must not reset a target that is
-     * deliberately backing off from a failing endpoint.
-     *
-     * The new period is measured from the LAST UPLOAD, not from this request, so consecutive
-     * rows really are the configured interval apart. Re-arming with the full period here
-     * instead would add however long ago the last upload was: changing 10 -> 15 shortly after
-     * an upload produced a 15-minute wait on top of that, so the first gap in the sheet was
-     * longer than 15 minutes and only later ones were right.
-     *
-     * If the new interval has already elapsed - shortening 15 -> 5 twelve minutes in - the
-     * send is due now, and goes out on a short delay rather than instantly so it cannot race
-     * the config.save() below.
-     */
-    if(config.gsheetsPushEvery != previousPushEvery) {
-        const uint32_t period = data_sender.backoffDelay(TARGET_GOOGLE_SHEETS,
-                                                         config.gsheetsPushEvery);
-        // sh_millis()/1000, matching what setTargetStatus() stores. NOT uptimeSeconds(), which
-        // returns the 0..59 seconds component and made this silently fall back to the full
-        // period whenever the two readings straddled a minute boundary.
-        const uint32_t lastAttempt = data_sender.targetStatus[TARGET_GOOGLE_SHEETS].lastAttemptTime;
-        const uint32_t now = sh_millis() / 1000;
-
-        uint32_t remaining = period;
-        if(lastAttempt > 0 && now >= lastAttempt) {
-            const uint32_t elapsed = now - lastAttempt;
-            remaining = (elapsed >= period) ? PUSH_INTERVAL_DUE_NOW_SEC : (period - elapsed);
-        }
-
-        /*
-         * This fire is deliberately off the cadence grid - it is the remainder of the OLD
-         * interval measured against the NEW one. Drop the anchor so the upload it triggers
-         * lays out a fresh grid on completion, rather than stepping the stale one forward
-         * and leaving one arbitrary gap behind. See dataSendHandler::rearmGSheetsTimer().
-         */
-        data_sender.gSheetsNextDueMs = 0;
-        data_sender.gSheetsGridIntervalSec = 0;
-
-        data_sender.startTimer(data_sender.gSheetsTimer, remaining);
-        Log.notice("Google Sheets interval %u -> %us; next upload in %us.\r\n",
-                   (unsigned)previousPushEvery, (unsigned)config.gsheetsPushEvery,
-                   (unsigned)remaining);
-    }
-
     if(failCount > 0) {
         Log.error("Error: Invalid Google Sheets configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Google Sheets configuration data.\r\n");
         failCount++;
+    } else {
+        /*
+         * Both of these act only once the update has been persisted. json_put_wrapper() rolls
+         * `config` back when a handler fails, so acting any earlier could arm a timer against
+         * an interval that was then discarded, or send with credentials that were.
+         *
+         * Gated on the sender's own minimums rather than the 26/5 that used to be here, which
+         * disagreed with them: a 6-character email passed this check and was then rejected by
+         * send_to_google_v2(), queueing a send that could only mark the target DISABLED.
+         */
+        if(credsChanged &&
+           strlen(config.scriptsURL) >= GSCRIPTS_MIN_URL_LENGTH &&
+           strlen(config.scriptsEmail) >= GSCRIPTS_MIN_EMAIL_LENGTH)
+            startSendNowTimer(sendNowGSheetsTimer, "SendGSheets", sendNowGSheetsCallback, 5);
+
+        if(config.gsheetsPushEvery != previousPushEvery) {
+            /*
+             * The re-armed fire is deliberately off the cadence grid - it is the remainder of
+             * the OLD interval measured against the NEW one. Drop the anchor so the upload it
+             * triggers lays out a fresh grid on completion, rather than stepping the stale one
+             * forward and leaving one arbitrary gap behind. Google Sheets only: it is the one
+             * target that holds an absolute deadline. See dataSendHandler::rearmGSheetsTimer().
+             */
+            data_sender.gSheetsNextDueMs = 0;
+            data_sender.gSheetsGridIntervalSec = 0;
+        }
+
+        rearmPushTimer(TARGET_GOOGLE_SHEETS, data_sender.gSheetsTimer, "Google Sheets",
+                       previousPushEvery, config.gsheetsPushEvery);
     }
 
     return failCount == 0;
@@ -705,10 +772,12 @@ static bool processGoogleSheetsSettings(const JsonDocument& json, bool triggerUp
 static bool processBrewersFriendSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    const bool keyChanged =
+        credentialChanged(json, BrewersFriendSettings::brewersFriendKey, config.brewersFriendKey);
+    const uint16_t previousPushEvery = config.brewersFriendPushEvery;
+
     if(!updateJsonSetting(json, BrewersFriendSettings::brewersFriendKey, config.brewersFriendKey, 64))
         failCount++;
-    if(strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH)
-        startSendNowTimer(sendNowBrewersFriendTimer, "SendBF", sendNowBrewersFriendCallback, 5);
 
     if(!applyPushEvery(json, BrewersFriendSettings::brewersFriendPushEvery, config.brewersFriendPushEvery))
         failCount++;
@@ -718,6 +787,14 @@ static bool processBrewersFriendSettings(const JsonDocument& json, bool triggerU
     } else if (!config.save()) {
         Log.error("Error: Unable to save Brewer's Friend configuration data.\r\n");
         failCount++;
+    } else {
+        // The length test is send_to_bf_and_bf()'s own, so a key this queues a send for is one
+        // that sender will actually use.
+        if(keyChanged && strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH)
+            startSendNowTimer(sendNowBrewersFriendTimer, "SendBF", sendNowBrewersFriendCallback, 5);
+
+        rearmPushTimer(TARGET_BREWERS_FRIEND, data_sender.brewersFriendTimer, "Brewer's Friend",
+                       previousPushEvery, config.brewersFriendPushEvery);
     }
 
     return failCount == 0;
@@ -726,10 +803,12 @@ static bool processBrewersFriendSettings(const JsonDocument& json, bool triggerU
 static bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    const bool keyChanged =
+        credentialChanged(json, BrewfatherSettings::brewfatherKey, config.brewfatherKey);
+    const uint16_t previousPushEvery = config.brewfatherPushEvery;
+
     if(!updateJsonSetting(json, BrewfatherSettings::brewfatherKey, config.brewfatherKey, 64))
         failCount++;
-    if(strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH)
-        startSendNowTimer(sendNowBrewfatherTimer, "SendBrewfather", sendNowBrewfatherCallback, 5);
 
     if(!applyPushEvery(json, BrewfatherSettings::brewfatherPushEvery, config.brewfatherPushEvery))
         failCount++;
@@ -739,6 +818,12 @@ static bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpst
     } else if (!config.save()) {
         Log.error("Error: Unable to save Brewfather configuration data.\r\n");
         failCount++;
+    } else {
+        if(keyChanged && strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH)
+            startSendNowTimer(sendNowBrewfatherTimer, "SendBrewfather", sendNowBrewfatherCallback, 5);
+
+        rearmPushTimer(TARGET_BREWFATHER, data_sender.brewfatherTimer, "Brewfather",
+                       previousPushEvery, config.brewfatherPushEvery);
     }
 
     return failCount == 0;
@@ -747,10 +832,12 @@ static bool processBrewfatherSettings(const JsonDocument& json, bool triggerUpst
 static bool processUserTargetSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    const bool urlChanged =
+        credentialChanged(json, UserTargetSettings::userTargetURL, config.userTargetURL);
+    const uint16_t previousPushEvery = config.userTargetPushEvery;
+
     if(!updateJsonSetting(json, UserTargetSettings::userTargetURL, config.userTargetURL, 128))
         failCount++;
-    if(strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
-        startSendNowTimer(sendNowUserTargetTimer, "SendUserTarget", sendNowUserTargetCallback, 5);
 
     if(!applyPushEvery(json, UserTargetSettings::userTargetPushEvery, config.userTargetPushEvery))
         failCount++;
@@ -760,6 +847,12 @@ static bool processUserTargetSettings(const JsonDocument& json, bool triggerUpst
     } else if (!config.save()) {
         Log.error("Error: Unable to save user target configuration data.\r\n");
         failCount++;
+    } else {
+        if(urlChanged && strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
+            startSendNowTimer(sendNowUserTargetTimer, "SendUserTarget", sendNowUserTargetCallback, 5);
+
+        rearmPushTimer(TARGET_USER_TARGET, data_sender.userTargetTimer, "User target",
+                       previousPushEvery, config.userTargetPushEvery);
     }
 
     return failCount == 0;
@@ -768,26 +861,54 @@ static bool processUserTargetSettings(const JsonDocument& json, bool triggerUpst
 static bool processGrainfatherSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    /*
+     * One URL per colour, so "did anything change" and "is anything configured" are both
+     * answered across all eight. The send-now used to be unconditional here - it fired even
+     * when every URL was empty, queueing a send to a target that is not set up at all.
+     */
+    bool urlChanged = false;
+    bool anyConfigured = false;
+    const uint16_t previousPushEvery = config.grainfatherPushEvery;
+
     uint8_t i = 0;
     for(const char* sheetKey : tiltColorSuffixes) {
         char full_key[35];
         snprintf(full_key, 35, "%s%s", GrainfatherSettings::grainfatherURLPrefix, sheetKey);
 
-        if(!updateJsonSetting(json, full_key, config.grainfatherURL[i].link, 64))
-            failCount++;
+        if(credentialChanged(json, full_key, config.grainfatherURL[i].link))
+            urlChanged = true;
+
+        /*
+         * Optional in the payload, like the Google Sheets per-colour names. A client that sends
+         * only the colours it uses must not have its whole update rejected - requiring all eight
+         * is what made a partial payload to this endpoint fail.
+         */
+        if(json[full_key].is<const char*>()) {
+            if(!updateJsonSetting(json, full_key, config.grainfatherURL[i].link, 64))
+                failCount++;
+        }
+
+        if(strlen(config.grainfatherURL[i].link) > 0)
+            anyConfigured = true;
         i++;
     }
 
     if(!applyPushEvery(json, GrainfatherSettings::grainfatherPushEvery, config.grainfatherPushEvery))
         failCount++;
 
-    startSendNowTimer(sendNowGrainfatherTimer, "SendGrainfather", sendNowGrainfatherCallback, 5);
-
     if(failCount > 0) {
         Log.error("Error: Invalid Grainfather configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save Grainfather configuration data.\r\n");
         failCount++;
+    } else {
+        // send_to_grainfather() skips a colour whose link is empty and reports nothing when
+        // none of them has one, so one non-empty URL is what "configured" means here.
+        if(urlChanged && anyConfigured)
+            startSendNowTimer(sendNowGrainfatherTimer, "SendGrainfather", sendNowGrainfatherCallback, 5);
+
+        rearmPushTimer(TARGET_GRAINFATHER, data_sender.grainfatherTimer, "Grainfather",
+                       previousPushEvery, config.grainfatherPushEvery);
     }
 
     return failCount == 0;
@@ -796,12 +917,15 @@ static bool processGrainfatherSettings(const JsonDocument& json, bool triggerUps
 static bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    const bool urlChanged =
+        credentialChanged(json, BrewstatusSettings::brewstatusURL, config.brewstatusURL);
+    const uint16_t previousPushEvery = config.brewstatusPushEvery;
+
     if(!updateJsonSetting(json, BrewstatusSettings::brewstatusURL, config.brewstatusURL, 256))
         failCount++;
-    if(strlen(config.brewstatusURL) > 11)
-        startSendNowTimer(sendNowBrewStatusTimer, "SendBrewStatus", sendNowBrewStatusCallback, 5);
 
-    if(!updateJsonSetting(json, BrewstatusSettings::brewstatusPushEvery, config.brewstatusPushEvery))
+    if(!applyPushEvery(json, BrewstatusSettings::brewstatusPushEvery, config.brewstatusPushEvery,
+                       PUSH_EVERY_FAST_MIN_SEC))
         failCount++;
 
     if(failCount > 0) {
@@ -809,6 +933,14 @@ static bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpst
     } else if (!config.save()) {
         Log.error("Error: Unable to save Brewstatus configuration data.\r\n");
         failCount++;
+    } else {
+        // BREWSTATUS_MIN_URL_LENGTH, not the bare 11 that used to be here: send_to_brewstatus()
+        // treats a URL of exactly 12 as unconfigured, so this queued sends it discarded.
+        if(urlChanged && strlen(config.brewstatusURL) > BREWSTATUS_MIN_URL_LENGTH)
+            startSendNowTimer(sendNowBrewStatusTimer, "SendBrewStatus", sendNowBrewStatusCallback, 5);
+
+        rearmPushTimer(TARGET_BREW_STATUS, data_sender.brewStatusTimer, "Brewstatus",
+                       previousPushEvery, config.brewstatusPushEvery);
     }
 
     return failCount == 0;
@@ -817,12 +949,15 @@ static bool processBrewstatusSettings(const JsonDocument& json, bool triggerUpst
 static bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    const bool urlChanged =
+        credentialChanged(json, TaplistioSettings::taplistioURL, config.taplistioURL);
+    const uint16_t previousPushEvery = config.taplistioPushEvery;
+
     if(!updateJsonSetting(json, TaplistioSettings::taplistioURL, config.taplistioURL, 256))
         failCount++;
-    if(strlen(config.taplistioURL) > 11)
-        startSendNowTimer(sendNowTaplistioTimer, "SendTaplistio", sendNowTaplistioCallback, 5);
 
-    if(!updateJsonSetting(json, TaplistioSettings::taplistioPushEvery, config.taplistioPushEvery))
+    if(!applyPushEvery(json, TaplistioSettings::taplistioPushEvery, config.taplistioPushEvery,
+                       PUSH_EVERY_FAST_MIN_SEC))
         failCount++;
 
     if(failCount > 0) {
@@ -830,6 +965,15 @@ static bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstr
     } else if (!config.save()) {
         Log.error("Error: Unable to save Taplist.io configuration data.\r\n");
         failCount++;
+    } else {
+        // TAPLISTIO_MIN_URL_LENGTH, not the bare 11 that used to be here, which was stricter
+        // than send_to_taplistio()'s own check and so skipped the confirming send for an
+        // 11-character URL the sender would have used.
+        if(urlChanged && strlen(config.taplistioURL) > TAPLISTIO_MIN_URL_LENGTH)
+            startSendNowTimer(sendNowTaplistioTimer, "SendTaplistio", sendNowTaplistioCallback, 5);
+
+        rearmPushTimer(TARGET_TAPLISTIO, data_sender.taplistioTimer, "Taplist.io",
+                       previousPushEvery, config.taplistioPushEvery);
     }
 
     return failCount == 0;
@@ -838,13 +982,31 @@ static bool processTaplistioSettings(const JsonDocument& json, bool triggerUpstr
 static bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
 
+    /*
+     * Tracked apart because they drive different things: the broker client only has to be
+     * rebuilt for the parameters it was built from, while a publish is worth confirming for
+     * anything that changes what is published or where it goes.
+     */
+    const bool connectionChanged =
+        credentialChanged(json, MQTTSettings::mqttBrokerHost, config.mqttBrokerHost) ||
+        credentialChanged(json, MQTTSettings::mqttUsername, config.mqttUsername) ||
+        credentialChanged(json, MQTTSettings::mqttPassword, config.mqttPassword) ||
+        (json[MQTTSettings::mqttBrokerPort].is<uint16_t>() &&
+         json[MQTTSettings::mqttBrokerPort].as<uint16_t>() != config.mqttBrokerPort);
+
+    const bool topicChanged =
+        credentialChanged(json, MQTTSettings::mqttTopic, config.mqttTopic);
+
+    const uint16_t previousPushEvery = config.mqttPushEvery;
+
     if(!updateJsonSetting(json, MQTTSettings::mqttBrokerHost, config.mqttBrokerHost, sizeof(config.mqttBrokerHost)))
         failCount++;
 
     if(!updateJsonSetting(json, MQTTSettings::mqttBrokerPort, config.mqttBrokerPort))
         failCount++;
 
-    if(!updateJsonSetting(json, MQTTSettings::mqttPushEvery, config.mqttPushEvery))
+    if(!applyPushEvery(json, MQTTSettings::mqttPushEvery, config.mqttPushEvery,
+                       PUSH_EVERY_FAST_MIN_SEC))
         failCount++;
 
     if(!updateJsonSetting(json, MQTTSettings::mqttUsername, config.mqttUsername, sizeof(config.mqttUsername)))
@@ -856,14 +1018,27 @@ static bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUp
     if(!updateJsonSetting(json, MQTTSettings::mqttTopic, config.mqttTopic, sizeof(config.mqttTopic)))
         failCount++;
 
-    http_server.mqtt_init_rqd = true;
-    startSendNowTimer(sendNowMqttTimer, "SendMQTT", sendNowMqttCallback, 5);
-
     if(failCount > 0) {
         Log.error("Error: Invalid MQTT configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save MQTT configuration data.\r\n");
         failCount++;
+    } else {
+        /*
+         * The keepalive handed to esp-mqtt is config.mqttPushEvery (mqtt.cpp), so a changed
+         * interval needs the re-init too - it is not only the connection parameters. What this
+         * no longer does is tear the client down and rebuild it when nothing relevant changed,
+         * which is what saving this panel for any reason used to cost.
+         */
+        if(connectionChanged || config.mqttPushEvery != previousPushEvery)
+            http_server.mqtt_init_rqd = true;
+
+        // send_to_mqtt() treats an empty broker host as "not configured" and publishes nothing.
+        if((connectionChanged || topicChanged) && strlen(config.mqttBrokerHost) > 0)
+            startSendNowTimer(sendNowMqttTimer, "SendMQTT", sendNowMqttCallback, 5);
+
+        rearmPushTimer(TARGET_MQTT, data_sender.mqttTimer, "MQTT",
+                       previousPushEvery, config.mqttPushEvery);
     }
 
     return failCount == 0;
@@ -871,6 +1046,14 @@ static bool processMqttSettings(const JsonDocument& json, bool triggerUpstreamUp
 
 static bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstreamUpdate) {
     uint8_t failCount = 0;
+
+    const bool credsChanged =
+        credentialChanged(json, InfluxDBSettings::influxdbURL, config.influxdbURL) ||
+        credentialChanged(json, InfluxDBSettings::influxdbToken, config.influxdbToken) ||
+        credentialChanged(json, InfluxDBSettings::influxdbOrg, config.influxdbOrg) ||
+        credentialChanged(json, InfluxDBSettings::influxdbBucket, config.influxdbBucket);
+
+    const uint16_t previousPushEvery = config.influxdbPushEvery;
 
     if(!updateJsonSetting(json, InfluxDBSettings::influxdbURL, config.influxdbURL, sizeof(config.influxdbURL)))
         failCount++;
@@ -880,17 +1063,30 @@ static bool processInfluxdbSettings(const JsonDocument& json, bool triggerUpstre
         failCount++;
     if(!updateJsonSetting(json, InfluxDBSettings::influxdbBucket, config.influxdbBucket, sizeof(config.influxdbBucket)))
         failCount++;
-    if(!updateJsonSetting(json, InfluxDBSettings::influxdbPushEvery, config.influxdbPushEvery))
+    if(!applyPushEvery(json, InfluxDBSettings::influxdbPushEvery, config.influxdbPushEvery,
+                       PUSH_EVERY_FAST_MIN_SEC))
         failCount++;
-
-    if(strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH)
-        startSendNowTimer(sendNowInfluxdbTimer, "SendInfluxDB", sendNowInfluxdbCallback, 5);
 
     if(failCount > 0) {
         Log.error("Error: Invalid InfluxDB configuration.\r\n");
     } else if (!config.save()) {
         Log.error("Error: Unable to save InfluxDB configuration data.\r\n");
         failCount++;
+    } else {
+        /*
+         * All four fields, matching send_to_influxdb()'s own check. Gating on the URL alone -
+         * which is what used to be here - queued a send for a URL with no token, org or bucket,
+         * and that send could only decide the target was not configured and clear it again.
+         */
+        if(credsChanged &&
+           strlen(config.influxdbURL) > INFLUXDB_MIN_URL_LENGTH &&
+           strlen(config.influxdbToken) > 0 &&
+           strlen(config.influxdbOrg) > 0 &&
+           strlen(config.influxdbBucket) > 0)
+            startSendNowTimer(sendNowInfluxdbTimer, "SendInfluxDB", sendNowInfluxdbCallback, 5);
+
+        rearmPushTimer(TARGET_INFLUXDB, data_sender.influxdbTimer, "InfluxDB",
+                       previousPushEvery, config.influxdbPushEvery);
     }
 
     return failCount == 0;

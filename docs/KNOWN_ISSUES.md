@@ -13,20 +13,112 @@ re-derive. The last section exists so nobody re-investigates things that are not
 
 ## Firmware — open
 
-### 1. Seven other targets still have the two bugs fixed for Google Sheets
+### 1. FIXED — every other target had the two bugs that were fixed for Google Sheets
 
 `src/http_server.cpp`. `processGoogleSheetsSettings()` was fixed to (a) only queue an
-immediate send when the URL or email actually changed, and (b) re-arm the send timer when
-the push interval changes, measured from the last upload.
+immediate send when the URL or email actually changed, and (b) re-arm the send timer when the
+push interval changes, measured from the last upload. The same two faults were left in
+`processBrewersFriendSettings`, `processBrewfatherSettings`, `processUserTargetSettings`,
+`processGrainfatherSettings`, `processBrewStatusSettings`, `processTaplistioSettings`,
+`processMqttSettings` and `processInfluxdbSettings`: each called `startSendNowTimer(...)`
+gated only on credentials being non-empty, and none re-armed its timer on an interval change.
+Saving a panel with only the interval edited therefore produced an extra upload about five
+seconds later, the old countdown still running underneath it, and then one long gap.
 
-The same two faults remain in `processBrewersFriendSettings`, `processBrewfatherSettings`,
-`processUserTargetSettings`, `processGrainfatherSettings`, `processBrewStatusSettings`,
-`processTaplistioSettings`, `processMqttSettings` and `processInfluxdbSettings`: each calls
-`startSendNowTimer(...)` gated only on credentials being non-empty, and none re-arms its
-timer on an interval change.
+Fixed by lifting the Google Sheets logic into two helpers — `credentialChanged()` and
+`rearmPushTimer()` — and putting all nine targets on them. One copy of the arithmetic is the
+point: nine hand-written copies is how the two faults came to differ between targets in the
+first place. Google Sheets keeps the one piece that is genuinely its own, dropping the grid
+anchor so the off-grid fire re-lays the cadence rather than stepping a stale deadline forward.
 
-**Proven.** Not fixed because every one of those targets is unconfigured on the test device,
-so none could be verified on hardware.
+Four faults found while doing it, beyond the two the entry was opened for:
+
+- **Grainfather and MQTT queued the send unconditionally**, with no credential check at all,
+  so saving an empty panel queued a send to a target that was not configured.
+- **MQTT re-initialised the broker client on every save**, tearing down the connection even
+  when only the interval had changed. It now re-inits for the connection parameters it was
+  built from, plus the interval, because the keepalive is derived from it.
+- **InfluxDB gated on the URL alone** while `send_to_influxdb()` requires URL, token, org and
+  bucket — so a half-filled panel queued a send that could only decide the target was
+  unconfigured.
+- **Brewstatus and Taplist.io used bare literals** (`> 11`) that disagreed with their senders
+  in opposite directions: Brewstatus queued sends for a 12-character URL the sender discards,
+  Taplist.io skipped the confirming send for an 11-character URL the sender would have used.
+  Both now use the sender's own constant, and `TAPLISTIO_MIN_URL_LENGTH` exists so the
+  Taplist.io sender is no longer the only place that number appears.
+
+The send-now and the re-arm now both happen only after `config.save()` has succeeded. They
+used to run mid-handler, before the failure check — and `json_put_wrapper()` rolls `config`
+back when a handler fails, so a rejected payload could still arm a timer against an interval
+that was then discarded. That was true of the Google Sheets path as well.
+
+**Verified on hardware** (`esp32_headless`, test board `lovric2`, no Tilts in range).
+
+Both halves, on Brewstatus, from the serial log:
+
+```
+330480 I: Brewstatus interval 30 -> 600s; next upload in 600s.     <- URL changed
+335488 V: Calling send to Brew Status.                             <- send-now, 5008 ms later
+342636 I: Brewstatus interval 600 -> 900s; next upload in 900s.    <- interval only
+        (zero "Calling send to Brew Status" in the 14 s that followed)
+```
+
+A changed URL re-arms *and* sends; a changed interval re-arms and sends nothing. Before this
+change the second case did the opposite of both.
+
+The re-arm arithmetic was checked against the clock on Legacy Fermentrack, which is the one
+sender that still issues a request with no Tilts in range:
+
+```
+299736 I: Legacy Fermentrack interval 60 -> 120s; next upload in 81s.
+```
+
+The previous upload was 39 s earlier, and 120 - 39 = 81. Re-arming from *now* would have said
+120. The upload cadence at the listener moved from 60.1 s to 120.1 s across the change, so the
+new interval took effect immediately rather than after one more cycle on the old schedule.
+
+Repeated afterwards on User Target with a Tilt in range, which is a per-Tilt sender rather than
+Brewstatus' unconditional one:
+
+- New URL -> `Calling send to User Target.` and the listener received
+  `{"name":"test-blue","temp":"81.0","gravity":"1.1760",...}`.
+- Same URL, interval 600 -> 900 -> zero POSTs in the following 15 s, and
+  `User target interval 600 -> 900s; next upload in 677s.`
+
+A first attempt at that test looked like a failure - a new URL produced no send - and was not
+one: the URL was already set to that exact value by an earlier step, so `credentialChanged()`
+correctly returned false. Worth knowing before anyone re-runs it.
+
+**One known trait, accepted.** `rearmPushTimer()` measures from `lastAttemptTime`, which is 0
+until a target's first send. Changing an interval inside the first two minutes after boot
+therefore replaces the staggered startup delay with a full interval — Brewstatus due in 30 s
+becomes due in 600 s. The Google Sheets implementation this came from has always behaved that
+way. Reading the pending timer instead would close it, for a window nobody configures in.
+
+**Fermentrack, both paths, followed.** It was excluded from this entry because its send-now is
+gated on branch selection rather than on credentials, which is sound — but it had no re-arm
+either, and the FT2 interval is applied *outside* the branch, so a payload carrying only
+`fermentrackPushEvery` changed a schedule without selecting a branch at all. Both targets are
+now named in the success branch; `rearmPushTimer()` returns immediately for the one whose
+interval did not move. All eleven target ids now re-arm.
+
+Three things were tidied at the same time, each a second copy of something that had already
+drifted once:
+
+- **Grainfather's eight per-colour URLs are optional in the payload now**, like the Google
+  Sheets per-colour names. Requiring all eight meant a client sending only the colours it uses
+  had its whole update rejected and rolled back.
+- **The last hand-rolled bounds check is gone.** `legacyFermentrackPushEvery` was validated
+  against a literal 30..43200 in the handler and again, separately, in the config loader. Both
+  now go through `applyPushEvery()` / `loadPushEvery()` with `PUSH_EVERY_FAST_MIN_SEC`. The
+  handler's copy also clamped the field to 30 on a bad value, which did nothing: the failure it
+  recorded rolls the whole config back anyway. The loader keeps falling back to 60 rather than
+  the struct's own default of 30, because that is what it has always done.
+- **`src/http_server.h` no longer defines target minimums.** Two of its five were dead
+  (`BREWSTATUS_MIN_KEY_LENGTH`, `GRAINFATHER_MIN_URL_LENGTH`, both marked "May no longer be
+  used") and the rest were second copies of `sendData.h`'s. `USER_TARGET_MIN_URL_LENGTH` moved
+  to sit with the others. Two headers holding the same threshold is how the handlers came to
+  disagree with the senders in the first place.
 
 ### 2. One stray advertisement can switch a Standard Tilt to Pro, permanently
 
@@ -643,6 +735,340 @@ its branches.
 write, so the banner can persist for up to one push interval after un-configuring. Making it
 instant needs the dispatcher at `http_server.cpp:905` to know each branch's `SendTargetID`,
 which it does not, and that is a refactor of a working function for a case that now self-heals.
+
+**Follow-up: three of the eleven clears were dead code, and are now fixed.** Found by reading
+the senders back against this entry. Brewfather, Brewer's Friend and User Target share one
+sender, and their clears were put at the guards inside `send_to_bf_and_bf(which_bf)` - but the
+outer `send_to_bf_and_bf()` dispatcher only calls in when `strlen(key) > MIN`
+(`sendData.cpp:619`, `:642`, `:666`), which is the exact complement of each inner
+`<= MIN` guard. Nothing could ever reach them.
+
+So for those three targets the reported symptom never went away: the commit message's own
+example - configure Brewfather with a bad key, get code 2, clear the key, and it complains
+about Brewfather for ever - was still true. The other eight target ids were correct, because
+their clears sit at checks that do run.
+
+Fixed by inverting the three outer conditions and swapping their branches, which is the shape
+the four siblings already had after the original commit, and by deleting the unreachable inner
+clears so nothing suggests they act. The inner guards stay as defence for a direct caller.
+
+**Verified on hardware** (`esp32_headless`, test board `lovric2`, one Tilt in range), on User
+Target, which shares the sender and therefore the defect with the other two:
+
+| device uptime | `/api/errors/` user_target | |
+|---|---|---|
+| 378 s | `error_code 1, last_attempt_at 378` | pointed at a port with nothing listening |
+| 392 s | `error_code 1, last_attempt_at 378` | URL cleared - still stale, nothing has run yet |
+| 983 s | `error_code 0, last_attempt_at 378` | one 600 s pass later: cleared |
+
+378 + 600 = 978, and the clear was seen at 983 within the 15 s poll. **`last_attempt_at` stayed
+at 378**, which is what proves this was `clearTargetStatus()` - it deliberately leaves that field
+alone - and not a fresh send. On the previous build this stayed at 1 for the life of the boot.
+
+---
+
+### 24. FIXED — four targets had no push-interval bounds at all, and zero was accepted
+
+`src/jsonconfig.h`, `src/jsonconfig.cpp`, `src/http_server.cpp`, and the four panels under
+`tiltbridge_web_ui/src/components/config/Targets/`. Found by auditing the other cloud targets
+against the Google Sheets work, not from a report.
+
+The comment above `PUSH_EVERY_MIN_SEC` claimed MQTT, Brewstatus, Taplist.io and InfluxDB
+"keep their own existing bounds". **They had none.** Their interval was applied with a plain
+`updateJsonSetting()` and loaded with a raw assignment, so every value a `uint16_t` can hold was
+accepted on both paths — including **zero**, which `startTimer()` clamps up to a single tick
+(`sendData.cpp:215`), turning the target into a continuous send loop. Nothing clamped on load
+either, so it survived a reboot. The web form is a free text field, so typing `0` was enough.
+
+Three smaller faults in the same place:
+
+- **A payload without the interval key was rejected outright**, and the atomic wrapper then
+  rolled back every other field in it. The six validated targets treat an absent key as "leave
+  it alone"; these four counted it as a failure.
+- **The MQTT panel sent both of its numbers as strings.** `mqttBrokerPort` and `mqttPushEvery`
+  are read with `is<uint16_t>()`, which a quoted `"1883"` fails — so *editing either field* failed
+  the whole MQTT save, while saving the panel without touching them worked. `ref()` seeds from
+  the config as a Number and the text input turns it into a String on first keystroke, which is
+  why this looked intermittent.
+- **InfluxDB's form validated 60..86400**, a range the device does not accept at either end:
+  below 600 it silently took the value, and anything past 65535 is not a `uint16_t` at all, so
+  it was refused as malformed rather than as out of range.
+
+Fixed with `PUSH_EVERY_FAST_MIN_SEC` (30 s), the floor `legacyFermentrackPushEvery` has always
+enforced by hand, applied through the existing `applyPushEvery()` / `loadPushEvery()` helpers so
+the API and the loader cannot disagree. 30 s keeps every one of the four defaults (30, 30, 300,
+900) valid and preserves the documented reason these targets are exempt from the 10-minute
+floor: they are usually a broker or a server on the LAN, where a fast cadence is free.
+
+The four panels now validate against the firmware's bounds through one shared
+`src/pushInterval.js`, rather than each carrying its own idea of the range, and pass Numbers.
+
+**Consequence worth knowing:** a stored interval now outside 30..43200 is reset to that target's
+default on load. That is the same behaviour the other six targets have had since they were
+converted, and it is the point — but a device that had been running Brewstatus at 10 s will come
+up at 30 s.
+
+**Verified on hardware** (`esp32_headless`, test board `lovric2`).
+
+A 17-check suite against `/api/settings/targets/` was run on the previously flashed build first,
+precisely so the checks were known to be able to fail: **7 of 17 passed before, 17 of 17 after.**
+The ten that flipped are the out-of-range intervals (0, 20, 99999) now being refused, and the
+partial payloads for Brewstatus, Taplist.io, MQTT, InfluxDB and Grainfather now being accepted.
+
+The load path was proven by accident and is the better evidence. The old build accepted
+`taplistioPushEvery: 0` and `influxdbPushEvery: 20` and **both came back off flash unchanged
+after a power cycle**. After flashing, the same stored config loaded as 300 and 900 — each
+target's default — while the valid neighbours (30, 30, 60) were preserved untouched.
+
+**Severity correction.** This entry said a zero interval "turns the target into a continuous send
+loop". Observed on hardware, that is only true when a Tilt is in range. With none, the timer
+still fires every tick and the sender is entered every pass, but each of these senders loops over
+Tilts and exits without building a request - so it burns CPU and sends nothing, and the health
+monitor stays green (`state: IDLE`, `heartbeatAgeSec: 0`, `staleEvents: 0`). The flood needs
+readings to exist. The spin does not.
+
+`cloud_config.influxdb.error_invalid_push_frequency` is now unused in en/de/es/nl/pt and states
+a range that no longer applies. Left for a translation pass rather than hand-edited across five
+locale files.
+
+---
+
+### 25. FIXED — with several Tilts, only the last one decided a target's status
+
+`src/sendData.cpp`, `src/targets/legacy_fermentrack.cpp`. Found in the same audit as 24.
+
+Six senders issue one HTTP request per Tilt: Brewer's Friend, Brewfather, User Target (one
+function, three target ids), Grainfather, Brewstatus, Taplist.io, and the legacy Google Sheets
+path. Every one of them kept a single `httpCode` across the loop, overwrote it each iteration,
+and read it once after:
+
+```cpp
+for (tiltHydrometer &th : tilt_scanner.m_tilt_devices) { ... http_request(..., &httpCode); }
+if (attempted)
+    setTargetStatus(target, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+```
+
+So with four Tilts, three failures followed by one success reported `SEND_OK`. `/api/errors/`
+showed nothing, the Tilts page lit no banner, and the readings were simply gone. The more Tilts
+a device has, the more likely the one that decides the verdict is not the one that failed.
+
+**Proven by reading.** Not observed in the field, and it would be nearly invisible if it
+happened: the symptom is the *absence* of an error.
+
+Fixed with one `MultiTiltSendStatus` in `sendData.cpp` that every per-Tilt sender now notes
+each result into. It keeps the **first** failure — the one whose cause is still in the log,
+and a later success to a different Tilt does not undo it — and reports `SEND_OK` only when no
+request failed.
+
+Two smaller faults fixed with it:
+
+- **Taplist.io assigned rather than accumulated its return value** (`result = (http_request(...)
+  == success)`), so a failure on any but the last Tilt was dropped from the function's result
+  as well as from the status.
+- **Legacy Fermentrack mapped a zero `httpCode` through `httpCodeToSendError()`**, which
+  returns `SEND_ERR_OTHER` for it. A zero means `http_request()` bailed before any response —
+  WiFi down, mDNS failure, client init failure — which every other sender reports as
+  `SEND_ERR_CONNECTION_FAILED`. It now does too.
+
+**The hop count from issue 22 now reaches every sender.** `http_request()` has always followed
+redirects for all of them and could report how many it followed, but the convenience overload
+most senders use had no parameter for it, so only the two Google Sheets paths could tell a 4xx
+on a redirected response leg apart from a 4xx on the submission. The overload takes
+`redirectHopsOut` now and every sender passes it. For endpoints that do not redirect this
+changes nothing — `redirectHops` is 0 and the mapping is exactly as before.
+
+**Partly verified on hardware.** With one Tilt in range the new accumulator was exercised and
+reports correctly in both directions on User Target: a delivered send gave `error_code 0`, and a
+send to a port with nothing listening gave `error_code 1` (`SEND_ERR_CONNECTION_FAILED`, the
+`httpCode == 0` path). So the refactor did not break the ordinary case.
+
+**The defect itself is still unverified**, and cannot be with one Tilt: first-failure versus
+last-result are identical for a single request. It needs two or more Tilts and a target that
+fails for some of them but not others.
+
+---
+
+### 26. FIXED — MQTT retried the broker at loop speed whenever it was configured but unreachable
+
+`src/targets/mqtt.cpp:152-155`. Found by accident: the serial log was opened to check something
+else and was scrolling this.
+
+```cpp
+if (!mqtt_connected && mqtt_client != nullptr) {
+    Log.warning("MQTT disconnected. Triggering reconnect attempt.\r\n");
+    connect_mqtt();
+}
+
+if (send_mqtt) { ... }          // <- the timer gate is BELOW this block
+```
+
+The reconnect sits above the `send_mqtt` gate, so it is not on the push timer at all - it runs
+on every `dataSendHandler::process()` pass, which is every `loopTask` iteration. A configured
+broker that cannot be reached is therefore retried continuously.
+
+**Measured on hardware**, test board pointed at an address with no broker on it:
+**1,939 reconnect attempts in 8 seconds**, about 240/s, each one a `connect_mqtt()` call and a
+log line. Clearing `mqttBrokerHost` stopped it dead (0 in the following capture).
+
+Not caused by any of the recent work - `git diff` over this session does not touch this file, and
+the block predates it. It is listed here because it was never written down.
+
+**What it costs.** The device stayed healthy while it happened - `state: IDLE`,
+`heartbeatAgeSec: 0`, `staleEvents: 0`, no recovery reboot - so this does not trip the watchdog.
+What it burns is CPU on the task that also runs every other sender, and it floods the serial log
+badly enough to hide anything else being diagnosed, which is how it was found.
+
+**Fixed with a backoff** rather than by moving the block under the `send_mqtt` gate: that would
+have put retries on `mqttPushEvery`, which is 30 s to 12 hours, so a broker that merely blipped
+would stay down for a whole push interval. `MQTT_RECONNECT_BASE_SEC` (5) doubles to
+`MQTT_RECONNECT_MAX_SEC` (5 min), and both the counter and the deadline reset on
+`MQTT_EVENT_CONNECTED` and in `init_mqtt()` - a rebuilt client must not inherit the old one's
+backoff, since a settings write is the most likely moment for a wrong host to have been fixed.
+The deadline comparison is wrap-safe, so a millis rollover cannot strand a reconnect for 49 days.
+
+**Verified on hardware**, pointed at an address with no broker:
+
+```
+ 25155 W: MQTT disconnected. Reconnect attempt 1; next in 5s if this fails.
+ 30187 W: MQTT disconnected. Reconnect attempt 2; next in 10s if this fails.
+ 40190 W: MQTT disconnected. Reconnect attempt 3; next in 20s if this fails.
+ 62631 W: MQTT disconnected. Reconnect attempt 4; next in 40s if this fails.
+102633 W: MQTT disconnected. Reconnect attempt 5; next in 80s if this fails.
+```
+
+**5 attempts in 100 seconds, against 1,939 in 8 seconds before.** The reset was checked
+separately: with a broker accepting the connection, `MQTT connected to broker.` appeared, and
+killing it restarted the sequence at the base delay instead of continuing at 80 s. With the
+broker up, publishing then held a clean 30.0-30.1 s cadence against `mqttPushEvery: 30` for 16
+consecutive messages.
+
+---
+
+### 27. MQTT publishes a Unix timestamp in a field called `uptime_seconds`
+
+`src/targets/mqtt.cpp:366`. Seen in a captured payload while verifying 26, not reported.
+
+```cpp
+payload["uptime_seconds"] = (int)std::time(0);
+```
+
+`std::time(0)` is the wall clock, not the uptime. A real payload off the test board:
+
+```json
+{"Color":"Blue","uptime_seconds":1789466611,"fermunits":"SG","SG":"1.1750",
+ "Temp":"27.2","tempunits":"C","WoB":"4"}
+```
+
+1789466611 is 2026-09-15, not a 20-minute uptime. The Home Assistant discovery payload two
+hundred lines up makes it worse by surfacing the field under the name it claims to have:
+
+```cpp
+payload["json_attr_tpl"] = "{ \"Uptime\": \"{{ value_json.uptime_seconds }}\" }\n";
+```
+
+so every HA install shows an epoch timestamp as the device's uptime. The cast to `int` is also a
+2038 problem, though that is the lesser half.
+
+**Not fixed deliberately.** `uptimeTotalSeconds()` (issue 8) is the value the name asks for, and
+one line changes it - but this field is published, and anyone who has built an automation on it
+has necessarily built it against a timestamp. Changing the value silently breaks them; renaming
+the field breaks them visibly. Worth a decision, not a quiet fix.
+
+---
+
+### 28. LIMITATION — the offline queue serves Google Sheets v2 only (the UI now says so)
+
+Not a defect: the queue was built for the Sheets path and does that correctly. It is recorded
+because everything around it — the setting names, the navigation entry, the panel copy — reads
+as though it protects every target, and it does not.
+
+**Scope, as built.** One global queue, no per-target separation:
+
+- Every drain call (`peekBatch`, `acknowledgeId`, `compact`) is in `src/targets/gsheets_v2.cpp`.
+  No other target file references `reading_queue` at all.
+- `queuePersistenceNeeded()` (`sendData.cpp:592`) decides whether to write to flash from
+  `targetStatus[TARGET_GOOGLE_SHEETS].consecutiveFailures`, plus network-down and an existing
+  backlog. No other target's health is consulted.
+- It returns false outright when `gsheetsV2Enabled` is off, with the reason in the code: legacy
+  single-reading mode never drains the queue, so filling it would be a leak.
+- `QueuedReading` carries no target field, and does carry `sheetName`. The design doc names the
+  stage `drain_queue_to_google()`.
+
+A single queue is consistent *because* there is exactly one consumer. It would break the moment
+a second one was added: `acknowledgeId()` terminates a record outright, so whichever target
+acknowledged first would delete the reading out from under the others.
+
+**What it costs.** Every other target is fire-and-forget — build a payload from current values,
+POST, discard. An hour of Brewfather being down is an hour lost, with no retry and nothing on
+flash. The sharp case is a WiFi outage: `network_is_usable()` being false *does* fill the queue,
+so the readings are on flash — but on recovery only Sheets drains them. Every other target loses
+a window whose data was preserved the whole time.
+
+**FIXED — with `gsheetsV2Enabled` off, nothing is buffered and the panel used to say "Idle".**
+Every `queueUploadState` write is inside `gsheets_v2.cpp`, which is not called at all in legacy
+mode (`sendData.cpp:357`), so the field kept its initialiser and the panel reported Idle with 0
+queued — indistinguishable from a healthy, empty, working queue while the feature was inert.
+
+`queue_json()` now derives the state instead of waiting for a sender pass, and reports a new
+`uploadDisabledReason` (`legacy_mode` or `not_configured`) so the panel can say which it is.
+Both conditions are derived, not just legacy mode: a first cut derived only legacy mode and left
+`not_configured` waiting on a sender pass, which produced "Upload status: Idle" directly above
+"Uploads: off, no script URL configured" for up to a full push interval. Caught on hardware, not
+by reading.
+
+**Verified on hardware**, all four states immediately after the settings write:
+
+| configuration | `uploadStatus` | `uploadDisabledReason` |
+|---|---|---|
+| v2, configured | `IDLE` (live state) | none |
+| v2, URL cleared | `DISABLED` | `not_configured` |
+| legacy mode | `DISABLED` | `legacy_mode` |
+| v2, configured again | `IDLE` (live state) | none |
+
+The legacy-mode check was run on a device holding 6 queued readings, which is the case that
+matters: they are stranded, and the panel now says so instead of showing Idle.
+
+**FIXED in English — the web UI used to state the opposite.** `queue.status.description` read
+"Readings captured while the TiltBridge could not reach **its targets** are stored on the device
+and uploaded once the connection returns" — plural, and wrong. `capacity_group_desc` promised an
+outage "without losing data"; `dropped_warning_desc` said to "fix the connection to the send
+target", singular but unnamed; `enable_queue_desc` described storing readings with no mention of
+which target. The only mention of Google Sheets anywhere in the queue UI was incidental, inside
+`send_backlog_pending_desc`, explaining why a backlog upload is slow. Nothing mentioned v2.
+
+All five now name Google Sheets and the v2 requirement, and two new strings
+(`queue.status.disabled_legacy_mode`, `disabled_not_configured`) render the reason above.
+
+**Correction to an earlier claim in this entry:** the other four locales were said to carry
+translations of the old, wrong text. They do not. `de`, `es`, `nl` and `pt` have no `queue`
+section at all — none of the 73 `queue.*` keys exists in any of them — so `fallbackLocale: "en"`
+means every language already renders the corrected English. Nothing was stale there.
+
+What the check did turn up is the real translation position: each of the four had 287 of the 528
+English keys, missing 241, including four whole sections — `queue`, `send_errors`,
+`tilt_device_config` and `wifi`. **Those 241 are now translated in all four languages**, so every
+locale is at 528/528. The merge rebuilt each file in `en.json` key order, which is safe because
+each file's existing order was already a subsequence of it — so the new keys landed in place and
+no existing key moved. Verified against `git HEAD` that nothing but the three factory-reset
+strings changed value, and that every translated string carries exactly the same `{placeholders}`
+as its English source (zero mismatches). The bundle grows 414 KB → 497 KB, which takes the
+filesystem image to 44% of the 832 KB partition — no capacity risk, and `data/assets` was checked
+file-for-file against `dist/assets` because mklittlefs drops what does not fit while still
+reporting success.
+
+`locales/translated_from/<lang>_en.json` records the English each string was translated from, so
+drift is detectable by diffing it against `en.json`. That found six drifted keys, of which three
+were false positives (the translations had been updated and only the record was stale). The other
+three were the factory-reset warnings, which had been broadened in English to mention WiFi
+credentials, per-Tilt calibration and queued readings while the translations still described the
+old, narrower erase — under-warning four languages about the most destructive action in the UI.
+Those are now translated and the records for all six brought up to date; drift is back to zero.
+
+**Generalising it is a design job, not a copy fix.** Termination would have to become per-target
+(a bitmask per record, or a cursor per target over a shared log); retention needs a rule for when
+a dead target may stop pinning the log, which is the head-pinning class of issue 19 again; and
+each sender would need its own drain path plus the "live reading suppressed while draining" fix
+from issue 21. Correcting the UI copy is the cheap half and is worth doing on its own.
 
 ---
 

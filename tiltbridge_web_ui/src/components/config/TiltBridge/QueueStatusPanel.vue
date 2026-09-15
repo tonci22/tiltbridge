@@ -140,6 +140,15 @@
                     </td>
                   </tr>
 
+                  <tr v-if="uploadDisabledText">
+                    <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {{ $t('queue.status.uploads_off') }}
+                    </th>
+                    <td class="px-3 py-4 sm:px-6 text-sm text-gray-700">
+                      {{ uploadDisabledText }}
+                    </td>
+                  </tr>
+
                   <tr v-if="!queueStore.enabled">
                     <th scope="row" class="px-3 py-3 sm:px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       {{ $t('queue.status.queue_state') }}
@@ -227,6 +236,14 @@ const storageBarClass = computed(() => {
   if (storagePercent.value > 90) return 'bg-red-600';
   if (storagePercent.value > 75) return 'bg-amber-500';
   return 'bg-green-600';
+});
+
+/* Null unless the firmware says uploads are off, in which case it says which kind. */
+const uploadDisabledText = computed(() => {
+  const reason = queueStore.uploadDisabledReason;
+  if (!reason) return null;
+  const key = `queue.status.disabled_${reason}`;
+  return i18n.global.te(key) ? i18n.global.t(key) : null;
 });
 
 const snapshotIntervalMinutes = computed(() => Math.round((queueStore.snapshotIntervalSec || 0) / 60));

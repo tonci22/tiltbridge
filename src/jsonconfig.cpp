@@ -522,13 +522,10 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(legacyFermentrackURL, tu, 256);
     }
 
-    if (!obj[FermentrackSettings::legacyFermentrackPushEvery].isNull()) {
-        legacyFermentrackPushEvery = int(obj[FermentrackSettings::legacyFermentrackPushEvery]);
-
-        if (legacyFermentrackPushEvery < 30 || legacyFermentrackPushEvery > 43200) {
-            legacyFermentrackPushEvery = 60;
-        }
-    }
+    // 60, not the struct's own default of 30, because that is the value this check has always
+    // fallen back to for an out-of-range stored interval.
+    loadPushEvery(obj, FermentrackSettings::legacyFermentrackPushEvery, legacyFermentrackPushEvery,
+                  PUSH_EVERY_FAST_MIN_SEC, PUSH_EVERY_MAX_SEC, 60);
 
     // Fermentrack 2 Settings
     if (!obj[FermentrackSettings::fermentrackHostname].isNull()) {
@@ -571,10 +568,8 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(brewstatusURL, bu, 256);
     }
 
-    if (!obj[BrewstatusSettings::brewstatusPushEvery].isNull()) {
-        int pe = obj[BrewstatusSettings::brewstatusPushEvery];
-        brewstatusPushEvery = pe;
-    }
+    loadPushEvery(obj, BrewstatusSettings::brewstatusPushEvery, brewstatusPushEvery,
+                  PUSH_EVERY_FAST_MIN_SEC, PUSH_EVERY_MAX_SEC, 30);
 
     // TaplistIO Settings
     if (!obj[TaplistioSettings::taplistioURL].isNull()) {
@@ -582,9 +577,8 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(taplistioURL, tu, 256);
     }
 
-    if (!obj[TaplistioSettings::taplistioPushEvery].isNull()) {
-        taplistioPushEvery = obj[TaplistioSettings::taplistioPushEvery];
-    }
+    loadPushEvery(obj, TaplistioSettings::taplistioPushEvery, taplistioPushEvery,
+                  PUSH_EVERY_FAST_MIN_SEC, PUSH_EVERY_MAX_SEC, 300);
 
     // Google Scripts Settings
     if (!obj[GoogleSheetsSettings::scriptsURL].isNull()) {
@@ -659,9 +653,8 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(mqttTopic, mt, 31);
     }
 
-    if (!obj[MQTTSettings::mqttPushEvery].isNull()) {
-        mqttPushEvery = int(obj[MQTTSettings::mqttPushEvery]);
-    }
+    loadPushEvery(obj, MQTTSettings::mqttPushEvery, mqttPushEvery,
+                  PUSH_EVERY_FAST_MIN_SEC, PUSH_EVERY_MAX_SEC, 30);
 
     // InfluxDB Settings
     if (!obj[InfluxDBSettings::influxdbURL].isNull()) {
@@ -684,7 +677,6 @@ void Config::load_from_json(JsonDocument obj) {
         strlcpy(influxdbBucket, ib, 64);
     }
 
-    if (!obj[InfluxDBSettings::influxdbPushEvery].isNull()) {
-        influxdbPushEvery = int(obj[InfluxDBSettings::influxdbPushEvery]);
-    }
+    loadPushEvery(obj, InfluxDBSettings::influxdbPushEvery, influxdbPushEvery,
+                  PUSH_EVERY_FAST_MIN_SEC, PUSH_EVERY_MAX_SEC, 900);
 }

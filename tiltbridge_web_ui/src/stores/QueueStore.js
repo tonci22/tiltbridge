@@ -20,6 +20,8 @@ export const useQueueStore = defineStore("QueueStore", () => {
     const healthy = ref(true);
     const fsFreeBytes = ref(null);
     const uploadStatus = ref("IDLE");
+    // "legacy_mode" | "not_configured" | null - why uploads are off, when they are.
+    const uploadDisabledReason = ref(null);
     // A "send backlog now" request the firmware has accepted but not started yet.
     const backlogRequested = ref(false);
     const lastUploadSuccessAgeSec = ref(null);
@@ -62,6 +64,7 @@ export const useQueueStore = defineStore("QueueStore", () => {
                 batchSize.value = response.batchSize ?? 20;
                 fsFreeBytes.value = response.fsFreeBytes ?? null;
                 uploadStatus.value = response.uploadStatus ?? "IDLE";
+                uploadDisabledReason.value = response.uploadDisabledReason ?? null;
                 lastUploadSuccessAgeSec.value = response.lastUploadSuccessAgeSec ?? null;
                 backlogRequested.value = response.backlogRequested ?? false;
 
@@ -168,6 +171,7 @@ export const useQueueStore = defineStore("QueueStore", () => {
         healthy,
         fsFreeBytes,
         uploadStatus,
+        uploadDisabledReason,
         backlogRequested,
         lastUploadSuccessAgeSec,
         maxRecords,

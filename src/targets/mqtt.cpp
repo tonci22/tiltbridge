@@ -23,6 +23,9 @@ void dataSendHandler::mqtt_event_handler(void *handler_args, esp_event_base_t ba
         case MQTT_EVENT_CONNECTED:
             Log.notice("MQTT connected to broker.\r\n");
             self->mqtt_connected = true;
+            // Whatever it took to get here, the next drop starts from the base delay again.
+            self->mqtt_reconnectFailures = 0;
+            self->mqtt_nextReconnectMs = 0;
             break;
         case MQTT_EVENT_DISCONNECTED:
             Log.warning("MQTT disconnected from broker.\r\n");
@@ -78,6 +81,14 @@ void dataSendHandler::init_mqtt()
         Log.verbose("Initializing connection to MQTTBroker: %s on port: %d\r\n",
             config.mqttBrokerHost, config.mqttBrokerPort);
     }
+
+    /*
+     * A rebuilt client is a fresh start, so it must not inherit the old one's backoff: the
+     * settings write that triggered this is the most likely moment for a wrong host or
+     * password to have just been corrected.
+     */
+    mqtt_reconnectFailures = 0;
+    mqtt_nextReconnectMs = 0;
 
     // Build the esp-mqtt configuration
     esp_mqtt_client_config_t mqtt_cfg = {};
@@ -147,11 +158,38 @@ bool dataSendHandler::send_to_mqtt() {
         return false;
     }
 
-    // esp-mqtt handles connection and reconnection internally via events
-    // We just check the connection status and optionally trigger a reconnect
+    /*
+     * esp-mqtt handles connection and reconnection internally via events; this nudges it when
+     * we notice we are still disconnected - but on a backoff, because this block sits ABOVE the
+     * send_mqtt timer gate below and so runs on every dataSendHandler::process() call, which is
+     * every loopTask iteration.
+     *
+     * Unpaced, a configured-but-unreachable broker was retried at loop speed: 1,939
+     * esp_mqtt_client_reconnect() calls in 8 seconds, measured on hardware, each one a log line
+     * too. It never tripped the health monitor - it just burned the task every other sender
+     * shares, and buried everything else in the log.
+     */
     if (!mqtt_connected && mqtt_client != nullptr) {
-        Log.warning("MQTT disconnected. Triggering reconnect attempt.\r\n");
-        connect_mqtt();
+        const uint32_t now = sh_millis();
+
+        // Wrap-safe comparison, so a reconnect is not stranded for 49 days by a millis rollover.
+        if (mqtt_nextReconnectMs == 0 || (int32_t)(now - mqtt_nextReconnectMs) >= 0) {
+            uint32_t delaySec = MQTT_RECONNECT_BASE_SEC;
+            if (mqtt_reconnectFailures > 0) {
+                const uint16_t steps = mqtt_reconnectFailures > 8 ? 8 : mqtt_reconnectFailures;
+                delaySec = (uint32_t)MQTT_RECONNECT_BASE_SEC << steps;
+                if (delaySec > MQTT_RECONNECT_MAX_SEC)
+                    delaySec = MQTT_RECONNECT_MAX_SEC;
+            }
+
+            Log.warning("MQTT disconnected. Reconnect attempt %u; next in %us if this fails.\r\n",
+                        (unsigned)(mqtt_reconnectFailures + 1), (unsigned)delaySec);
+            connect_mqtt();
+
+            if (mqtt_reconnectFailures < 0xFFFF)
+                mqtt_reconnectFailures++;
+            mqtt_nextReconnectMs = now + (delaySec * 1000);
+        }
     }
 
     if (send_mqtt) {

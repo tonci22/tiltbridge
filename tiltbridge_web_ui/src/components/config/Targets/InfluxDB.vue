@@ -101,6 +101,7 @@ import { useLoading } from 'vue-loading-overlay'
 import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue";
 import {onMounted, ref} from "vue";
 import { i18n } from "@/main.js";
+import { validatePushEverySeconds } from "@/pushInterval";
 
 const $loading = useLoading({
   // options
@@ -177,9 +178,11 @@ async function submitForm() {
     return;
   }
 
-  // Push frequency validation
-  if (parseInt(influxdbPushEvery.value) < 60 || parseInt(influxdbPushEvery.value) > 86400) {
-    form_error_message.value = i18n.global.t('cloud_config.influxdb.error_invalid_push_frequency');
+  // Push frequency validation. The bounds are the firmware's, not this form's own: the old
+  // 60..86400 accepted values the device refuses, and anything past 65535 is not a uint16_t.
+  const pushEvery = validatePushEverySeconds(influxdbPushEvery.value);
+  if (pushEvery.error) {
+    form_error_message.value = pushEvery.error;
     return;
   }
 
@@ -190,7 +193,7 @@ async function submitForm() {
       influxdbToken.value.trim(),
       influxdbOrg.value.trim(),
       influxdbBucket.value.trim(),
-      parseInt(influxdbPushEvery.value)
+      pushEvery.seconds
   ).then(() => {
     updateCachedSettings();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here

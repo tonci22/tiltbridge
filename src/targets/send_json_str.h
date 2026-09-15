@@ -127,7 +127,10 @@ sendResult http_request(
     int* redirectHopsOut = nullptr
 );
 
-// Convenience overload for simple requests without response buffer
-sendResult http_request(const char* url, httpMethod method, const char* payload, int16_t* httpCodeOut = nullptr);
+// Convenience overload for simple requests without response buffer. redirectHopsOut carries
+// the same meaning as above - pass it if a 4xx reached through a redirect should be reported as
+// "the response could not be read" rather than as the status's usual meaning.
+sendResult http_request(const char* url, httpMethod method, const char* payload,
+                        int16_t* httpCodeOut = nullptr, int* redirectHopsOut = nullptr);
 
 #endif // SEND_JSON_STR_H

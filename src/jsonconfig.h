@@ -20,12 +20,21 @@
 // which meters against a daily Apps Script execution-time quota - the ability to upload at all
 // later in the day.
 //
-// It applies only to the targets converted from compile-time constants. The intervals that were
-// already configurable (MQTT, Brewstatus, Taplist.io, InfluxDB, legacy Fermentrack) keep their
-// own existing bounds: those are commonly pointed at a broker or a server on the local network,
-// where a 30-second cadence is free and useful.
+// It applies only to the targets converted from compile-time constants. MQTT, Brewstatus,
+// Taplist.io and InfluxDB are commonly pointed at a broker or a server on the local network,
+// where a 30-second cadence is free and useful, so they get the lower floor below instead.
 #define PUSH_EVERY_MIN_SEC 600
 #define PUSH_EVERY_MAX_SEC 43200
+
+// Floor for those four. This comment used to say they "keep their own existing bounds" - they
+// had none. Their interval was read with a plain updateJsonSetting() and stored with a raw
+// assignment, so any uint16_t was accepted on both the API and the load path, INCLUDING ZERO:
+// startTimer() clamps a zero period up to a single tick, which turns the target into a
+// continuous send loop that survives a reboot because nothing clamps on load either.
+//
+// 30 s is the floor legacyFermentrackPushEvery has always enforced by hand, and it leaves every
+// one of these four defaults (30, 30, 300, 900) valid.
+#define PUSH_EVERY_FAST_MIN_SEC 30
 
 struct TiltCalData {
     double x0 = 0.0;

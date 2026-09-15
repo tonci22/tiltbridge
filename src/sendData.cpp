@@ -605,6 +605,31 @@ bool dataSendHandler::queuePersistenceNeeded() const
     return targetStatus[TARGET_GOOGLE_SHEETS].consecutiveFailures > 0;
 }
 
+/*
+ * Collects the per-Tilt outcomes of a target that sends one request per Tilt.
+ *
+ * Each of these senders kept a single httpCode across the loop and read it once at the end, so
+ * only the LAST Tilt decided the target's status: with four Tilts, three failures followed by
+ * one success reported SEND_OK and lit no banner. The FIRST failure is the one kept - it is the
+ * one whose cause is still in the log, and a later success to a different Tilt does not undo it.
+ */
+struct MultiTiltSendStatus {
+    bool attempted = false;
+    SendError firstError = SEND_OK;
+
+    // httpCode stays 0 when http_request() bails before any response (WiFi down, mDNS
+    // resolution failure, client init failure), which is a connection failure rather than a
+    // status worth mapping.
+    void note(int16_t httpCode, int redirectHops = 0) {
+        attempted = true;
+        if (firstError != SEND_OK)
+            return;
+        firstError = httpCode != 0
+                   ? dataSendHandler::httpCodeToSendError(httpCode, redirectHops)
+                   : SEND_ERR_CONNECTION_FAILED;
+    }
+};
+
 bool dataSendHandler::send_to_bf_and_bf()
 {
     bool retval = false;
@@ -616,7 +641,19 @@ bool dataSendHandler::send_to_bf_and_bf()
 
         // Brewer's Friend
         data_sender.send_brewersFriend = false;
-        if (strlen(config.brewersFriendKey) > BREWERS_FRIEND_MIN_KEY_LENGTH) {
+        if (strlen(config.brewersFriendKey) <= BREWERS_FRIEND_MIN_KEY_LENGTH) {
+            /*
+             * Not configured, so nothing is attempted - and that is not an error state.
+             *
+             * The clear has to happen HERE rather than at the matching guard inside
+             * send_to_bf_and_bf(which_bf), which is where it was first put. That guard is the
+             * exact complement of this condition, so this branch is the only way the
+             * unconfigured case is ever reached: the call below simply does not happen. The
+             * clear sat in code that could not run, and a stale error survived un-configuring
+             * the target for ever - the very thing it was added to fix.
+             */
+            clearTargetStatus(TARGET_BREWERS_FRIEND);
+        } else {
             Log.verbose("Calling send to Brewer's Friend.\r\n");
             retval = data_sender.send_to_bf_and_bf(BF_MEANS_BREWERS_FRIEND);
             if (retval)
@@ -639,7 +676,11 @@ bool dataSendHandler::send_to_bf_and_bf()
 
         // Brewfather
         data_sender.send_brewfather = false;
-        if (strlen(config.brewfatherKey) > BREWFATHER_MIN_KEY_LENGTH) {
+        if (strlen(config.brewfatherKey) <= BREWFATHER_MIN_KEY_LENGTH) {
+            // Not configured. See the note on Brewer's Friend above for why the clear is here
+            // and not at the matching guard inside send_to_bf_and_bf(which_bf).
+            clearTargetStatus(TARGET_BREWFATHER);
+        } else {
             Log.verbose("Calling send to Brewfather.\r\n");
             retval = data_sender.send_to_bf_and_bf(BF_MEANS_BREWFATHER);
             if (retval)
@@ -663,7 +704,13 @@ bool dataSendHandler::send_to_bf_and_bf()
 
         // User Target
         data_sender.send_userTarget = false;
-        if (strlen(config.userTargetURL) > USER_TARGET_MIN_URL_LENGTH)
+        if (strlen(config.userTargetURL) <= USER_TARGET_MIN_URL_LENGTH)
+        {
+            // Not configured. See the note on Brewer's Friend above for why the clear is here
+            // and not at the matching guard inside send_to_bf_and_bf(which_bf).
+            clearTargetStatus(TARGET_USER_TARGET);
+        }
+        else
         {
             Log.verbose("Calling send to User Target.\r\n");
             retval = data_sender.send_to_bf_and_bf(BF_MEANS_USER_TARGET);
@@ -691,6 +738,8 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     JsonDocument j;
     char url[128];
     int16_t httpCode = 0;
+    int redirectHops = 0;
+    MultiTiltSendStatus status;
 
     SendTargetID targetId = (which_bf == BF_MEANS_BREWFATHER) ? TARGET_BREWFATHER :
                             (which_bf == BF_MEANS_BREWERS_FRIEND) ? TARGET_BREWERS_FRIEND :
@@ -698,12 +747,18 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
 
     // As this function is being used for both Brewer's Friend and Brewfather,
     // let's determine which we want and set up the URL/API key accordingly.
+    /*
+     * The three guards below are defence for a direct caller only.
+     *
+     * send_to_bf_and_bf() screens each of these conditions before it calls in, so clearing the
+     * target's error state from here would never run. That clear lives at the caller's check;
+     * these just refuse to build a request out of credentials that are not there.
+     */
     if (which_bf == BF_MEANS_BREWFATHER)
     {
         if (strlen(config.brewfatherKey) <= BREWFATHER_MIN_KEY_LENGTH)
         {
             Log.verbose("Brewfather key not populated. Returning.\r\n");
-            clearTargetStatus(TARGET_BREWFATHER);
             return false;
         }
         strcpy(url, "http://log.brewfather.net/stream?id=");
@@ -714,7 +769,6 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         if (strlen(config.brewersFriendKey) <= BREWERS_FRIEND_MIN_KEY_LENGTH)
         {
             Log.verbose("Brewer's Friend key not populated. Returning.\r\n");
-            clearTargetStatus(TARGET_BREWERS_FRIEND);
             return false;
         }
         strcpy(url, "https://log.brewersfriend.com/stream/");
@@ -725,7 +779,6 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         if (strlen(config.userTargetURL) <= USER_TARGET_MIN_URL_LENGTH)
         {
             Log.verbose("User target URL not populated. Returning.\r\n");
-            clearTargetStatus(TARGET_USER_TARGET);
             return false;
         }
         strcpy(url, config.userTargetURL);
@@ -739,7 +792,6 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
     // Loop through each of the tilt colors cached by tilt_scanner, sending
     // data for each of the active tilts
     tilt_scanner.drop_expired_tilts();
-    bool attempted = false;
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
         if (!device_config.isEnabled(th.deviceId()))
             continue;
@@ -761,16 +813,14 @@ bool dataSendHandler::send_to_bf_and_bf(const uint8_t which_bf)
         char payload_string[BF_SIZE];
         serializeJson(j, payload_string);
 
-        attempted = true;
-        if (http_request(url, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
+        if (http_request(url, httpMethod::HTTP_POST, payload_string, &httpCode, &redirectHops)
+                != sendResult::success)
             result = false; // There was an error with the previous send
+        status.note(httpCode, redirectHops);
     }
-    // If we tried to send, always update status so a recovered connection clears
-    // any stale error. httpCode can remain 0 when http_request bails early
-    // (WiFi down, mDNS resolution failure, client init failure) — treat that
-    // as a connection failure rather than leaving the previous status cached.
-    if (attempted)
-        setTargetStatus(targetId, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+    // If we tried to send, always update status so a recovered connection clears any stale error.
+    if (status.attempted)
+        setTargetStatus(targetId, status.firstError);
     return result;
 }
 
@@ -791,7 +841,8 @@ bool dataSendHandler::send_to_grainfather()
         // Loop through each of the tilt colors cached by tilt_scanner, sending
         // data for each of the active tilts
         tilt_scanner.drop_expired_tilts();
-        bool attempted = false;
+        int redirectHops = 0;
+        MultiTiltSendStatus status;
         for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
             if (!device_config.isEnabled(th.deviceId()))
                 continue;
@@ -814,12 +865,13 @@ bool dataSendHandler::send_to_grainfather()
             char payload_string[GF_SIZE];
             serializeJson(j, payload_string);
 
-            attempted = true;
-            if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST, payload_string, &httpCode) != sendResult::success)
+            if (http_request(config.grainfatherURL[th.m_color].link, httpMethod::HTTP_POST,
+                             payload_string, &httpCode, &redirectHops) != sendResult::success)
                 result = false; // There was an error with the previous send
+            status.note(httpCode, redirectHops);
         }
-        if (attempted)
-            setTargetStatus(TARGET_GRAINFATHER, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+        if (status.attempted)
+            setTargetStatus(TARGET_GRAINFATHER, status.firstError);
         else
             // No colour has a URL, so nothing was attempted.
             clearTargetStatus(TARGET_GRAINFATHER);
@@ -833,7 +885,7 @@ bool dataSendHandler::send_to_taplistio()
     bool result = true;
 
     // Check if config.taplistioURL is set, and return if it's not
-    if (strlen(config.taplistioURL) <= 10) {
+    if (strlen(config.taplistioURL) <= TAPLISTIO_MIN_URL_LENGTH) {
         clearTargetStatus(TARGET_TAPLISTIO);
         return false;
     }
@@ -860,7 +912,8 @@ bool dataSendHandler::send_to_taplistio()
 
     tilt_scanner.drop_expired_tilts();
     int16_t httpCode = 0;
-    bool attempted = false;
+    int redirectHops = 0;
+    MultiTiltSendStatus status;
 
     for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
         if (!device_config.isEnabled(th.deviceId()))
@@ -883,12 +936,16 @@ bool dataSendHandler::send_to_taplistio()
 
         Log.verbose("taplist.io: Sending %s Tilt to %s\r\n", tilt_color_names[th.m_color], config.taplistioURL);
 
-        attempted = true;
-        result = (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string, &httpCode) == sendResult::success);
+        // `result = ...` here, rather than accumulating, meant a failure on any but the last
+        // Tilt was dropped from the return value as well as from the status.
+        if (http_request(config.taplistioURL, httpMethod::HTTP_POST, payload_string, &httpCode,
+                         &redirectHops) != sendResult::success)
+            result = false;
+        status.note(httpCode, redirectHops);
     }
 
-    if (attempted)
-        setTargetStatus(TARGET_TAPLISTIO, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+    if (status.attempted)
+        setTargetStatus(TARGET_TAPLISTIO, status.firstError);
     startTimer(taplistioTimer, backoffDelay(TARGET_TAPLISTIO, config.taplistioPushEvery));
     return result;
 }
@@ -925,7 +982,8 @@ bool dataSendHandler::send_to_brewstatus()
             // Loop through each of the tilt colors cached by tilt_scanner, sending data for each of the active tilts
             tilt_scanner.drop_expired_tilts();
             int16_t httpCode = 0;
-            bool attempted = false;
+            int redirectHops = 0;
+            MultiTiltSendStatus status;
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 if (!device_config.isEnabled(th.deviceId()))
                     continue;
@@ -939,16 +997,17 @@ bool dataSendHandler::send_to_brewstatus()
 
                 HttpRequestOptions options;
                 options.contentType = content_x_www_form_urlencoded;
-                attempted = true;
-                if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0, options, &httpCode) == sendResult::success) {
+                if (http_request(config.brewstatusURL, httpMethod::HTTP_POST, payload, nullptr, 0,
+                                 options, &httpCode, &redirectHops) == sendResult::success) {
                     Log.notice("Completed send to Brew Status.\r\n");
                 } else {
                     result = false;
                     Log.verbose("Error sending to Brew Status.\r\n");
                 }
+                status.note(httpCode, redirectHops);
             }
-            if (attempted)
-                setTargetStatus(TARGET_BREW_STATUS, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+            if (status.attempted)
+                setTargetStatus(TARGET_BREW_STATUS, status.firstError);
         }
         startTimer(brewStatusTimer, backoffDelay(TARGET_BREW_STATUS, config.brewstatusPushEvery)); // Set up subsequent send to Brew Status
     }
@@ -983,7 +1042,7 @@ bool dataSendHandler::send_to_google()
             tilt_scanner.drop_expired_tilts();
             int16_t httpCode = 0;
             int redirectHops = 0;
-            bool attempted = false;
+            MultiTiltSendStatus status;
 
             for(tiltHydrometer & th : tilt_scanner.m_tilt_devices) {
                 if (!device_config.isEnabled(th.deviceId()))
@@ -1023,7 +1082,6 @@ bool dataSendHandler::send_to_google()
                     options.skipCertValidation = true;
                     options.timeoutMs = 10000;  // 10 second timeout - Google Scripts can be slow
 
-                    attempted = true;
                     // Same endpoint as the v2 path, so the same 302-to-echo-URL behaviour:
                     // the hop count is what keeps a 4xx on the response leg from being
                     // reported as "target not found".
@@ -1059,15 +1117,14 @@ bool dataSendHandler::send_to_google()
                         result = false;
                     }
 
+                    status.note(httpCode, redirectHops);
                     vTaskDelay(pdMS_TO_TICKS(100));  // Give some time between requests
                 } // Check we have a sheet name for the color
             }
 
             Log.notice("Submitted %l sheet%s to Google.\r\n", numSent, (numSent== 1) ? "" : "s");
-            if (attempted)
-                setTargetStatus(TARGET_GOOGLE_SHEETS,
-                                httpCode != 0 ? httpCodeToSendError(httpCode, redirectHops)
-                                              : SEND_ERR_CONNECTION_FAILED);
+            if (status.attempted)
+                setTargetStatus(TARGET_GOOGLE_SHEETS, status.firstError);
         }
         // Anchored, like the v2 path: same timer, same target, so the two must not disagree
         // about what "every gsheetsPushEvery seconds" means.
@@ -1150,7 +1207,9 @@ bool dataSendHandler::send_to_influxdb()
 
                 // Send the data
                 int16_t httpCode = 0;
-                sendResult sendRes = http_request(writeURL, httpMethod::HTTP_POST, lineData, nullptr, 0, options, &httpCode);
+                int redirectHops = 0;
+                sendResult sendRes = http_request(writeURL, httpMethod::HTTP_POST, lineData,
+                                                  nullptr, 0, options, &httpCode, &redirectHops);
 
                 if (sendRes == sendResult::success) {
                     Log.notice("Completed send to InfluxDB.\r\n");
@@ -1158,7 +1217,9 @@ bool dataSendHandler::send_to_influxdb()
                     Log.error("Error sending to InfluxDB\r\n");
                     result = false;
                 }
-                setTargetStatus(TARGET_INFLUXDB, httpCode != 0 ? httpCodeToSendError(httpCode) : SEND_ERR_CONNECTION_FAILED);
+                setTargetStatus(TARGET_INFLUXDB,
+                                httpCode != 0 ? httpCodeToSendError(httpCode, redirectHops)
+                                              : SEND_ERR_CONNECTION_FAILED);
             } else {
                 Log.verbose("No Tilt data to send to InfluxDB.\r\n");
             }

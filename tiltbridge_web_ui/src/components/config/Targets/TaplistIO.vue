@@ -63,6 +63,7 @@ import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue
 import { useConfigStore } from "@/stores/ConfigStore";
 import { useLoading } from "vue-loading-overlay";
 import { i18n } from "@/main";
+import { validatePushEverySeconds } from "@/pushInterval";
 
 const configStore = useConfigStore();
 const taplistIoURL = ref(configStore.taplistioURL);
@@ -79,9 +80,15 @@ const $loading = useLoading({
 async function submitForm() {
   form_error_message.value = "";
 
+  const pushEvery = validatePushEverySeconds(taplistIoPushEvery.value);
+  if (pushEvery.error) {
+    form_error_message.value = pushEvery.error;
+    return;
+  }
+
   let loader = $loading.show({});
 
-  configStore.updateTaplistIoConfig(taplistIoURL.value, parseInt(taplistIoPushEvery.value)).then(() => {
+  configStore.updateTaplistIoConfig(taplistIoURL.value, pushEvery.seconds).then(() => {
     updateCachedSettings();
     loader.hide();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here

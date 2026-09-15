@@ -63,6 +63,7 @@ import UpdateSuccessfulModal from "@/components/config/UpdateSuccessfulModal.vue
 import { useConfigStore } from "@/stores/ConfigStore";
 import { useLoading } from "vue-loading-overlay";
 import { i18n } from "@/main";
+import { validatePushEverySeconds } from "@/pushInterval";
 
 const configStore = useConfigStore();
 const brewstatusURL = ref(configStore.brewstatusURL);
@@ -79,9 +80,15 @@ const $loading = useLoading({
 async function submitForm() {
   form_error_message.value = "";
 
+  const pushEvery = validatePushEverySeconds(brewstatusPushEvery.value);
+  if (pushEvery.error) {
+    form_error_message.value = pushEvery.error;
+    return;
+  }
+
   let loader = $loading.show({});
 
-  configStore.updateBrewstatusConfig(brewstatusURL.value, parseInt(brewstatusPushEvery.value)).then(() => {
+  configStore.updateBrewstatusConfig(brewstatusURL.value, pushEvery.seconds).then(() => {
     updateCachedSettings();
     loader.hide();
     updateSuccessful.value = !configStore.configUpdateError;  // configUpdateError is inverted from what we want here
